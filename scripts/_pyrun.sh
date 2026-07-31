@@ -8,6 +8,17 @@
 # Exits 0 silently if no Python is found — hooks must never block the AI tool.
 set -u
 
+# Codex desktop may provide a bundled Python runtime outside PATH.
+PY=""
+shopt -s nullglob 2>/dev/null || true
+for cand in /c/Users/*/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe; do
+  if [ -x "$cand" ]; then PY="$cand"; break; fi
+done
+shopt -u nullglob 2>/dev/null || true
+if [ -n "$PY" ]; then
+  exec "$PY" "$@"
+fi
+
 if command -v python3 >/dev/null 2>&1; then
   PY=python3
 elif command -v python >/dev/null 2>&1; then

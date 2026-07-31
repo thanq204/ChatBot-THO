@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Community Channel Agent — Admin</title>
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body data-page="admin">
+    <header class="topbar">
+      <a class="brand" href="/admin"><span class="brand-mark">CC</span><span><span class="eyebrow">COMMUNITY CHANNEL</span><strong>Agent Console</strong></span></a>
+      <div class="topbar-right"><span class="live-status"><i></i> Review workspace</span><nav><a href="/member">Member <span class="nav-arrow">↗</span></a><a class="active" href="/admin">Admin queue</a></nav></div>
+    </header>
+    <main class="layout admin-layout">
+      <section class="hero-copy admin-hero"><span class="eyebrow accent-eyebrow">ADMIN WORKSPACE / 02</span><h1>Make the call<br><em>with context.</em></h1><p>Review uncertain content with the signal, context, and evidence in one place.</p></section>
+      <section class="summary"><div class="metric metric-primary"><span class="metric-icon">◎</span><span class="metric-label">Pending review</span><strong id="pending-count">0</strong><small>Needs your attention</small></div><div class="metric"><span class="metric-icon">◫</span><span class="metric-label">Persistence</span><strong>SQLite</strong><small>Local, durable storage</small></div><div class="metric"><span class="metric-icon">✓</span><span class="metric-label">Audit trail</span><strong>Enabled</strong><small>Every decision recorded</small></div></section>
+      <section class="panel queue-panel"><div class="section-heading"><div><span class="eyebrow">PENDING CASES</span><h2>Admin Review Queue</h2><p class="panel-subtitle">Only uncertain content arrives here.</p></div><button class="secondary" id="refresh-button"><span>Refresh queue</span><b>↻</b></button></div><div id="queue" class="case-list"></div></section>
+      <section class="panel audit-panel"><div class="section-heading"><div><span class="eyebrow">DECISION HISTORY</span><h2>Audit Log</h2><p class="panel-subtitle">A transparent record of every action.</p></div></div><div id="audit-log" class="audit-list"></div></section>
+    </main>
+    <footer class="footer"><span>Community Channel Agent</span><span>Admin decisions are permanent in the local audit trail.</span></footer>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
