@@ -13,6 +13,36 @@ ModerationCategory = Literal[
 RiskLevel = Literal["low", "medium", "high", "critical"]
 
 
+class ContextAgentOutput(BaseModel):
+    """Structured result from the context/intent agent."""
+
+    intent: Literal["neutral", "friendly", "joking", "conflict", "threat", "unknown"]
+    tone: Literal["calm", "playful", "hostile", "distressed", "unknown"]
+    context_summary: str = Field(..., min_length=1, max_length=300)
+    ambiguity_score: float = Field(..., ge=0.0, le=1.0)
+    evidence: list[str] = Field(default_factory=list, max_length=3)
+
+
+class PolicyAgentOutput(BaseModel):
+    """Structured result from the policy/category agent."""
+
+    category: ModerationCategory
+    policy_id: str | None = Field(default=None, max_length=100)
+    policy_match: str = Field(..., min_length=1, max_length=300)
+    violation_signal: bool
+    evidence: list[str] = Field(default_factory=list, max_length=3)
+
+
+class RiskAgentOutput(BaseModel):
+    """Structured result from the safety/risk agent."""
+
+    risk_level: RiskLevel
+    risk_score: float = Field(..., ge=0.0, le=1.0)
+    escalation_needed: bool
+    rationale: str = Field(..., min_length=1, max_length=300)
+    evidence: list[str] = Field(default_factory=list, max_length=3)
+
+
 class MemberSubmission(BaseModel):
     user_id: str = Field(..., min_length=1, max_length=100)
     role: Literal["member"] = "member"
@@ -31,9 +61,10 @@ class ModerationResult(BaseModel):
     needs_admin_review: bool
     evidence: list[str] = Field(default_factory=list, max_length=5)
     model_used: str
-    mode: Literal["gemini", "mock", "mock-fallback"]
+    mode: Literal["openai", "gemini", "mock", "mock-fallback"]
     fallback_used: bool = False
     fallback_reason: str | None = None
+    agent_trace: list[str] = Field(default_factory=list, max_length=10)
 
 
 class GeminiModerationOutput(BaseModel):
@@ -76,7 +107,7 @@ class ModerationSubmissionResponse(BaseModel):
     review: ReviewCase | None = None
     queue_item_created: bool
     review_id: str | None = None
-    mode: Literal["gemini", "mock", "mock-fallback"]
+    mode: Literal["openai", "gemini", "mock", "mock-fallback"]
     fallback_used: bool
     message: str
 

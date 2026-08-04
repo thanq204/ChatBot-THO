@@ -199,3 +199,29 @@ bất kỳ markdown viewer/editor nào (VS Code, Obsidian, GitHub UI, …).
 ## 📄 License
 
 MIT — Sử dụng tự do cho mục đích giáo dục.
+## Community Health & Conflict Mediation Copilot
+
+Phần mở rộng hiện tại biến moderation một câu thành conversation-level pipeline:
+
+`YouTube public read/import → group comment + reply → specialist analysis → escalation radar → Admin intervention → simulated action → audit + feedback`
+
+Các trang demo:
+
+- `http://localhost:8000/admin`: Radar, timeline, trigger, root cause, escalation score, mediation workspace và Admin decision.
+- `http://localhost:8000/youtube`: nhập YouTube URL/ID, sync comment/reply và phân tích thread. Public mode chỉ đọc.
+- `http://localhost:8000/member`: sentence-level moderation cũ vẫn được giữ nguyên.
+
+### Cấu hình YouTube
+
+Mặc định app chạy local với `YOUTUBE_ACTION_MODE=simulated`. Để đọc comment public thật, thêm `YOUTUBE_API_KEY` vào `.env` và giữ `YOUTUBE_DATA_MODE=public_api`. Nếu chưa có key, dùng `YOUTUBE_DATA_MODE=imported_dataset`; hệ thống sẽ dùng demo data offline.
+
+OAuth channel là scaffold an toàn: chỉ sau khi cấu hình `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, redirect URI và hoàn tất consent mới có thể phát triển action thật. Không có OAuth, app không gọi YouTube write API và mọi action hiển thị rõ `SIMULATED ACTION`.
+
+### Chạy và kiểm tra
+
+```powershell
+uvicorn src.main:app --reload --host 127.0.0.1 --port 8000
+pytest -q
+```
+
+Data local nằm trong `data/app.db` và `data/youtube_demo/` (đã được `.gitignore` bảo vệ). Admin feedback được lưu thành reviewed case để các thread sau tham khảo theo escalation score; đây là case-based retrieval, không tự fine-tune model.

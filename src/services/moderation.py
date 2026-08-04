@@ -1,13 +1,15 @@
-"""Moderation orchestration: Gemini is primary; mock is explicit only."""
+"""Provider-agnostic moderation orchestration; OpenAI is primary in the project .env."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
 
+from src.agents.moderation_graph import ModerationAgentGraph
 from src.config import Settings, get_settings
 from src.models.moderation import MemberSubmission, ModerationResult
 from src.services.gemini_moderation import GeminiModerationError, GeminiModerationService, GeminiStageResult
+from src.services.openai_moderation import OpenAIModerationError, OpenAIModerationService
 
 logger = logging.getLogger(__name__)
 
@@ -22,22 +24,26 @@ class ModerationEngine:
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
         self.gemini = GeminiModerationService(self.settings)
+        self.openai = OpenAIModerationService(self.settings)
+        # `moderation_mode=gemini` remains a backwards-compatible explicit Gemini switch.
+        self.provider = "gemini" if self.settings.moderation_mode == "gemini" else self.settings.moderation_provider
+        self.service = self.openai if self.provider == "openai" else self.gemini
+        self.agent_graph = ModerationAgentGraph(self.service)
 
     async def moderate(self, submission: MemberSubmission) -> ModerationResult:
         if self.settings.moderation_mode == "mock":
             return self._mock_result(submission)
-        if not self.settings.gemini_api_key:
+        api_key = self.settings.openai_api_key if self.provider == "openai" else self.settings.gemini_api_key
+        if not api_key:
+            key_name = "OPENAI_API_KEY" if self.provider == "openai" else "GEMINI_API_KEY"
             raise ModerationConfigurationError(
-                "Gemini API chưa được cấu hình. Hãy điền GEMINI_API_KEY vào file .env rồi khởi động lại server."
+                f"{key_name} chưa được cấu hình. Hãy điền key vào file .env rồi khởi động lại server."
             )
 
         try:
-            triage = await asyncio.to_thread(self.gemini.moderate_with_triage, submission)
-            final = triage
-            if self.should_escalate_to_review_model(triage, submission):
-                final = await asyncio.to_thread(self.gemini.review_ambiguous_content, submission, triage)
-            return self._to_result(final, mode="gemini")
-        except GeminiModerationError as exc:
+            state = await asyncio.to_thread(self.agent_graph.invoke, submission)
+            return self._graph_to_result(state)
+        except (GeminiModerationError, OpenAIModerationError) as exc:
             if exc.code == "invalid_structured_output":
                 return self._invalid_output_result(exc.user_message)
             if self.settings.allow_mock_fallback:
@@ -86,6 +92,28 @@ class ModerationEngine:
             fallback_used=False,
         )
 
+    def _graph_to_result(self, state: dict[str, object]) -> ModerationResult:
+        output = state["decision"]
+        needs_review = bool(
+            output.needs_admin_review
+            or output.action == "review"
+            or output.confidence < self.settings.moderation_auto_action_threshold
+        )
+        return ModerationResult(
+            action="review" if needs_review else output.action,
+            category=output.category,
+            risk_level=output.risk_level,
+            policy_id=output.policy_id,
+            reason=output.reason,
+            confidence=output.confidence,
+            needs_admin_review=needs_review,
+            evidence=output.evidence,
+            model_used=str(state.get("model_used") or self._active_model),
+            mode=self.provider,
+            fallback_used=False,
+            agent_trace=list(state.get("trace") or []),
+        )
+
     def _invalid_output_result(self, reason: str) -> ModerationResult:
         logger.warning("Gemini returned invalid structured moderation output")
         return ModerationResult(
@@ -97,11 +125,16 @@ class ModerationEngine:
             confidence=0.0,
             needs_admin_review=True,
             evidence=[],
-            model_used=self.settings.gemini_review_model,
-            mode="gemini",
+            model_used=self._active_model,
+            mode=self.provider,
             fallback_used=False,
             fallback_reason=reason,
+            agent_trace=["Agent Graph", "Invalid Output Guardrail"],
         )
+
+    @property
+    def _active_model(self) -> str:
+        return self.settings.openai_moderation_model if self.provider == "openai" else self.settings.gemini_review_model
 
     def _mock_result(self, submission: MemberSubmission) -> ModerationResult:
         text = submission.text.strip().casefold()
@@ -133,4 +166,5 @@ class ModerationEngine:
             model_used="mock",
             mode="mock",
             fallback_used=False,
+            agent_trace=["Mock Policy Agent", "Deterministic Guardrail"],
         )

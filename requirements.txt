@@ -8,8 +8,12 @@ python-dotenv>=1.0.0
 # AI / LangChain
 langchain>=0.3.0
 langchain-openai>=0.3.0
+openai>=1.0.0
 langgraph>=0.2.0
 google-genai>=1.0.0
+google-api-python-client>=2.160.0
+google-auth-oauthlib>=1.2.1
+cryptography>=44.0.0
 
 # AI log submission
 requests>=2.31.0

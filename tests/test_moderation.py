@@ -2,7 +2,7 @@ import pytest
 
 from src.config import Settings
 from src.models.moderation import GeminiModerationOutput, MemberSubmission
-from src.services.gemini_moderation import GeminiModerationError, GeminiStageResult
+from src.services.gemini_moderation import GeminiModerationError
 from src.services.moderation import ModerationConfigurationError, ModerationEngine
 
 
@@ -36,57 +36,45 @@ async def test_missing_key_is_a_clear_configuration_error():
 
 
 @pytest.mark.asyncio
-async def test_two_stage_gemini_pipeline_uses_review_model_for_ambiguous_content(monkeypatch):
+async def test_multi_agent_graph_returns_final_decision_and_trace(monkeypatch):
     engine = ModerationEngine(Settings(moderation_mode="gemini", gemini_api_key="configured"))
-    calls = []
-
-    def triage(submission):
-        calls.append("triage")
-        return GeminiStageResult(
-            output=GeminiModerationOutput(
+    monkeypatch.setattr(
+        engine.agent_graph,
+        "invoke",
+        lambda submission: {
+            "decision": GeminiModerationOutput(
                 action="review", category="ambiguous", risk_level="medium", policy_id=None,
-                reason="Context is ambiguous.", confidence=0.62, needs_admin_review=True,
-                evidence=[submission.text],
-            ),
-            model_used="gemini-3.1-flash-lite",
-        )
-
-    def review(submission, triage_result):
-        calls.append("review")
-        return GeminiStageResult(
-            output=GeminiModerationOutput(
-                action="review", category="ambiguous", risk_level="medium", policy_id=None,
-                reason="Admin should decide because intent remains unclear.", confidence=0.67,
+                reason="Specialist agents found ambiguous intent.", confidence=0.67,
                 needs_admin_review=True, evidence=[submission.text],
             ),
-            model_used="gemini-3.6-flash",
-        )
-
-    monkeypatch.setattr(engine.gemini, "moderate_with_triage", triage)
-    monkeypatch.setattr(engine.gemini, "review_ambiguous_content", review)
+            "model_used": "gemini-3.6-flash",
+            "trace": ["Context Agent", "Policy Agent", "Risk Agent", "Decision Agent", "Deterministic Guardrail"],
+        },
+    )
 
     result = await engine.moderate(MemberSubmission(user_id="U001", text="Ra đường gặp tao là biết."))
 
-    assert calls == ["triage", "review"]
     assert result.mode == "gemini"
     assert result.model_used == "gemini-3.6-flash"
     assert result.action == "review"
+    assert result.agent_trace == ["Context Agent", "Policy Agent", "Risk Agent", "Decision Agent", "Deterministic Guardrail"]
 
 
 @pytest.mark.asyncio
 async def test_gemini_policy_id_can_be_descriptive(monkeypatch):
     engine = ModerationEngine(Settings(moderation_mode="gemini", gemini_api_key="configured"))
     monkeypatch.setattr(
-        engine.gemini,
-        "moderate_with_triage",
-        lambda submission: GeminiStageResult(
-            output=GeminiModerationOutput(
+        engine.agent_graph,
+        "invoke",
+        lambda submission: {
+            "decision": GeminiModerationOutput(
                 action="warn", category="harassment", risk_level="high",
                 policy_id="harassment_policy_001", reason="Personal attack.", confidence=0.95,
                 needs_admin_review=False, evidence=[submission.text],
             ),
-            model_used="gemini-3.1-flash-lite",
-        ),
+            "model_used": "gemini-3.6-flash",
+            "trace": ["Context Agent", "Policy Agent", "Risk Agent", "Decision Agent", "Deterministic Guardrail"],
+        },
     )
 
     result = await engine.moderate(MemberSubmission(user_id="U001", text="You are being rude."))
@@ -99,8 +87,8 @@ async def test_gemini_policy_id_can_be_descriptive(monkeypatch):
 async def test_mock_fallback_requires_explicit_flag(monkeypatch):
     engine = ModerationEngine(Settings(moderation_mode="gemini", gemini_api_key="configured", allow_mock_fallback=True))
     monkeypatch.setattr(
-        engine.gemini,
-        "moderate_with_triage",
+        engine.agent_graph,
+        "invoke",
         lambda submission: (_ for _ in ()).throw(GeminiModerationError("quota", "Quota exceeded.")),
     )
 
@@ -116,8 +104,8 @@ async def test_mock_fallback_requires_explicit_flag(monkeypatch):
 async def test_invalid_gemini_output_is_sent_to_review(monkeypatch):
     engine = ModerationEngine(Settings(moderation_mode="gemini", gemini_api_key="configured"))
     monkeypatch.setattr(
-        engine.gemini,
-        "moderate_with_triage",
+        engine.agent_graph,
+        "invoke",
         lambda submission: (_ for _ in ()).throw(
             GeminiModerationError("invalid_structured_output", "Invalid JSON")
         ),

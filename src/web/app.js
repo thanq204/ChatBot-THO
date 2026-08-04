@@ -83,9 +83,19 @@ async function setupMember() {
       while (history.length > 30) history.shift();
       localStorage.setItem(historyStorageKey, JSON.stringify(history));
       renderConversationHistory(history);
-      document.querySelector("#mode-badge").outerHTML = renderModeBadge(moderation.mode, moderation.fallback_used);
+      const currentModeBadge = document.querySelector("#mode-badge");
+      if (currentModeBadge) {
+        currentModeBadge.outerHTML = renderModeBadge(moderation.mode, moderation.fallback_used, "mode-badge");
+      }
       resultPanel.hidden = false;
       resultPanel.innerHTML = `<div class="section-heading"><div><span class="eyebrow">MODERATION RESULT</span><h2>${result.review ? "Sent to Admin Review Queue" : "Automatic decision complete"}</h2></div>${badge(moderation.action)}</div><div class="result-grid"><div class="data-point"><span>Category</span><strong>${escapeHtml(moderation.category)}</strong></div><div class="data-point"><span>Risk level</span><strong>${escapeHtml(moderation.risk_level)}</strong></div><div class="data-point"><span>Confidence</span><strong>${Math.round(moderation.confidence * 100)}%</strong></div><div class="data-point"><span>Model</span><strong>${escapeHtml(moderation.model_used)}</strong></div></div><p><strong>Reason:</strong> ${escapeHtml(moderation.reason)}</p><p><strong>Evidence:</strong> ${escapeHtml((moderation.evidence || []).join(" · ") || "—")}</p><p class="${result.review ? "notice" : "muted"}">${escapeHtml(result.message)}</p>${moderation.fallback_reason ? `<p class="muted">${escapeHtml(moderation.fallback_reason)}</p>` : ""}`;
+      const trace = (moderation.agent_trace || []).map((agent) => escapeHtml(agent)).join(" → ");
+      if (trace) {
+        const traceElement = document.createElement("div");
+        traceElement.className = "agent-trace";
+        traceElement.innerHTML = `<span>Agent pipeline</span><strong>${trace}</strong>`;
+        resultPanel.appendChild(traceElement);
+      }
     } catch (requestError) { error.textContent = requestError.message; error.hidden = false; }
   });
 }

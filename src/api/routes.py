@@ -92,11 +92,15 @@ async def demo_cases() -> list[MemberSubmission]:
 
 @router.get("/moderation/status")
 async def moderation_status() -> dict[str, object]:
-    settings = get_moderation_engine().settings
+    engine = get_moderation_engine()
+    settings = engine.settings
+    provider = engine.provider
     return {
-        "mode": settings.moderation_mode,
-        "configured": bool(settings.gemini_api_key),
-        "triage_model": settings.gemini_triage_model,
-        "review_model": settings.gemini_review_model,
+        "mode": "mock" if settings.moderation_mode == "mock" else provider,
+        "moderation_mode": settings.moderation_mode,
+        "provider": provider,
+        "configured": bool(settings.openai_api_key if provider == "openai" else settings.gemini_api_key),
+        "triage_model": settings.openai_moderation_model if provider == "openai" else settings.gemini_triage_model,
+        "review_model": settings.openai_moderation_model if provider == "openai" else settings.gemini_review_model,
         "allow_mock_fallback": settings.allow_mock_fallback,
     }
