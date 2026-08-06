@@ -1,27 +1,17 @@
-# Community Health pipeline
+# Discord + Telegram operations pipeline
 
 ```mermaid
 flowchart TD
-    A[Local Web App] --> B{Data source}
-    B -->|Public read-only| C[YouTube API: video + commentThreads]
-    B -->|Offline demo| D[Imported dataset]
-    B -->|Owner consent| E[Google OAuth]
-    C --> F[Normalize and deduplicate]
-    D --> F
-    E --> F
-    F --> G[Group comment + replies into thread]
-    G --> H[Context Agent]
-    H --> I[Escalation Agent]
-    I --> J[Trigger + root cause + participants]
-    J --> K[Intervention Agent]
-    K --> L[Admin review and edit]
-    L --> M{Approved action}
-    M -->|Publish / reply / hide| N[YouTube action: simulated by default]
-    M -->|Hold / observe| O[Keep under review]
-    N --> P[Audit trail + outcome]
-    O --> P
-    P --> Q[Reviewed case examples]
-    Q -. similar context .-> H
+    A[Discord hoặc Telegram message] --> B[Normalize + deduplicate]
+    B --> C[Incident grouping]
+    C --> D[Context + risk analysis]
+    D --> E[Knowledge Hub retrieval]
+    E --> F[Admin review / intervention]
+    F --> G{Action}
+    G -->|Warn / hide / hold| H[Audit trail]
+    G -->|Reply / notify| I[Discord hoặc Telegram]
+    H --> J[Reviewed feedback]
+    J -. tham khảo case tương tự .-> D
 ```
 
-Public API mode never calls a YouTube write endpoint. The UI labels the default action as `SIMULATED ACTION`; real channel actions require explicit OAuth configuration and Admin approval.
+Discord listener nhận message realtime, nhóm incident theo channel/thread, truy xuất Knowledge Hub rồi mới đề xuất hành động. Telegram chỉ nhận cảnh báo khi risk vượt ngưỡng cấu hình; mọi quyết định vẫn được lưu vào audit trail.

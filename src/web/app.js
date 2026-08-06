@@ -125,3 +125,18 @@ async function setupAdmin() {
 
 if (document.body.dataset.page === "member") setupMember().catch((error) => { document.querySelector("#form-error").textContent = error.message; document.querySelector("#form-error").hidden = false; });
 if (document.body.dataset.page === "admin") setupAdmin().catch((error) => { document.querySelector("#queue").innerHTML = `<p class="notice error">${escapeHtml(error.message)}</p>`; });
+const memberRagForm = document.querySelector("#member-rag-form");
+if (memberRagForm) {
+  memberRagForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const output = document.querySelector("#member-rag-result");
+    output.hidden = false;
+    output.innerHTML = `<p class="muted">Đang tìm trong knowledge hub...</p>`;
+    try {
+      const response = await fetch("/api/v1/rag/ask", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({question: document.querySelector("#member-rag-question").value.trim()})});
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Không thể hỏi knowledge hub.");
+      output.innerHTML = `<p>${escapeHtml(data.answer).replaceAll("\n", "<br>")}</p><small class="muted">Nguồn: ${escapeHtml((data.sources || []).map(source => source.title).join(", "))} · ${escapeHtml(data.model_used)}</small>`;
+    } catch (error) { output.innerHTML = `<p class="notice error">${escapeHtml(error.message)}</p>`; }
+  });
+}

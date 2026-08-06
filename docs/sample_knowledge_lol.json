@@ -1,0 +1,124 @@
+{
+  "documents": [
+    {
+      "document_id": "KN-LOL-001", "dataset": "league_of_legends",
+      "title": "Liên Minh Huyền Thoại là gì?",
+      "body": "Liên Minh Huyền Thoại là game MOBA 5 đấu 5. Mục tiêu chính là phối hợp với đồng đội, phá các công trình phòng thủ và phá Nhà Chính của đối phương.",
+      "tags": ["league-of-legends", "overview", "gameplay"]
+    },
+    {
+      "document_id": "KN-LOL-002", "dataset": "league_of_legends",
+      "title": "Bản đồ Summoner's Rift",
+      "body": "Summoner's Rift là bản đồ phổ biến cho các trận đấu 5 đấu 5. Bản đồ có ba đường chính, khu vực rừng, công trình phòng thủ và những mục tiêu lớn.",
+      "tags": ["map", "summoners-rift"]
+    },
+    {
+      "document_id": "KN-LOL-003", "dataset": "league_of_legends",
+      "title": "Ba đường chính",
+      "body": "Ba đường chính gồm đường trên, đường giữa và đường dưới. Mỗi đường thường có cách vận hành, tướng phù hợp và mục tiêu kiểm soát khác nhau.",
+      "tags": ["lanes", "strategy"]
+    },
+    {
+      "document_id": "KN-LOL-004", "dataset": "league_of_legends",
+      "title": "Vai trò đường trên",
+      "body": "Đường trên thường là khu vực đấu tay đôi. Người chơi cần quản lý lính, trao đổi chiêu thức hợp lý và quyết định khi nào nên dịch chuyển hỗ trợ đồng đội.",
+      "tags": ["top", "roles"]
+    },
+    {
+      "document_id": "KN-LOL-005", "dataset": "league_of_legends",
+      "title": "Vai trò đi rừng",
+      "body": "Người đi rừng dọn quái, kiểm soát mục tiêu lớn, tạo áp lực lên các đường và hỗ trợ đồng đội bằng những pha gank phù hợp.",
+      "tags": ["jungle", "roles"]
+    },
+    {
+      "document_id": "KN-LOL-006", "dataset": "league_of_legends",
+      "title": "Vai trò đường giữa",
+      "body": "Đường giữa thường có ảnh hưởng lớn đến bản đồ vì nằm ở vị trí trung tâm. Người chơi cần vừa giữ đường vừa quan sát cơ hội hỗ trợ hai cánh.",
+      "tags": ["mid", "roles"]
+    },
+    {
+      "document_id": "KN-LOL-007", "dataset": "league_of_legends",
+      "title": "Vai trò xạ thủ",
+      "body": "Xạ thủ thường gây sát thương liên tục trong giao tranh và cần giữ vị trí an toàn. Xạ thủ phụ thuộc nhiều vào trang bị, vàng và khả năng bảo vệ từ đồng đội.",
+      "tags": ["adc", "roles"]
+    },
+    {
+      "document_id": "KN-LOL-008", "dataset": "league_of_legends",
+      "title": "Vai trò hỗ trợ",
+      "body": "Hỗ trợ bảo vệ xạ thủ, kiểm soát tầm nhìn, mở giao tranh hoặc tạo điều kiện cho đồng đội. Hỗ trợ không chỉ có nhiệm vụ cắm mắt.",
+      "tags": ["support", "roles"]
+    },
+    {
+      "document_id": "KN-LOL-009", "dataset": "league_of_legends",
+      "title": "Lính và kinh nghiệm",
+      "body": "Lính xuất hiện theo đợt và cung cấp vàng hoặc kinh nghiệm. Đứng gần khi lính đối phương bị hạ giúp nhận kinh nghiệm, còn đòn đánh kết liễu thường giúp nhận vàng.",
+      "tags": ["minions", "experience", "gold"]
+    },
+    {
+      "document_id": "KN-LOL-010", "dataset": "league_of_legends",
+      "title": "Vàng và trang bị",
+      "body": "Vàng dùng để mua trang bị tại cửa hàng. Trang bị làm thay đổi sức mạnh của tướng, vì vậy người chơi nên chọn đồ theo tướng của mình và đội hình đối phương.",
+      "tags": ["items", "gold"]
+    },
+    {
+      "document_id": "KN-LOL-011", "dataset": "league_of_legends",
+      "title": "Rồng nguyên tố",
+      "body": "Rồng nguyên tố là mục tiêu trung lập quan trọng. Hạ rồng giúp đội nhận hiệu ứng hoặc cộng dồn sức mạnh, nên đội cần cân nhắc tầm nhìn và thời điểm tranh chấp.",
+      "tags": ["dragon", "objectives"]
+    },
+    {
+      "document_id": "KN-LOL-012", "dataset": "league_of_legends",
+      "title": "Rồng Ngàn Tuổi",
+      "body": "Rồng Ngàn Tuổi xuất hiện về cuối trận và là mục tiêu có ảnh hưởng rất lớn. Đội hạ được rồng thường có lợi thế kết thúc giao tranh hoặc đẩy mạnh vào căn cứ.",
+      "tags": ["elder-dragon", "objectives"]
+    },
+    {
+      "document_id": "KN-LOL-013", "dataset": "league_of_legends",
+      "title": "Baron Nashor",
+      "body": "Baron Nashor là mục tiêu lớn ở nửa trên bản đồ. Bùa lợi Baron giúp đội tăng khả năng đẩy đường, nhưng việc ăn Baron cần kiểm tra tầm nhìn và nguy cơ bị cướp.",
+      "tags": ["baron", "objectives"]
+    },
+    {
+      "document_id": "KN-LOL-014", "dataset": "league_of_legends",
+      "title": "Trụ phòng thủ",
+      "body": "Trụ bảo vệ các đường và căn cứ. Phá trụ mở ra không gian di chuyển, tạo vàng cho đội và giúp kiểm soát bản đồ tốt hơn.",
+      "tags": ["turrets", "map-control"]
+    },
+    {
+      "document_id": "KN-LOL-015", "dataset": "league_of_legends",
+      "title": "Nhà Chính và điều kiện thắng",
+      "body": "Trận đấu kết thúc khi một đội phá được Nhà Chính của đối phương. Hạ nhiều mạng không tự động mang lại chiến thắng nếu đội không chuyển lợi thế thành mục tiêu.",
+      "tags": ["nexus", "win-condition"]
+    },
+    {
+      "document_id": "KN-LOL-016", "dataset": "league_of_legends",
+      "title": "Tầm nhìn và mắt",
+      "body": "Mắt giúp phát hiện vị trí đối thủ trong khu vực được soi sáng. Kiểm soát tầm nhìn hỗ trợ việc đi gank, ăn mục tiêu và tránh bị bắt lẻ.",
+      "tags": ["vision", "wards"]
+    },
+    {
+      "document_id": "KN-LOL-017", "dataset": "league_of_legends",
+      "title": "Giao tranh tổng",
+      "body": "Trong giao tranh tổng, đội nên xác định mục tiêu ưu tiên, theo dõi kỹ năng quan trọng và giữ vị trí phù hợp. Không phải lúc nào lao vào trước cũng là lựa chọn tốt.",
+      "tags": ["teamfight", "combat"]
+    },
+    {
+      "document_id": "KN-LOL-018", "dataset": "league_of_legends",
+      "title": "Đẩy lẻ",
+      "body": "Đẩy lẻ là gây áp lực ở một đường trong khi đồng đội tạo sức ép hoặc kiểm soát mục tiêu ở nơi khác. Cách này cần khả năng rút lui và theo dõi vị trí đối thủ.",
+      "tags": ["split-push", "macro"]
+    },
+    {
+      "document_id": "KN-LOL-019", "dataset": "league_of_legends",
+      "title": "Macro và micro",
+      "body": "Micro là kỹ năng điều khiển tướng, né chiêu và sử dụng kỹ năng. Macro là quyết định lớn như đổi mục tiêu, di chuyển, kiểm soát bản đồ và chọn thời điểm giao tranh.",
+      "tags": ["macro", "micro", "strategy"]
+    },
+    {
+      "document_id": "KN-LOL-020", "dataset": "league_of_legends",
+      "title": "Cách hỏi trợ lý về Liên Minh",
+      "body": "Có thể hỏi CHAT-10 những câu như: Vai trò đi rừng cần làm gì? Khi nào nên tranh Baron? Tại sao đội cần kiểm soát tầm nhìn? Trợ lý chỉ nên trả lời dựa trên tài liệu đã được nạp.",
+      "tags": ["chatbot", "rag", "demo"]
+    }
+  ]
+}

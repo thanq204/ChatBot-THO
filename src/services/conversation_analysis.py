@@ -60,7 +60,7 @@ class ConversationAnalysisService:
             reviewed_example_ids=[case.feedback_id for case in (similar_cases or [])],
         )
         provider = "gemini" if self.settings.moderation_mode == "gemini" else self.settings.moderation_provider
-        if allow_remote and provider == "openai" and self.settings.openai_api_key:
+        if allow_remote and self.settings.moderation_mode != "mock" and provider == "openai" and self.settings.openai_api_key:
             try:
                 return self._annotate_trigger_evidence(thread, self._openai_synthesis(thread, heuristic, similar_cases or []))
             except Exception:
@@ -219,15 +219,24 @@ Thread:
         personal = re.compile(r"\b(mày|tao|you are|your family|gia đình mày)\b", re.I)
         constructive = re.compile(r"\b(cảm ơn|xin lỗi|giải thích|đồng ý|agree|please|thanks|sorry)\b", re.I)
         value = 0.0
+        has_threat = False
+        has_personal_attack = False
         for message in messages:
-            value += 0.17 if aggression.search(message.text) else 0
-            value += 0.34 if threat.search(message.text) else 0
-            value += 0.10 if personal.search(message.text) else 0
+            is_aggression = bool(aggression.search(message.text))
+            is_threat = bool(threat.search(message.text))
+            is_personal = bool(personal.search(message.text))
+            has_threat = has_threat or is_threat
+            has_personal_attack = has_personal_attack or is_aggression or is_personal
+            value += 0.17 if is_aggression else 0
+            value += 0.34 if is_threat else 0
+            value += 0.10 if is_personal else 0
             value += 0.04 if message.text.count("!") >= 2 else 0
             value += 0.05 if len(re.findall(r"[A-ZÀ-ỸĐ]", message.text)) > max(8, len(message.text) // 3) else 0
             value -= 0.04 if constructive.search(message.text) else 0
         if len(messages) >= 4:
             value += 0.06
+        if has_threat and has_personal_attack:
+            value += 0.15
         return max(0.0, min(1.0, value))
 
     @staticmethod
@@ -387,3 +396,30 @@ Thread:
             "temporary_cooldown": ("hold_for_review", False, "YouTube action cần quyền channel và được mô phỏng trong local demo."),
         }
         return mapping.get(action, ("admin_review", False, "Hành động cần Admin duyệt."))
+def _fixed_local_score(messages: list[ConversationMessage]) -> float:
+    aggression = re.compile(r"\b(ngu|\u0111i\u00ean|c\u00fat|im \u0111i|v\u00f4 d\u1ee5ng|stupid|idiot|hate|shut up)\b", re.I)
+    threat = re.compile(r"\b(gi\u1ebft|\u0111\u00e1nh|d\u1ecda|\u0111e d\u1ecda|t\u00ecm ra m\u00e0y|kill|hurt|dox|find you)\b", re.I)
+    personal = re.compile(r"\b(m\u00e0y|tao|you are|your family|gia \u0111\u00ecnh m\u00e0y)\b", re.I)
+    value = 0.0
+    has_threat = False
+    has_personal_attack = False
+    for message in messages:
+        is_aggression = bool(aggression.search(message.text))
+        is_threat = bool(threat.search(message.text))
+        is_personal = bool(personal.search(message.text))
+        has_threat = has_threat or is_threat
+        has_personal_attack = has_personal_attack or is_aggression or is_personal
+        value += 0.17 if is_aggression else 0
+        value += 0.34 if is_threat else 0
+        value += 0.10 if is_personal else 0
+        value += 0.04 if message.text.count("!") >= 2 else 0
+    if len(messages) >= 4:
+        value += 0.06
+    if has_threat and has_personal_attack:
+        value += 0.15
+    return max(0.0, min(1.0, value))
+
+
+# Compatibility override for the older source copy whose literal regexes were
+# committed with mojibake. It keeps the mock/local analysis deterministic.
+ConversationAnalysisService._score = staticmethod(_fixed_local_score)
