@@ -1,9 +1,10 @@
 import pytest
 
-from src.api import routes
-from src.config import Settings
-from src.services.moderation import ModerationEngine
-from src.services.review_store import ReviewStore
+from backend.api import routes
+from backend.config import Settings
+from backend.main import FRONTEND_DIST
+from backend.services.moderation import ModerationEngine
+from backend.services.review_store import ReviewStore
 
 
 @pytest.fixture
@@ -60,10 +61,27 @@ async def test_gemini_mode_without_key_returns_configuration_error(client, monke
 
 
 @pytest.mark.asyncio
-async def test_member_and_admin_pages_are_served(client):
-    for path in ("/", "/member", "/admin", "/static/app.js", "/static/styles.css"):
+async def test_health_is_served(client):
+    response = await client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_spa_fallback_serves_the_react_shell(client):
+    """Client-side routes must resolve to index.html, not 404.
+
+    Skipped when the frontend has not been built, since dist/ is a build artifact
+    and the backend is expected to run without it during API-only development.
+    """
+    if not (FRONTEND_DIST / "index.html").exists():
+        pytest.skip("frontend/dist not built")
+
+    for path in ("/", "/operations", "/review-queue", "/member"):
         response = await client.get(path)
         assert response.status_code == 200
+        assert "<div id=\"root\">" in response.text
 
 
 @pytest.mark.asyncio

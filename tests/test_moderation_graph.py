@@ -1,12 +1,12 @@
-from src.agents.moderation_graph import ModerationAgentGraph
-from src.models.moderation import (
+from backend.agents.moderation_graph import ModerationAgentGraph
+from backend.models.moderation import (
     ContextAgentOutput,
     GeminiModerationOutput,
     MemberSubmission,
     PolicyAgentOutput,
     RiskAgentOutput,
 )
-from src.services.gemini_moderation import GeminiAgentStageResult
+from backend.services.gemini_moderation import GeminiAgentStageResult
 
 
 class FakeAgentService:

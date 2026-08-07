@@ -1,4 +1,16 @@
-# ---- Stage 1: Build ----
+# ---- Stage 1: Build the React frontend ----
+FROM node:22-slim AS frontend
+
+WORKDIR /frontend
+
+# Copy the manifests first so npm ci is cached until dependencies actually change.
+COPY frontend/package.json frontend/package-lock.json* ./
+RUN npm ci
+
+COPY frontend/ ./
+RUN npm run build
+
+# ---- Stage 2: Build Python dependencies ----
 FROM python:3.11-slim AS builder
 
 WORKDIR /app
@@ -6,7 +18,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir --user -r requirements.txt
 
-# ---- Stage 2: Production ----
+# ---- Stage 3: Production ----
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -18,8 +30,9 @@ ENV PATH=/root/.local/bin:$PATH
 # Security: run as non-root user
 RUN useradd -m appuser
 
-# Copy application code
-COPY . .
+# Backend source, then the compiled SPA that FastAPI serves from frontend/dist.
+COPY backend/ ./backend/
+COPY --from=frontend /frontend/dist ./frontend/dist
 
 # Create data directory with correct ownership
 RUN mkdir -p /app/data && chown -R appuser:appuser /app
@@ -31,4 +44,4 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
 
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]

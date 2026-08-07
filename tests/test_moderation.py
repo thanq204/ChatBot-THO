@@ -1,9 +1,9 @@
 import pytest
 
-from src.config import Settings
-from src.models.moderation import GeminiModerationOutput, MemberSubmission
-from src.services.gemini_moderation import GeminiModerationError
-from src.services.moderation import ModerationConfigurationError, ModerationEngine
+from backend.config import Settings
+from backend.models.moderation import GeminiModerationOutput, MemberSubmission
+from backend.services.gemini_moderation import GeminiModerationError
+from backend.services.moderation import ModerationConfigurationError, ModerationEngine
 
 
 @pytest.mark.asyncio
