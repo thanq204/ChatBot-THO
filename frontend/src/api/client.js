@@ -20,12 +20,18 @@ const del = (path) => request(path, { method: "DELETE" });
 /** Operations surface: incidents, connectors, policies, knowledge, RAG. */
 export const ops = {
   analytics: () => get("/analytics"),
-  audit: () => get("/audit"),
   platforms: () => get("/platforms"),
   pullPlatform: (platform, limit) => post(`/platforms/${platform}/pull?limit=${limit}`),
-  incidents: (platform) => get(`/incidents${platform ? `?platform=${encodeURIComponent(platform)}` : ""}`),
+  incidents: (filters = {}) => {
+    const params = new URLSearchParams();
+    if (filters.platform) params.set("platform", filters.platform);
+    if (filters.status) params.set("status", filters.status);
+    const query = params.toString();
+    return get(`/incidents${query ? `?${query}` : ""}`);
+  },
   incident: (id) => get(`/incidents/${encodeURIComponent(id)}`),
   updateIncident: (id, payload) => patch(`/incidents/${encodeURIComponent(id)}`, payload),
+  audit: (incidentId) => get(`/audit${incidentId ? `?incident_id=${encodeURIComponent(incidentId)}` : ""}`),
   analyze: (message) => post("/messages/analyze", { message }),
   ingest: (payload) => post("/messages/ingest", payload),
   ask: (question, dataset) => post("/rag/ask", { question, dataset: dataset || null }),

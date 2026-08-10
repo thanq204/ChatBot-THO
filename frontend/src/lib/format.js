@@ -4,6 +4,10 @@ export function formatNumber(value) {
   return numberFormatter.format(Math.round(value));
 }
 
+export function percent(value) {
+  return `${Math.round((value ?? 0) * 100)}%`;
+}
+
 /** "5 phút trước" style relative time, Vietnamese. Coarse on purpose (dashboard, not a clock). */
 export function relativeTime(isoString) {
   const then = new Date(isoString).getTime();

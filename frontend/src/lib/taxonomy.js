@@ -53,6 +53,28 @@ export const STATUS_LABELS = {
   snoozed: "Tạm hoãn",
 };
 
+export const STATUS_COLORS = {
+  open: "var(--sev-high)",
+  monitoring: "var(--accent-solid)",
+  resolved: "var(--sev-low)",
+  snoozed: "var(--text-muted)",
+};
+
+/** operations.py Decision enum: shared by incidents, policy actions and message decisions. */
+export const DECISION_LABELS = {
+  allow: "Cho phép",
+  warn: "Cảnh báo",
+  hide: "Ẩn",
+  hold_for_review: "Chờ review",
+};
+
+export const DECISION_COLORS = {
+  allow: "var(--sev-low)",
+  warn: "var(--sev-medium)",
+  hide: "var(--sev-high)",
+  hold_for_review: "var(--accent-solid)",
+};
+
 export function categoryLabel(category) {
   return CATEGORY_LABELS[category] ?? category;
 }
@@ -63,6 +85,14 @@ export function severityLabel(severity) {
 
 export function platformLabel(platform) {
   return PLATFORM_LABELS[platform] ?? platform;
+}
+
+export function statusLabel(value) {
+  return STATUS_LABELS[value] ?? value;
+}
+
+export function decisionLabel(value) {
+  return DECISION_LABELS[value] ?? value;
 }
 
 /**

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { ChatsCircle, WarningCircle, SquaresFour, ArrowsClockwise } from "@phosphor-icons/react";
+import { ChatsCircle, WarningCircle, ArrowsClockwise } from "@phosphor-icons/react";
 import Card from "../components/Card.jsx";
 import StatTile from "../components/StatTile.jsx";
 import RankList from "../components/RankList.jsx";
@@ -9,10 +9,7 @@ import ActivityFeed from "../components/ActivityFeed.jsx";
 import { SkeletonLine, SkeletonBlock } from "../components/Skeleton.jsx";
 import { ErrorState, EmptyState } from "../components/StatePanels.jsx";
 import { ops } from "../api/client.js";
-import { categoryLabel, platformLabel, CATEGORY_COLORS } from "../lib/taxonomy.js";
-
-const DECISION_LABELS = { allow: "Cho phép", warn: "Cảnh báo", hide: "Ẩn", hold_for_review: "Chờ review" };
-const DECISION_COLORS = { allow: "var(--sev-low)", warn: "var(--sev-medium)", hide: "var(--sev-high)", hold_for_review: "var(--accent-solid)" };
+import { categoryLabel, platformLabel, CATEGORY_COLORS, decisionLabel, DECISION_COLORS } from "../lib/taxonomy.js";
 
 function buildCategoryRanks(summary) {
   const entries = Object.entries(summary.by_category).filter(([category]) => category !== "safe");
@@ -205,7 +202,7 @@ export default function OverviewPage() {
               {decisionRows.map(([decision, count]) => (
                 <li key={decision} className="decision-list__row">
                   <span className="decision-list__dot" style={{ background: DECISION_COLORS[decision] }} />
-                  <span className="decision-list__label">{DECISION_LABELS[decision] ?? decision}</span>
+                  <span className="decision-list__label">{decisionLabel(decision)}</span>
                   <span className="decision-list__value">{count.toLocaleString("vi-VN")}</span>
                 </li>
               ))}
