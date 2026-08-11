@@ -55,9 +55,12 @@ def _latest_transcript() -> Path:
     return max(candidates, key=lambda path: path.name)
 
 
-def _transcript_data(path: Path) -> tuple[str, str]:
+def _transcript_data(path: Path) -> tuple[str, str, str]:
     best_message = ""
     session_id = ""
+    model = ""
+    direct_messages: list[str] = []
+    response_messages: list[str] = []
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
         try:
             record = json.loads(line)
@@ -66,16 +69,50 @@ def _transcript_data(path: Path) -> tuple[str, str]:
 
         payload = record.get("payload", {})
         session_id = session_id or str(payload.get("id", ""))
+        if record.get("type") == "turn_context":
+            model = str(payload.get("model", "")) or model
         if record.get("type") == "event_msg" and payload.get("type") == "user_message":
             message = str(payload.get("message", ""))
             if len(USER_BLOCK.findall(message)) > len(USER_BLOCK.findall(best_message)):
                 best_message = message
+            elif message.strip():
+                # Newer Codex Desktop rollouts store each user message directly
+                # rather than as a combined "[N] user: ..." transcript.
+                direct_messages.append(message.strip())
+        elif (
+            record.get("type") == "response_item"
+            and payload.get("type") == "message"
+            and payload.get("role") == "user"
+        ):
+            # Current Codex Desktop records the actual typed request here.
+            # The event_msg above contains only the IDE context wrapper.
+            parts = [
+                str(item.get("text", ""))
+                for item in payload.get("content", [])
+                if isinstance(item, dict) and item.get("type") == "input_text"
+            ]
+            raw_message = "\n".join(part for part in parts if part.strip())
+            marker = "## My request:"
+            if marker in raw_message:
+                request = raw_message.split(marker, 1)[1].strip()
+                if request:
+                    response_messages.append(request)
 
-    if not best_message:
+    if not best_message and not direct_messages and not response_messages:
         raise RuntimeError(f"No user-message transcript found in {path}")
     if not session_id:
         session_id = path.stem.removeprefix("rollout-")
-    return session_id, best_message
+    if response_messages:
+        best_message = "\n\n".join(
+            f"[{number}] user: {message}"
+            for number, message in enumerate(response_messages, start=1)
+        )
+    elif not USER_BLOCK.findall(best_message):
+        best_message = "\n\n".join(
+            f"[{number}] user: {message}"
+            for number, message in enumerate(direct_messages, start=1)
+        )
+    return session_id, best_message, model
 
 
 def _existing_turns() -> set[str]:
@@ -102,7 +139,7 @@ def main() -> int:
     )
     args = parser.parse_args()
     transcript = _latest_transcript()
-    session_id, message = _transcript_data(transcript)
+    session_id, message, model = _transcript_data(transcript)
     prompts = [(int(number), prompt.strip()) for number, prompt in USER_BLOCK.findall(message)]
     prompts = [(number, prompt) for number, prompt in prompts if prompt]
     for prompt in args.extra_prompt:
@@ -118,7 +155,9 @@ def main() -> int:
     now = datetime.now(VN_TZ).isoformat()
     entries: list[dict[str, Any]] = []
     for number, prompt in prompts:
-        turn_id = f"backfill-{session_id}-{number}"
+        # v2 uses the response_item stream. Keep its ids separate from the
+        # older event_msg import so corrected entries can still be submitted.
+        turn_id = f"backfill-v2-{session_id}-{number}"
         if turn_id in existing:
             continue
         entries.append(
@@ -127,7 +166,7 @@ def main() -> int:
                 "tool": "codex",
                 "event": "UserPromptSubmit",
                 "session_id": session_id,
-                "model": "",
+                "model": model,
                 "repo": repo,
                 "branch": _git(["git", "rev-parse", "--abbrev-ref", "HEAD"]),
                 "commit": _git(["git", "rev-parse", "--short", "HEAD"]),
