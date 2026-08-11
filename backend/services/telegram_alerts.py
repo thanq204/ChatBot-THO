@@ -1,4 +1,4 @@
-"""Outbound Telegram moderation alerts."""
+"""Outbound Telegram alerts for realtime moderation incidents."""
 
 from __future__ import annotations
 

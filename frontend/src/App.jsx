@@ -1,26 +1,22 @@
 import { Navigate, Route, Routes } from "react-router-dom";
-import AppLayout from "./layouts/AppLayout.jsx";
-import OverviewPage from "./pages/OverviewPage.jsx";
-import AiSandboxPage from "./pages/AiSandboxPage.jsx";
-import CommunityPage from "./pages/CommunityPage.jsx";
-import PolicyPage from "./pages/PolicyPage.jsx";
-import ModerationLogPage from "./pages/ModerationLogPage.jsx";
-import UserManagementPage from "./pages/UserManagementPage.jsx";
-import SettingsPage from "./pages/SettingsPage.jsx";
+import Layout from "./components/Layout.jsx";
+import OperationsPage from "./pages/OperationsPage.jsx";
+import MemberPage from "./pages/MemberPage.jsx";
+import ReviewQueuePage from "./pages/ReviewQueuePage.jsx";
 
 export default function App() {
   return (
-    <Routes>
-      <Route element={<AppLayout />}>
-        <Route path="/" element={<OverviewPage />} />
-        <Route path="/cong-dong" element={<CommunityPage />} />
-        <Route path="/quy-tac-ai" element={<PolicyPage />} />
-        <Route path="/nhat-ky" element={<ModerationLogPage />} />
-        <Route path="/khu-thu-nghiem-ai" element={<AiSandboxPage />} />
-        <Route path="/nguoi-dung" element={<UserManagementPage />} />
-        <Route path="/cai-dat" element={<SettingsPage />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Route>
-    </Routes>
+    <Layout>
+      <Routes>
+        <Route path="/" element={<Navigate to="/operations" replace />} />
+        <Route path="/operations" element={<OperationsPage />} />
+        <Route path="/member" element={<MemberPage />} />
+        <Route path="/review-queue" element={<ReviewQueuePage />} />
+        {/* Legacy paths from the server-rendered build. */}
+        <Route path="/admin" element={<Navigate to="/operations" replace />} />
+        <Route path="/moderation-admin" element={<Navigate to="/review-queue" replace />} />
+        <Route path="*" element={<Navigate to="/operations" replace />} />
+      </Routes>
+    </Layout>
   );
 }

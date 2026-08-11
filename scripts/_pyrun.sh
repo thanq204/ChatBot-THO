@@ -19,22 +19,22 @@ is_real_python() {
   "$1" --version >/dev/null 2>&1
 }
 
-# The project's virtualenv, when usable, is preferred because it contains the
-# project's optional dependencies.
-PY=""
-for cand in "$PROJECT_ROOT/.venv/Scripts/python.exe" "$PROJECT_ROOT/.venv/bin/python"; do
-  if [ -x "$cand" ] && is_real_python "$cand"; then PY="$cand"; break; fi
-done
-if [ -n "$PY" ]; then
-  exec "$PY" "$@"
-fi
-
 # Codex desktop may provide a bundled Python runtime outside PATH.
+PY=""
 shopt -s nullglob 2>/dev/null || true
 for cand in /c/Users/*/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe; do
   if [ -x "$cand" ] && is_real_python "$cand"; then PY="$cand"; break; fi
 done
 shopt -u nullglob 2>/dev/null || true
+if [ -n "$PY" ]; then
+  exec "$PY" "$@"
+fi
+
+# The project's own virtualenv already has every hook dependency installed
+# (python-dotenv, requests) and can't be shadowed by a PATH alias.
+for cand in "$PROJECT_ROOT/.venv/Scripts/python.exe" "$PROJECT_ROOT/.venv/bin/python"; do
+  if [ -x "$cand" ] && is_real_python "$cand"; then PY="$cand"; break; fi
+done
 if [ -n "$PY" ]; then
   exec "$PY" "$@"
 fi
