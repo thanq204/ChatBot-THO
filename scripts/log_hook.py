@@ -9,15 +9,30 @@ import sys
 import subprocess
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+from dotenv import load_dotenv
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+load_dotenv(PROJECT_ROOT / ".env")
 
 VN_TZ = timezone(timedelta(hours=7))
 
 
-def git(cmd):
+def git(cmd, cwd=None):
     try:
-        return subprocess.check_output(cmd, shell=True, text=True, stderr=subprocess.DEVNULL).strip()
+        return subprocess.check_output(
+            cmd,
+            shell=True,
+            text=True,
+            stderr=subprocess.DEVNULL,
+            cwd=str(cwd) if cwd else None,
+        ).strip()
     except Exception:
         return ""
+
+
+def _project_path(value: str) -> Path:
+    path = Path(value)
+    return path if path.is_absolute() else PROJECT_ROOT / path
 
 
 def detect_tool(data: dict) -> str:
@@ -59,7 +74,8 @@ def normalize(data: dict, tool: str) -> dict | None:
     # origin isn't set), skip the event entirely — these entries can't be
     # tied back to a team on the server and would just clutter the pending
     # queue forever.
-    origin = git("git remote get-url origin")
+    hook_cwd = Path(str(data.get("cwd") or PROJECT_ROOT))
+    origin = git("git remote get-url origin", cwd=hook_cwd)
     if not origin:
         return None
     repo = origin.rstrip("/").split("/")[-1]
@@ -77,9 +93,9 @@ def normalize(data: dict, tool: str) -> dict | None:
         ),
         "model": data.get("model", ""),
         "repo": repo,
-        "branch": git("git rev-parse --abbrev-ref HEAD"),
-        "commit": git("git rev-parse --short HEAD"),
-        "student": git("git config user.email"),
+        "branch": git("git rev-parse --abbrev-ref HEAD", cwd=hook_cwd),
+        "commit": git("git rev-parse --short HEAD", cwd=hook_cwd),
+        "student": git("git config user.email", cwd=hook_cwd),
     }
 
     if tool == "claude":
@@ -173,12 +189,27 @@ def main():
     if not entry:
         sys.exit(0)
 
-    log_dir = Path(os.environ.get("AI_LOG_DIR", ".ai-log"))
+    log_dir = _project_path(os.environ.get("AI_LOG_DIR", ".ai-log"))
     log_dir.mkdir(exist_ok=True)
     log_file = log_dir / "session.jsonl"
 
     with open(log_file, "a", encoding="utf-8") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+    # Submit Codex prompts immediately after the local write. Keeping this
+    # inside the trusted hook preserves the required local-first ordering.
+    if tool == "codex" and entry.get("event") == "UserPromptSubmit":
+        try:
+            import submit_log
+
+            submit_status = submit_log.submit_entry(entry)
+        except Exception as exc:
+            print(f"[ai-log] Submit failed: {exc}", file=sys.stderr)
+            submit_status = 1
+        if submit_status != 0:
+            # The local JSONL entry is the durable fallback. Never block the
+            # AI client just because Phoenix is temporarily unavailable.
+            print("[ai-log] Entry kept locally for a later retry", file=sys.stderr)
 
     # Output valid JSON (required by some tools like Gemini)
     print(json.dumps({"status": "logged"}))
