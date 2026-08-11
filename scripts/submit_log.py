@@ -7,34 +7,15 @@ import json
 import os
 import re
 import sys
-import urllib.error
-import urllib.request
 from pathlib import Path
 from typing import Any
 
+import requests
+from dotenv import load_dotenv
+
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-
-
-def _load_dotenv(path: Path) -> None:
-    """Load simple KEY=VALUE pairs without a third-party dependency.
-
-    The pre-push hook can run with Codex's bundled Python, which deliberately
-    contains only the standard library.  Keeping this script dependency-free
-    means queued logs can still be submitted in that environment.
-    """
-    if not path.exists():
-        return
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key = key.strip()
-        if key and key not in os.environ:
-            os.environ[key] = value.strip().strip('"').strip("'")
-
-
-_load_dotenv(PROJECT_ROOT / ".env")
+load_dotenv(PROJECT_ROOT / ".env")
 
 
 def _repo_path(value: str) -> Path:
@@ -59,12 +40,12 @@ def _redact(value: Any, api_key: str) -> Any:
     return value
 
 
-def _safe_response(body_text: str, api_key: str) -> str:
+def _safe_response(response: requests.Response, api_key: str) -> str:
     try:
-        body: Any = json.loads(body_text)
+        body: Any = response.json()
         rendered = json.dumps(_redact(body, api_key), ensure_ascii=False)
     except ValueError:
-        rendered = _redact(body_text, api_key)
+        rendered = _redact(response.text, api_key)
     return str(rendered)[:4000]
 
 
@@ -101,28 +82,22 @@ def submit_entries(entries: list[dict[str, Any]]) -> int:
         return 2
 
     try:
-        request = urllib.request.Request(
+        response = requests.post(
             server,
-            data=json.dumps({"entries": entries}).encode("utf-8"),
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
             },
-            method="POST",
+            json={"entries": entries},
+            timeout=8,
         )
-        with urllib.request.urlopen(request, timeout=8) as response:
-            status_code = response.status
-            body_text = response.read().decode("utf-8", errors="replace")
-    except urllib.error.HTTPError as exc:
-        status_code = exc.code
-        body_text = exc.read().decode("utf-8", errors="replace")
-    except (OSError, ValueError, RuntimeError) as exc:
+    except (OSError, requests.RequestException, RuntimeError) as exc:
         print(f"[ai-log] Submit failed: {exc}", file=sys.stderr)
         return 1
 
-    print(f"[ai-log] HTTP status: {status_code}", file=sys.stderr)
-    print(f"[ai-log] Response: {_safe_response(body_text, api_key)}", file=sys.stderr)
-    if not 200 <= status_code < 300:
+    print(f"[ai-log] HTTP status: {response.status_code}", file=sys.stderr)
+    print(f"[ai-log] Response: {_safe_response(response, api_key)}", file=sys.stderr)
+    if not 200 <= response.status_code < 300:
         print("[ai-log] Submission failed: server did not return HTTP 2xx", file=sys.stderr)
         return 1
     return 0

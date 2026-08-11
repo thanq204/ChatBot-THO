@@ -1,4 +1,4 @@
-"""Discord Gateway listener for mention -> local RAG replies."""
+"""Optional Discord Gateway listener for mention -> local RAG replies."""
 
 from __future__ import annotations
 
@@ -16,10 +16,9 @@ from typing import Any
 
 from backend.config import Settings, get_settings
 from backend.models.operations import CommonMessage
-from backend.services.chat_orchestrator import ChatOrchestrator
 from backend.services.operations_pipeline import OperationsPipeline
 from backend.services.operations_store import OperationsStore
-from backend.services.telegram.alerts import TelegramAlertSender
+from backend.services.telegram_alerts import TelegramAlertSender
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +43,6 @@ class DiscordRagBot:
         self.settings = settings or get_settings()
         self.store = store
         self.pipeline = pipeline or OperationsPipeline(store=self.store, settings=self.settings)
-        self.chat = ChatOrchestrator(self.store, self.settings, self.pipeline)
         self.telegram_alerts = TelegramAlertSender(self.settings)
         self._thread: threading.Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -155,28 +153,26 @@ class DiscordRagBot:
             if message_id:
                 self._seen_message_ids.add(message_id)
 
+            # Every live Discord message goes through the same moderation
+            # pipeline as the Operations dashboard. Mentions additionally get
+            # a grounded RAG reply below.
             common_message = self._common_message(message)
-            mentioned = client.user in message.mentions or bool(re.search(fr"<@!?{client.user.id}>", message.content or ""))
             try:
-                if mentioned:
-                    question = re.sub(r"<@!?\d+>", "", message.content or "").strip()
-                    outcome = await asyncio.to_thread(self.chat.reply, common_message, [])
-                    result = outcome.moderation
-                else:
-                    result = await asyncio.to_thread(self.pipeline.analyze, common_message, [])
-                    outcome = None
-                if result and await asyncio.to_thread(self.telegram_alerts.send_alert, common_message, result):
+                result = await asyncio.to_thread(self.pipeline.analyze, common_message, [])
+                if await asyncio.to_thread(self.telegram_alerts.send_alert, common_message, result):
                     logger.info("Telegram alert sent for Discord message %s", message_id)
                     print(f"[Telegram] Alert sent for Discord message {message_id}", flush=True)
             except Exception:
                 logger.exception("Realtime moderation failed for Discord message %s", message_id)
                 print(f"[Discord] Moderation failed for message {message_id}; listener continues.", flush=True)
 
+            mentioned = client.user in message.mentions or bool(re.search(fr"<@!?{client.user.id}>", message.content or ""))
             if not mentioned:
                 return
             logger.info("Discord mention received in channel %s", message.channel.id)
             print(f"[Discord] Mention received in channel {message.channel.id}", flush=True)
-            answer = outcome.answer if outcome else self._answer(question)
+            question = re.sub(r"<@!?\d+>", "", message.content or "").strip()
+            answer = self._answer(question)
             try:
                 await message.reply(
                     answer[: self.settings.discord_reply_max_chars],

@@ -2,23 +2,13 @@ from __future__ import annotations
 
 import base64
 import binascii
-import uuid
-from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, Query, status
 
 from backend.models.operations import (
     AnalyzeMessageRequest,
     AnalyzeMessageResponse,
-    AnnouncementRequest,
-    AnnouncementResponse,
     CommonMessage,
-    CommunityHealth,
-    FAQ,
-    FAQSuggestion,
-    FAQSuggestionApproveRequest,
-    FAQUpsertRequest,
-    FAQWriteResponse,
     Incident,
     IncidentUpdateRequest,
     KnowledgeDocument,
@@ -35,7 +25,6 @@ from backend.models.operations import (
     RagResponse,
 )
 from backend.services.knowledge_importer import KnowledgeImporter, KnowledgeImportError
-from backend.services.admin_announcements import AdminAnnouncementSender
 from backend.services.operations_demo import seed_operations_demo
 from backend.services.operations_pipeline import OperationsPipeline
 from backend.services.operations_store import OperationsStore
@@ -183,72 +172,6 @@ async def delete_knowledge(document_id: str) -> dict[str, object]:
     if not get_operations_store().delete_knowledge(document_id):
         raise HTTPException(status_code=404, detail="Không tìm thấy tài liệu để xóa.")
     return {"deleted": True, "document_id": document_id}
-
-
-@router.get("/faqs", response_model=list[FAQ])
-async def faqs(active_only: bool = False) -> list[FAQ]:
-    return get_operations_store().list_faqs(active_only)
-
-
-@router.put("/faqs/{faq_id}", response_model=FAQWriteResponse)
-async def upsert_faq(faq_id: str, payload: FAQUpsertRequest) -> FAQWriteResponse:
-    faq, similar = get_operations_store().upsert_faq(faq_id, payload)
-    warning = "Câu hỏi này có độ tương tự cao với FAQ hiện có; hãy kiểm tra trước khi xuất bản." if similar else None
-    return FAQWriteResponse(faq=faq, duplicate_warning=warning, similar_faqs=similar)
-
-
-@router.delete("/faqs/{faq_id}")
-async def delete_faq(faq_id: str) -> dict[str, object]:
-    if not get_operations_store().delete_faq(faq_id):
-        raise HTTPException(status_code=404, detail="FAQ not found.")
-    return {"deleted": True, "faq_id": faq_id}
-
-
-@router.get("/faq-suggestions", response_model=list[FAQSuggestion])
-async def faq_suggestions(status_filter: str = Query(default="open", alias="status")) -> list[FAQSuggestion]:
-    return get_operations_store().list_faq_suggestions(status_filter)
-
-
-@router.post("/faq-suggestions/{suggestion_id}/approve", response_model=FAQWriteResponse)
-async def approve_faq_suggestion(suggestion_id: str, payload: FAQSuggestionApproveRequest) -> FAQWriteResponse:
-    suggestion = next((item for item in get_operations_store().list_faq_suggestions("") if item.suggestion_id == suggestion_id), None)
-    if not suggestion:
-        raise HTTPException(status_code=404, detail="FAQ suggestion not found.")
-    faq_id = payload.faq_id or f"FAQ-{suggestion_id.removeprefix('FAQS-')}"
-    faq, similar = get_operations_store().upsert_faq(faq_id, FAQUpsertRequest(question=suggestion.representative_question, answer=payload.answer, tags=payload.tags))
-    get_operations_store().set_faq_suggestion_status(suggestion_id, "approved")
-    warning = "FAQ được tạo nhưng có nội dung tương tự FAQ khác; hãy rà soát." if similar else None
-    return FAQWriteResponse(faq=faq, duplicate_warning=warning, similar_faqs=similar)
-
-
-@router.post("/faq-suggestions/{suggestion_id}/dismiss", response_model=FAQSuggestion)
-async def dismiss_faq_suggestion(suggestion_id: str) -> FAQSuggestion:
-    result = get_operations_store().set_faq_suggestion_status(suggestion_id, "dismissed")
-    if not result:
-        raise HTTPException(status_code=404, detail="FAQ suggestion not found.")
-    return result
-
-
-@router.get("/community-health", response_model=CommunityHealth)
-async def community_health(window_hours: int = Query(default=24, ge=1, le=24 * 90)) -> CommunityHealth:
-    return get_operations_store().community_health(window_hours)
-
-
-@router.post("/admin/announcements", response_model=AnnouncementResponse)
-async def send_admin_announcement(payload: AnnouncementRequest) -> AnnouncementResponse:
-    sender = AdminAnnouncementSender()
-    targets = list(dict.fromkeys(payload.targets))
-    deliveries = [sender.send(payload.message, target) for target in targets]
-    announcement_id = f"ANN-{uuid.uuid4().hex[:10].upper()}"
-    created_at = datetime.now(UTC)
-    get_operations_store().add_audit(
-        None,
-        None,
-        "admin_announcement",
-        payload.actor,
-        {"announcement_id": announcement_id, "targets": targets, "delivered": [item.model_dump() for item in deliveries]},
-    )
-    return AnnouncementResponse(announcement_id=announcement_id, deliveries=deliveries, created_at=created_at)
 
 
 @router.post("/rag/ask", response_model=RagResponse)
