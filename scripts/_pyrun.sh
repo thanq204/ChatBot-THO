@@ -47,7 +47,6 @@ elif command -v py >/dev/null 2>&1 && is_real_python "py -3"; then
   PY="py -3"
 else
   # PATH lookup failed — probe standard Windows install locations.
-  PY=""
   shopt -s nullglob 2>/dev/null || true
   for cand in \
     /c/Users/*/AppData/Local/Programs/Python/Python*/python.exe \
