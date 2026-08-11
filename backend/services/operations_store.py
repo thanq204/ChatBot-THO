@@ -17,6 +17,10 @@ from typing import Any
 from backend.config import Settings, get_settings
 from backend.models.operations import (
     CommonMessage,
+    CommunityHealth,
+    FAQ,
+    FAQSuggestion,
+    FAQUpsertRequest,
     Incident,
     KnowledgeDocument,
     KnowledgeDocumentRequest,
@@ -131,6 +135,19 @@ class OperationsStore:
                     target TEXT NOT NULL, normalized_count INTEGER NOT NULL, skipped_count INTEGER NOT NULL,
                     warnings_json TEXT NOT NULL, normalized_by TEXT NOT NULL, created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS operations_faqs (
+                    faq_id TEXT PRIMARY KEY, question TEXT NOT NULL, answer TEXT NOT NULL,
+                    tags_json TEXT NOT NULL DEFAULT '[]', active INTEGER NOT NULL DEFAULT 1, updated_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS operations_faq_questions (
+                    question_id TEXT PRIMARY KEY, message_id TEXT UNIQUE, question TEXT NOT NULL,
+                    normalized_question TEXT NOT NULL, platform TEXT NOT NULL, author_id TEXT NOT NULL, created_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS operations_faq_suggestions (
+                    suggestion_id TEXT PRIMARY KEY, representative_question TEXT NOT NULL, normalized_question TEXT NOT NULL,
+                    question_count INTEGER NOT NULL DEFAULT 1, samples_json TEXT NOT NULL DEFAULT '[]',
+                    status TEXT NOT NULL DEFAULT 'open', created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+                );
                 """
             )
             columns = {row[1] for row in db.execute("PRAGMA table_info(operations_knowledge)").fetchall()}
@@ -159,6 +176,13 @@ class OperationsStore:
                     "INSERT INTO operations_knowledge (document_id, title, body, tags_json, dataset, active, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
                     [(did, title, body, _json(tags), "community_rules", 1, _now()) for did, title, body, tags in docs],
                 )
+            if not db.execute("SELECT 1 FROM operations_faqs LIMIT 1").fetchone():
+                faqs = [
+                    ("FAQ-STUDY-RULES", "Nội quy nhóm học tập là gì?", "Tôn trọng mọi người, trao đổi đúng chủ đề, không spam/công kích, không chia sẻ đáp án thi hoặc làm hộ bài kiểm tra, và báo Admin khi cần hỗ trợ.", ["rules", "study-group"]),
+                    ("FAQ-ACADEMIC-INTEGRITY", "Có được xin đáp án hoặc nhờ làm hộ bài kiểm tra không?", "Không. Nhóm hỗ trợ giải thích kiến thức và phương pháp làm bài, không cung cấp đáp án thi hoặc làm hộ bài kiểm tra.", ["academic-integrity", "assessment"]),
+                    ("FAQ-ASK-HELP", "Làm sao để hỏi bài hiệu quả?", "Hãy nêu môn học, phần đang vướng, điều bạn đã thử và câu hỏi cụ thể. Đừng đăng thông tin cá nhân hoặc toàn bộ đề thi đang diễn ra.", ["study", "help"]),
+                ]
+                db.executemany("INSERT INTO operations_faqs VALUES (?, ?, ?, ?, ?, ?)", [(faq_id, question, answer, _json(tags), 1, _now()) for faq_id, question, answer, tags in faqs])
 
     def purge_demo_data(self) -> int:
         """Remove seeded/demo and synthetic test records, never live Discord IDs."""
@@ -367,6 +391,91 @@ class OperationsStore:
             cursor = db.execute("DELETE FROM operations_knowledge WHERE document_id=?", (document_id,))
             db.execute("DELETE FROM operations_knowledge_embeddings WHERE document_id=?", (document_id,))
         return cursor.rowcount > 0
+
+    @staticmethod
+    def _faq(row: sqlite3.Row) -> FAQ:
+        return FAQ(faq_id=row["faq_id"], question=row["question"], answer=row["answer"], tags=json.loads(row["tags_json"]), active=bool(row["active"]), updated_at=datetime.fromisoformat(row["updated_at"]))
+
+    @staticmethod
+    def _similarity(left: str, right: str) -> float:
+        left_terms, right_terms = set(_fold_search_text(left).split()), set(_fold_search_text(right).split())
+        return len(left_terms & right_terms) / len(left_terms | right_terms) if left_terms and right_terms else 0.0
+
+    def list_faqs(self, active_only: bool = False) -> list[FAQ]:
+        with self._connect() as db:
+            rows = db.execute("SELECT * FROM operations_faqs WHERE (?=0 OR active=1) ORDER BY updated_at DESC", (int(active_only),)).fetchall()
+        return [self._faq(row) for row in rows]
+
+    def find_faq(self, question: str, threshold: float = 0.72) -> FAQ | None:
+        candidates = [(self._similarity(question, faq.question), faq) for faq in self.list_faqs(active_only=True)]
+        best = max(candidates, default=(0.0, None), key=lambda item: item[0])
+        return best[1] if best[0] >= threshold else None
+
+    def upsert_faq(self, faq_id: str, request: FAQUpsertRequest, duplicate_threshold: float = 0.82) -> tuple[FAQ, list[FAQ]]:
+        similar = [faq for faq in self.list_faqs(active_only=True) if faq.faq_id != faq_id and self._similarity(request.question, faq.question) >= duplicate_threshold]
+        now = _now()
+        with self._connect() as db:
+            db.execute("""INSERT INTO operations_faqs VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(faq_id) DO UPDATE SET question=excluded.question, answer=excluded.answer, tags_json=excluded.tags_json, active=excluded.active, updated_at=excluded.updated_at""", (faq_id, request.question, request.answer, _json(request.tags), int(request.active), now))
+        return next(faq for faq in self.list_faqs() if faq.faq_id == faq_id), similar
+
+    def delete_faq(self, faq_id: str) -> bool:
+        with self._connect() as db:
+            cursor = db.execute("DELETE FROM operations_faqs WHERE faq_id=?", (faq_id,))
+        return cursor.rowcount > 0
+
+    def record_unanswered_question(self, message: CommonMessage, minimum_questions: int = 3) -> FAQSuggestion | None:
+        normalized = _fold_search_text(message.text)
+        if not normalized:
+            return None
+        now = _now()
+        with self._connect() as db:
+            try:
+                db.execute("INSERT INTO operations_faq_questions VALUES (?, ?, ?, ?, ?, ?, ?)", (f"FQQ-{uuid.uuid4().hex[:12].upper()}", message.message_id, message.text[:2000], normalized, message.platform, message.author_id, now))
+            except sqlite3.IntegrityError:
+                return None
+            rows = db.execute("SELECT * FROM operations_faq_suggestions WHERE status='open'").fetchall()
+            match = next((row for row in rows if self._similarity(normalized, row["normalized_question"]) >= 0.72), None)
+            if match:
+                samples = list(dict.fromkeys([*json.loads(match["samples_json"]), message.text]))[-5:]
+                count = int(match["question_count"]) + 1
+                db.execute("UPDATE operations_faq_suggestions SET question_count=?, samples_json=?, updated_at=? WHERE suggestion_id=?", (count, _json(samples), now, match["suggestion_id"]))
+                row = db.execute("SELECT * FROM operations_faq_suggestions WHERE suggestion_id=?", (match["suggestion_id"],)).fetchone()
+            else:
+                suggestion_id = f"FAQS-{uuid.uuid4().hex[:10].upper()}"
+                db.execute("INSERT INTO operations_faq_suggestions VALUES (?, ?, ?, ?, ?, 'open', ?, ?)", (suggestion_id, message.text[:500], normalized, 1, _json([message.text]), now, now))
+                row = db.execute("SELECT * FROM operations_faq_suggestions WHERE suggestion_id=?", (suggestion_id,)).fetchone()
+        suggestion = self._suggestion(row)
+        return suggestion if suggestion.question_count >= minimum_questions else None
+
+    @staticmethod
+    def _suggestion(row: sqlite3.Row) -> FAQSuggestion:
+        return FAQSuggestion(suggestion_id=row["suggestion_id"], representative_question=row["representative_question"], question_count=row["question_count"], status=row["status"], sample_questions=json.loads(row["samples_json"]), created_at=datetime.fromisoformat(row["created_at"]), updated_at=datetime.fromisoformat(row["updated_at"]))
+
+    def list_faq_suggestions(self, status: str = "open") -> list[FAQSuggestion]:
+        with self._connect() as db:
+            rows = db.execute("SELECT * FROM operations_faq_suggestions WHERE (?='' OR status=?) ORDER BY question_count DESC, updated_at DESC", (status, status)).fetchall()
+        return [self._suggestion(row) for row in rows]
+
+    def set_faq_suggestion_status(self, suggestion_id: str, status: str) -> FAQSuggestion | None:
+        with self._connect() as db:
+            cursor = db.execute("UPDATE operations_faq_suggestions SET status=?, updated_at=? WHERE suggestion_id=?", (status, _now(), suggestion_id))
+            if not cursor.rowcount:
+                return None
+            row = db.execute("SELECT * FROM operations_faq_suggestions WHERE suggestion_id=?", (suggestion_id,)).fetchone()
+        return self._suggestion(row)
+
+    def community_health(self, window_hours: int = 24) -> CommunityHealth:
+        since = (datetime.now(UTC) - timedelta(hours=window_hours)).isoformat()
+        with self._connect() as db:
+            rows = db.execute("SELECT text, category, decision, author_id FROM operations_messages WHERE timestamp>=?", (since,)).fetchall()
+            first_seen = db.execute("SELECT author_id, MIN(timestamp) first_seen FROM operations_messages GROUP BY author_id").fetchall()
+            open_suggestions = int(db.execute("SELECT COUNT(*) FROM operations_faq_suggestions WHERE status='open'").fetchone()[0])
+        categories = [str(row["category"] or "") for row in rows]
+        terms: dict[str, int] = {}
+        for row in rows:
+            for term in set(term for term in _fold_search_text(row["text"]).split() if len(term) >= 4):
+                terms[term] = terms.get(term, 0) + 1
+        return CommunityHealth(window_hours=window_hours, messages_total=len(rows), spam_count=categories.count("spam"), toxic_count=sum(item in {"harassment", "hate", "violence"} for item in categories), risky_count=sum(str(row["decision"] or "allow") != "allow" for row in rows), unique_members=len({row["author_id"] for row in rows}), new_members=sum(str(row["first_seen"]) >= since for row in first_seen), top_topics=sorted(terms.items(), key=lambda item: (-item[1], item[0]))[:10], open_faq_suggestions=open_suggestions, generated_at=datetime.now(UTC))
 
     def record_import(self, response: KnowledgeImportResponse) -> KnowledgeImportResponse:
         with self._connect() as db:

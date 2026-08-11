@@ -183,6 +183,84 @@ class RagResponse(BaseModel):
     model_used: str
 
 
+class FAQ(BaseModel):
+    faq_id: str
+    question: str
+    answer: str
+    tags: list[str] = Field(default_factory=list)
+    active: bool = True
+    updated_at: datetime
+
+
+class FAQUpsertRequest(BaseModel):
+    question: str = Field(..., min_length=3, max_length=500)
+    answer: str = Field(..., min_length=1, max_length=5000)
+    tags: list[str] = Field(default_factory=list, max_length=20)
+    active: bool = True
+
+
+class FAQWriteResponse(BaseModel):
+    faq: FAQ
+    duplicate_warning: str | None = None
+    similar_faqs: list[FAQ] = Field(default_factory=list)
+
+
+class FAQSuggestion(BaseModel):
+    suggestion_id: str
+    representative_question: str
+    question_count: int
+    status: Literal["open", "approved", "dismissed"] = "open"
+    sample_questions: list[str] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+
+class FAQSuggestionApproveRequest(BaseModel):
+    faq_id: str | None = Field(default=None, max_length=200)
+    answer: str = Field(..., min_length=1, max_length=5000)
+    tags: list[str] = Field(default_factory=list, max_length=20)
+
+
+class ChatOutcome(BaseModel):
+    answer: str
+    stage: Literal["rule", "faq", "moderation", "rag"]
+    model_used: str
+    moderation: MessageDecision | None = None
+    faq_id: str | None = None
+    sources: list[KnowledgeDocument] = Field(default_factory=list)
+
+
+class CommunityHealth(BaseModel):
+    window_hours: int
+    messages_total: int
+    spam_count: int
+    toxic_count: int
+    risky_count: int
+    unique_members: int
+    new_members: int
+    top_topics: list[tuple[str, int]] = Field(default_factory=list)
+    open_faq_suggestions: int
+    generated_at: datetime
+
+
+class AnnouncementRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=1900)
+    targets: list[Literal["discord", "telegram"]] = Field(..., min_length=1, max_length=2)
+    actor: str = Field(default="Admin", min_length=1, max_length=100)
+
+
+class AnnouncementDelivery(BaseModel):
+    platform: Literal["discord", "telegram"]
+    delivered: bool
+    detail: str
+
+
+class AnnouncementResponse(BaseModel):
+    announcement_id: str
+    deliveries: list[AnnouncementDelivery]
+    created_at: datetime
+
+
 class PlatformStatus(BaseModel):
     platform: PlatformName
     configured: bool
