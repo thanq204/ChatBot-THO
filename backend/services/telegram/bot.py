@@ -15,6 +15,7 @@ from backend.models.operations import CommonMessage
 from backend.services.chat_orchestrator import ChatOrchestrator
 from backend.services.operations_pipeline import OperationsPipeline
 from backend.services.operations_store import OperationsStore
+from backend.services.platform_moderation import PlatformModerationService
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,7 @@ class TelegramRagBot:
         self.store = store
         self.pipeline = pipeline or OperationsPipeline(store=store, settings=self.settings)
         self.chat = ChatOrchestrator(store, self.settings, self.pipeline)
+        self.platform_moderation = PlatformModerationService(self.settings)
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
         self._offset: int | None = None
@@ -60,11 +62,35 @@ class TelegramRagBot:
     def _api_base(self) -> str:
         return f"https://api.telegram.org/bot{self.settings.telegram_bot_token}"
 
+    def _register_commands(self) -> None:
+        """Expose Level 1 commands in Telegram's native '/' command menu."""
+        commands = [
+            {"command": "start", "description": "Giới thiệu bot"},
+            {"command": "help", "description": "Danh sách lệnh"},
+            {"command": "rule", "description": "Nội quy nhóm"},
+            {"command": "event", "description": "Sự kiện và lịch học"},
+            {"command": "daily", "description": "Việc cần làm hôm nay"},
+            {"command": "weekly", "description": "Kế hoạch tuần"},
+            {"command": "faq", "description": "Câu hỏi thường gặp"},
+            {"command": "report", "description": "Báo cáo vi phạm"},
+            {"command": "admin", "description": "Liên hệ Admin/Mod"},
+            {"command": "resources", "description": "Tài liệu học tập"},
+            {"command": "settings", "description": "Cài đặt thông báo"},
+        ]
+        try:
+            response = requests.post(f"{self._api_base}/setMyCommands", json={"commands": commands}, timeout=15)
+            response.raise_for_status()
+            if not response.json().get("ok"):
+                raise RuntimeError("Telegram returned ok=false")
+        except Exception:
+            logger.warning("Telegram command menu registration failed; text commands remain available.")
+
     def _run(self) -> None:
         try:
             response = requests.get(f"{self._api_base}/getMe", timeout=15)
             response.raise_for_status()
             self._username = str(response.json().get("result", {}).get("username", "")).lower()
+            self._register_commands()
             logger.info("Telegram RAG listener ready as @%s", self._username or "bot")
         except requests.RequestException:
             logger.exception("Telegram listener stopped: getMe failed.")
@@ -96,7 +122,10 @@ class TelegramRagBot:
         message = update.get("message") or {}
         text = str(message.get("text") or "").strip()
         sender = message.get("from") or {}
-        if not text or sender.get("is_bot"):
+        if sender.get("is_bot"):
+            return
+        if not text:
+            self._send_message(str((message.get("chat") or {}).get("id")), "Bạn hãy nhập câu hỏi hoặc dùng /help.")
             return
         common = self._common_message(message)
         question = self._question_to_answer(message, text)
@@ -104,14 +133,23 @@ class TelegramRagBot:
             common = common.model_copy(update={"text": question})
             outcome = self.chat.reply(common, [])
             self._send_message(str(message["chat"]["id"]), outcome.answer)
+            result = outcome.moderation
         else:
-            self.pipeline.analyze(common, [])
+            result = self.pipeline.analyze(common, [])
+        if result:
+            warning = self.platform_moderation.send_automatic_warning(common, result, self.store)
+            if warning:
+                logger.info("Automatic Telegram warning DM for %s completed=%s", common.message_id, warning.completed)
 
     def _question_to_answer(self, message: dict[str, Any], text: str) -> str | None:
         chat_type = str((message.get("chat") or {}).get("type", ""))
-        command = re.match(r"^/(?:ask|start)(?:@\w+)?\s*(.*)$", text, re.I | re.S)
+        command = re.match(r"^/(\w+)(?:@\w+)?(?:\s+(.*))?$", text, re.I | re.S)
         if command:
-            return command.group(1).strip() or "hello"
+            name, argument = command.group(1).lower(), (command.group(2) or "").strip()
+            if name == "ask":
+                return argument or "hello"
+            if name in {"start", "help", "rule", "rules", "event", "daily", "weekly", "faq", "report", "admin", "resources", "settings"}:
+                return f"/{name}" + (f" {argument}" if argument else "")
         if chat_type == "private":
             return text
         if self._username:

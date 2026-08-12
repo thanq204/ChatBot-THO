@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import json
 import uuid
 from datetime import UTC, datetime
 
@@ -10,15 +11,20 @@ from fastapi import APIRouter, HTTPException, Query, status
 from backend.models.operations import (
     AnalyzeMessageRequest,
     AnalyzeMessageResponse,
+    AdminPlatformActionRequest,
+    AdminPlatformActionResponse,
     AnnouncementRequest,
     AnnouncementResponse,
     CommonMessage,
     CommunityHealth,
+    CommandContent,
+    CommandContentRequest,
     FAQ,
     FAQSuggestion,
     FAQSuggestionApproveRequest,
     FAQUpsertRequest,
     FAQWriteResponse,
+    MemberReport,
     Incident,
     IncidentUpdateRequest,
     KnowledgeDocument,
@@ -40,6 +46,7 @@ from backend.services.operations_demo import seed_operations_demo
 from backend.services.operations_pipeline import OperationsPipeline
 from backend.services.operations_store import OperationsStore
 from backend.services.platform_connectors import ConnectorError, PlatformConnectors
+from backend.services.platform_moderation import PlatformModerationError, PlatformModerationService
 
 router = APIRouter(tags=["community-operations"])
 _store: OperationsStore | None = None
@@ -229,9 +236,68 @@ async def dismiss_faq_suggestion(suggestion_id: str) -> FAQSuggestion:
     return result
 
 
+@router.post("/incidents/{incident_id}/actions", response_model=AdminPlatformActionResponse)
+async def execute_incident_action(incident_id: str, payload: AdminPlatformActionRequest) -> AdminPlatformActionResponse:
+    """Run one Admin-confirmed platform action; never called automatically."""
+    if not payload.confirmed:
+        raise HTTPException(status_code=400, detail="Set confirmed=true after reviewing the case.")
+    store = get_operations_store()
+    incident = store.get_incident(incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail="Incident not found.")
+    message = store.get_incident_message(incident_id, payload.message_id)
+    if not message:
+        raise HTTPException(status_code=404, detail="Message not found in this incident.")
+    raw = json.loads(message.get("raw_json") or "{}")
+    target_message_id = message["message_id"]
+    if incident.platform == "telegram":
+        target_message_id = str((raw.get("message") or {}).get("message_id") or target_message_id.rsplit("-", 1)[-1])
+    try:
+        result = PlatformModerationService().execute(
+            platform=incident.platform,
+            community_id=incident.community_id,
+            channel_id=incident.channel_id,
+            user_id=message["author_id"],
+            message_id=target_message_id if payload.action == "delete_message" else None,
+            action=payload.action,
+            text=payload.message,
+            duration_minutes=payload.duration_minutes,
+        )
+    except PlatformModerationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    store.add_audit(
+        incident_id,
+        message["message_id"],
+        "admin_platform_action",
+        payload.actor,
+        {"action": payload.action, "completed": result.completed, "detail": result.detail, "target_user_id": message["author_id"], "duration_minutes": payload.duration_minutes},
+    )
+    return result
+
+
 @router.get("/community-health", response_model=CommunityHealth)
 async def community_health(window_hours: int = Query(default=24, ge=1, le=24 * 90)) -> CommunityHealth:
     return get_operations_store().community_health(window_hours)
+
+
+@router.get("/admin/command-content/{command}", response_model=CommandContent)
+async def command_content(command: str) -> CommandContent:
+    result = get_operations_store().get_command_content(command.strip().lower().lstrip("/"))
+    if not result:
+        raise HTTPException(status_code=404, detail="Command content not found.")
+    return result
+
+
+@router.put("/admin/command-content/{command}", response_model=CommandContent)
+async def upsert_command_content(command: str, payload: CommandContentRequest) -> CommandContent:
+    if command.strip().lower().lstrip("/") not in {"event", "daily", "weekly", "resources", "admin"}:
+        raise HTTPException(status_code=400, detail="Only event, daily, weekly, resources and admin content can be managed.")
+    return get_operations_store().upsert_command_content(command, payload)
+
+
+@router.get("/admin/member-reports", response_model=list[MemberReport])
+async def member_reports() -> list[MemberReport]:
+    return get_operations_store().list_member_reports()
 
 
 @router.post("/admin/announcements", response_model=AnnouncementResponse)
