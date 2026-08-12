@@ -380,7 +380,7 @@ a {
   display: grid;
   grid-template-columns: repeat(12, 1fr);
   gap: 20px;
-  align-items: start;
+  align-items: stretch;
 }
 
 .span-3 {
