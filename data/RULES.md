@@ -44,6 +44,7 @@ File upload hoặc sự kiện từ nền tảng
 | `POL-*` | Một policy moderation |
 | `KN-*` | Một tài liệu knowledge đã chuẩn hóa |
 | `CHUNK-*` | Một chunk dùng cho truy xuất |
+| `MM-*` | Một nội dung đã được Admin/Mod đánh dấu |
 
 ## Quy tắc raw và normalized
 
@@ -125,6 +126,17 @@ Mỗi vector artifact phải có model, dimensions, text_hash, version và chunk
 Tách index FAQ, knowledge và policy.
 Không trộn model hoặc số chiều khác nhau trong một index.
 Nếu embedding thất bại, ghi lỗi vào `data/quarantine/failed_embeddings`.
+```
+
+### Role moderation memory
+
+```text
+Chỉ tạo moderation mark sau khi Admin/Mod đã xác nhận quyết định.
+Lưu record chuẩn tại `data/20_normalized/moderation_memory` và chunk tại `data/30_chunks/moderation_memory`.
+Embedding moderation memory phải nằm trong collection riêng, không trộn với FAQ, knowledge hoặc policy.
+Chỉ dùng match semantic để chống gửi review trùng; không tự động áp hình phạt mới từ match cũ.
+Match phải cùng category mặc định và phải giữ `marked_by`, `marked_at`, `reason`, `message_id` để Admin/Mod mở lại.
+Khi match đạt ngưỡng, trả `send_to_admin=false`, `can_expand=true` và banner đã đánh dấu.
 ```
 
 ### Role tích hợp tính năng hoặc consumer

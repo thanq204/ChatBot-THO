@@ -4,6 +4,7 @@
 
 - `pitch_deck.pptx` — Slide thuyết trình Demo Day
 - `video_demo.mp4` — Video demo sản phẩm (tối đa 5 phút)
+- `gate2_demo_script.md` — Kịch bản quay Gate 2 tối đa 3 phút; chưa thay thế file video thật
 
 ## Pitch Deck Structure (10 slides)
 

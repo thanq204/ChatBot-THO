@@ -30,8 +30,9 @@ ENV PATH=/root/.local/bin:$PATH
 # Security: run as non-root user
 RUN useradd -m appuser
 
-# Backend source, then the compiled SPA that FastAPI serves from frontend/dist.
+# Backend and model-only pipeline, then the compiled SPA served by FastAPI.
 COPY backend/ ./backend/
+COPY src/ai_models/ ./src/ai_models/
 COPY --from=frontend /frontend/dist ./frontend/dist
 
 # Create data directory with correct ownership
