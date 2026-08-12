@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import json
 import uuid
 from datetime import UTC, datetime
 
@@ -10,6 +11,8 @@ from fastapi import APIRouter, HTTPException, Query, status
 from backend.models.operations import (
     AnalyzeMessageRequest,
     AnalyzeMessageResponse,
+    AdminPlatformActionRequest,
+    AdminPlatformActionResponse,
     AnnouncementRequest,
     AnnouncementResponse,
     CommonMessage,
@@ -43,6 +46,7 @@ from backend.services.operations_demo import seed_operations_demo
 from backend.services.operations_pipeline import OperationsPipeline
 from backend.services.operations_store import OperationsStore
 from backend.services.platform_connectors import ConnectorError, PlatformConnectors
+from backend.services.platform_moderation import PlatformModerationError, PlatformModerationService
 
 router = APIRouter(tags=["community-operations"])
 _store: OperationsStore | None = None
@@ -229,6 +233,45 @@ async def dismiss_faq_suggestion(suggestion_id: str) -> FAQSuggestion:
     result = get_operations_store().set_faq_suggestion_status(suggestion_id, "dismissed")
     if not result:
         raise HTTPException(status_code=404, detail="FAQ suggestion not found.")
+    return result
+
+
+@router.post("/incidents/{incident_id}/actions", response_model=AdminPlatformActionResponse)
+async def execute_incident_action(incident_id: str, payload: AdminPlatformActionRequest) -> AdminPlatformActionResponse:
+    """Run one Admin-confirmed platform action; never called automatically."""
+    if not payload.confirmed:
+        raise HTTPException(status_code=400, detail="Set confirmed=true after reviewing the case.")
+    store = get_operations_store()
+    incident = store.get_incident(incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail="Incident not found.")
+    message = store.get_incident_message(incident_id, payload.message_id)
+    if not message:
+        raise HTTPException(status_code=404, detail="Message not found in this incident.")
+    raw = json.loads(message.get("raw_json") or "{}")
+    target_message_id = message["message_id"]
+    if incident.platform == "telegram":
+        target_message_id = str((raw.get("message") or {}).get("message_id") or target_message_id.rsplit("-", 1)[-1])
+    try:
+        result = PlatformModerationService().execute(
+            platform=incident.platform,
+            community_id=incident.community_id,
+            channel_id=incident.channel_id,
+            user_id=message["author_id"],
+            message_id=target_message_id if payload.action == "delete_message" else None,
+            action=payload.action,
+            text=payload.message,
+            duration_minutes=payload.duration_minutes,
+        )
+    except PlatformModerationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    store.add_audit(
+        incident_id,
+        message["message_id"],
+        "admin_platform_action",
+        payload.actor,
+        {"action": payload.action, "completed": result.completed, "detail": result.detail, "target_user_id": message["author_id"], "duration_minutes": payload.duration_minutes},
+    )
     return result
 
 

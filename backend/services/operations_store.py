@@ -364,6 +364,15 @@ class OperationsStore:
             rows = db.execute("SELECT * FROM operations_messages WHERE incident_id=? ORDER BY timestamp", (incident_id,)).fetchall()
         return [dict(row) for row in rows]
 
+    def get_incident_message(self, incident_id: str, message_id: str | None = None) -> dict[str, Any] | None:
+        """Get the explicitly selected message, or the latest case message."""
+        with self._connect() as db:
+            if message_id:
+                row = db.execute("SELECT * FROM operations_messages WHERE incident_id=? AND message_id=?", (incident_id, message_id)).fetchone()
+            else:
+                row = db.execute("SELECT * FROM operations_messages WHERE incident_id=? ORDER BY timestamp DESC LIMIT 1", (incident_id,)).fetchone()
+        return dict(row) if row else None
+
     def update_incident(self, incident_id: str, status: str | None, assigned_to: str | None, note: str) -> Incident | None:
         with self._connect() as db:
             db.execute("UPDATE operations_incidents SET status=COALESCE(?,status), assigned_to=COALESCE(?,assigned_to), updated_at=? WHERE incident_id=?", (status, assigned_to, _now(), incident_id))
