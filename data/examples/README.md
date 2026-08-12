@@ -29,6 +29,15 @@ Luồng FAQ riêng:
   -> 10_faq_chunks.jsonl
 ```
 
+Luồng moderation memory riêng:
+
+```text
+11_moderation_mark.jsonl
+  -> 12_moderation_memory_chunk.jsonl
+  -> 13_moderation_memory_embedding.jsonl
+  -> 14_moderation_match_result.json
+```
+
 ## Quy tắc cho Chat AI
 
 ```text
@@ -39,4 +48,3 @@ File normalized phải dùng đúng schema trong các file mẫu tương ứng.
 Nếu thêm field mới, cập nhật README mini và file mẫu trước khi code.
 Luôn giữ source_import_id/source_id để truy ngược về dữ liệu gốc.
 ```
-

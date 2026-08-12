@@ -2,15 +2,30 @@
 
 from __future__ import annotations
 
+import logging
 import re
+from datetime import datetime, timedelta, timezone
 
 from backend.config import Settings, get_settings
 from backend.models.operations import ChatOutcome, CommonMessage
 from backend.services.operations_pipeline import OperationsPipeline
 from backend.services.operations_store import OperationsStore
+from src.ai_models import CommunityAIPipeline, RetrievalCandidate
+
+logger = logging.getLogger(__name__)
+VIETNAM_TIMEZONE = timezone(timedelta(hours=7))
 
 
 class ChatOrchestrator:
+    _GENERAL_LLM_PATTERNS = (
+        r"\b(bạn|ban)\s+(tên|ten)\s+(là|la)\s+(gì|gi)\b",
+        r"\b(tên|ten)\s+(bạn|ban)\b",
+        r"\b(bạn|ban)\s+(là|la)\s+ai\b",
+        r"\b(hôm nay|hom nay)\s+(là|la)?\s*(ngày|ngay)\s+(bao nhiêu|bao nhieu|mấy|may)\b",
+        r"\b(hôm nay|hom nay)\s+(là|la)\s+(thứ|thu)\s+(mấy|may)\b",
+        r"\b(bây giờ|bay gio|hiện tại|hien tai)\s+(là|la)?\s*(mấy giờ|may gio)\b",
+        r"\b(bạn|ban)\s+(có thể|co the|làm được|lam duoc)\s+(gì|gi)\b",
+    )
     STUDY_GROUP_RULES = """Nội quy nhóm học tập:
 1. Trao đổi đúng chủ đề học tập và nêu rõ môn/chương khi cần.
 2. Tôn trọng người khác; không công kích, chế giễu hoặc spam.
@@ -36,6 +51,7 @@ class ChatOrchestrator:
         self.settings = settings or get_settings()
         self.store = store
         self.pipeline = pipeline or OperationsPipeline(store=store, settings=self.settings)
+        self.ai_pipeline = CommunityAIPipeline()
 
     def _rule_answer(self, message: CommonMessage) -> str | None:
         cleaned = message.text.strip().lower()
@@ -90,7 +106,12 @@ class ChatOrchestrator:
         if faq:
             return ChatOutcome(answer=faq.answer, stage="faq", model_used="admin-faq", moderation=moderation, faq_id=faq.faq_id)
 
-        # Level 4: Vector Search -> Reranker -> Relevance Gate -> LLM.
+        if self._is_general_llm_question(message.text):
+            answer, model = self._general_llm_answer(message.text)
+            label = "LLM" if model != "system-fallback" else "Hệ thống"
+            return ChatOutcome(answer=f"[{label}]\n{answer}", stage="llm", model_used=model, moderation=moderation)
+
+        # Level 4: Vector Search -> Reranker -> Relevance Gate -> cited source.
         candidates = self.store.search_knowledge_ranked(
             message.text,
             limit=self.settings.rag_candidate_limit,
@@ -99,13 +120,89 @@ class ChatOrchestrator:
             self.store.record_unanswered_question(message)
             return ChatOutcome(answer="Mình chưa tìm thấy tài liệu phù hợp. Câu hỏi của bạn đã được ghi nhận để Admin cân nhắc bổ sung FAQ hoặc tài liệu.", stage="rag", model_used="vector-search", moderation=moderation, relevance_passed=False)
 
-        _vector_score, source, rerank_score = self._rerank_candidates(message.text, candidates)[0]
-        if rerank_score < self.settings.rag_relevance_threshold:
+        source_by_id = {str(document.document_id): document for _score, document in candidates}
+        model_candidates = [
+            RetrievalCandidate(
+                source_id=str(document.document_id),
+                title=str(document.title),
+                text=str(document.body),
+                vector_score=vector_score,
+                source_type="knowledge",
+                metadata={"source_url": getattr(document, "source_url", None)},
+            )
+            for vector_score, document in candidates
+        ]
+        rag_decision = self.ai_pipeline.decide_question(
+            message.text,
+            (),
+            (),
+            model_candidates,
+            # Knowledge records are already canonical answers. Returning the
+            # selected source verbatim avoids unsupported LLM elaboration.
+            llm_enabled=False,
+        )
+        if not rag_decision.relevance or not rag_decision.relevance.passed:
             self.store.record_unanswered_question(message)
-            return ChatOutcome(answer="Mình chưa tìm thấy nguồn tài liệu đủ liên quan để trả lời chính xác. Câu hỏi của bạn đã được ghi nhận để Admin cân nhắc bổ sung FAQ hoặc tài liệu.", stage="rag", model_used="relevance-gate", moderation=moderation, sources=[source], retrieval_score=rerank_score, relevance_passed=False)
+            sources = []
+            if rag_decision.ranked_candidates:
+                best_id = rag_decision.ranked_candidates[0].candidate.source_id
+                if best_id in source_by_id:
+                    sources.append(source_by_id[best_id])
+            return ChatOutcome(answer="[Không đủ nguồn]\nMình chưa tìm thấy nguồn tài liệu đủ liên quan để trả lời chính xác. Câu hỏi của bạn đã được ghi nhận để Admin cân nhắc bổ sung FAQ hoặc tài liệu.", stage="rag", model_used="relevance-gate", moderation=moderation, sources=sources, retrieval_score=rag_decision.relevance.score, relevance_passed=False)
 
-        answer, model = self._grounded_answer(message.text, source.title, source.body)
-        return ChatOutcome(answer=answer, stage="rag", model_used=model, moderation=moderation, sources=[source], retrieval_score=rerank_score, relevance_passed=True)
+        best = rag_decision.ranked_candidates[0]
+        source = source_by_id[best.candidate.source_id]
+        answer, model = source.body.strip(), "rag-retrieval"
+        rendered = self.ai_pipeline.compose_answer(answer, rag_decision, model_used=model)
+        return ChatOutcome(answer=rendered.display_text, stage="rag", model_used=model, moderation=moderation, sources=[source], retrieval_score=rag_decision.relevance.score, relevance_passed=True)
+
+    @classmethod
+    def _is_general_llm_question(cls, question: str) -> bool:
+        normalized = question.strip().casefold()
+        return any(re.search(pattern, normalized) for pattern in cls._GENERAL_LLM_PATTERNS)
+
+    def _general_llm_answer(self, question: str) -> tuple[str, str]:
+        now = datetime.now(VIETNAM_TIMEZONE)
+        if self.settings.discord_rag_llm_enabled and self.settings.openai_api_key:
+            try:
+                from langchain_openai import ChatOpenAI
+
+                llm = ChatOpenAI(
+                    model=self.settings.discord_rag_model,
+                    api_key=self.settings.openai_api_key,
+                    temperature=0,
+                    max_tokens=160,
+                )
+                response = llm.invoke(
+                    [
+                        (
+                            "system",
+                            "Bạn là CHAT-10, trợ lý cộng đồng học tập. "
+                            f"Thời gian hệ thống tại Việt Nam là {now:%H:%M, ngày %d/%m/%Y}. "
+                            "Chỉ trả lời ngắn gọn câu hỏi hội thoại về danh tính, khả năng của bot hoặc ngày giờ. "
+                            "Không được bịa thông tin cá nhân, dữ liệu dự án hoặc sự kiện hiện tại khác.",
+                        ),
+                        ("human", question),
+                    ]
+                )
+                content = response.content if isinstance(response.content, str) else str(response.content)
+                if content.strip():
+                    return content.strip(), self.settings.discord_rag_model
+            except Exception:
+                logger.exception("General conversation LLM failed; using deterministic system answer.")
+
+        return self._general_system_answer(question, now), "system-fallback"
+
+    @staticmethod
+    def _general_system_answer(question: str, now: datetime) -> str:
+        normalized = question.casefold()
+        if "tên" in normalized or "ten" in normalized or "là ai" in normalized or "la ai" in normalized:
+            return "Mình tên là CHAT-10, trợ lý cộng đồng học tập."
+        if "giờ" in normalized or "gio" in normalized:
+            return f"Hiện tại là {now:%H:%M} ngày {now:%d/%m/%Y} theo giờ Việt Nam."
+        if "ngày" in normalized or "ngay" in normalized or "hôm nay" in normalized or "hom nay" in normalized:
+            return f"Hôm nay là ngày {now:%d/%m/%Y} theo giờ Việt Nam."
+        return "Mình có thể hỗ trợ nội quy, FAQ và tra cứu tài liệu học tập khi bạn tag CHAT-10."
 
     @staticmethod
     def _rerank_candidates(question: str, candidates: list[tuple[float, object]]) -> list[tuple[float, object, float]]:
@@ -123,8 +220,8 @@ class ChatOrchestrator:
             reranked.append((vector_score, document, score))
         return sorted(reranked, key=lambda item: (item[2], item[0]), reverse=True)
 
-    def _grounded_answer(self, question: str, title: str, body: str) -> tuple[str, str]:
-        if self.settings.discord_rag_llm_enabled and self.settings.openai_api_key:
+    def _grounded_answer(self, question: str, title: str, body: str, *, use_llm: bool = True) -> tuple[str, str]:
+        if use_llm and self.settings.discord_rag_llm_enabled and self.settings.openai_api_key:
             try:
                 from langchain_openai import ChatOpenAI
 

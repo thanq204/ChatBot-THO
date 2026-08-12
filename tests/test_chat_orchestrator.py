@@ -19,6 +19,7 @@ def test_moderation_precedes_faq(tmp_path) -> None:
     store = OperationsStore(Settings(database_url=f"sqlite:///{tmp_path / 'app.db'}"))
     store.upsert_faq("FAQ-1", __import__("backend.models.operations", fromlist=["FAQUpsertRequest"]).FAQUpsertRequest(question="How do I report spam?", answer="Use the report command."))
     pipeline = Mock()
+    pipeline.analyze.return_value = allowed()
 
     outcome = ChatOrchestrator(store, Settings(database_url=f"sqlite:///{tmp_path / 'app.db'}"), pipeline).reply(message("m1", "How do I report spam?"))
 
@@ -34,7 +35,7 @@ def test_unanswered_questions_create_one_suggestion_after_threshold(tmp_path) ->
     pipeline.analyze.return_value = allowed()
     chat = ChatOrchestrator(store, settings, pipeline)
     for index in range(3):
-        chat.reply(message(f"m{index}", "Where can I find the event schedule?"))
+        chat.reply(message(f"m{index}", "Where is the quantum cafeteria menu?"))
 
     suggestions = store.list_faq_suggestions()
     assert len(suggestions) == 1

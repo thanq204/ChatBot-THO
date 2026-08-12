@@ -19,3 +19,5 @@ Nếu lưu vector dạng JSONL, mỗi dòng có dạng:
 ```
 
 Vector trong ví dụ chỉ là vector rút gọn, không dùng cho production. Nếu dùng Chroma, phải có manifest ghi collection, model, dimensions, source chunks và thời gian build.
+
+Giữ collection riêng cho `faq_questions`, `knowledge`, `policies` và `moderation_memory`. Query và record trong cùng collection phải dùng cùng model, dimensions và version chuẩn hóa.

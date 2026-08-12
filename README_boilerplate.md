@@ -1,42 +1,40 @@
-# [Tên Dự Án]
+# CHAT-10 — Community Health & Conflict Mediation Copilot
 
-> Tóm tắt 1 câu: [Vấn đề] → [Giải pháp AI] cho [Target User]
+> Cộng đồng trực tuyến khó theo dõi xung đột và trả lời câu hỏi lặp lại theo thời gian thực → CHAT-10 kết hợp moderation nhiều tầng, FAQ và RAG có kiểm tra độ liên quan cho Admin/Mod và thành viên trên Discord, Telegram.
 
 ## Vấn đề (Problem)
 
-Mô tả pain point cụ thể với data/số liệu:
-- Ai đang gặp vấn đề?
-- Vấn đề tốn bao nhiêu thời gian/tiền?
-- Tại sao các giải pháp hiện tại chưa đủ?
+- Admin/Mod của cộng đồng học tập phải theo dõi message trên nhiều nền tảng, đọc lại ngữ cảnh hội thoại, phát hiện xung đột và trả lời các câu hỏi lặp lại.
+- Việc review thủ công tốn thời gian theo số lượng message và dễ tạo cảnh báo trùng. Dự án chưa có baseline thực tế về số giờ hoặc chi phí tiết kiệm; hệ thống đang lưu số message, incident, quyết định và audit log để đo trong giai đoạn evaluation.
+- Bộ lọc từ khóa đơn giản không hiểu ngữ cảnh, còn chatbot không có relevance gate có thể chọn sai tài liệu hoặc tạo câu trả lời không được nguồn hỗ trợ.
 
 ## Giải pháp (Solution)
 
-Sản phẩm giải quyết vấn đề như thế nào bằng AI:
-- Feature 1: [mô tả]
-- Feature 2: [mô tả]
-- Feature 3: [mô tả]
+- Feature 1: Phân tích moderation nhiều tầng, gom message liên quan thành incident và chuyển trường hợp cần thiết tới Admin/Mod kèm bằng chứng.
+- Feature 2: Quản lý policy, knowledge, audit trail và moderation memory để tham khảo quyết định đã được người kiểm duyệt xác nhận.
+- Feature 3: Chatbot hỏi đáp theo luồng Rule → Moderation → FAQ → LLM hoặc RAG. Câu hội thoại chung dùng LLM thật; câu kiến thức dùng retrieval, reranking và relevance gate rồi trả nội dung canonical kèm nguồn, không dùng LLM viết dài thêm.
 
 ## Target User
 
-- Primary: [mô tả user chính]
-- Secondary: [mô tả user phụ]
+- Primary: Admin và Moderator quản lý cộng đồng học tập trên Discord, Telegram.
+- Secondary: Thành viên cần xem nội quy, gửi báo cáo hoặc hỏi chatbot về FAQ và knowledge đã được duyệt.
 
 ## Tech Stack
 
 | Layer | Technology |
 |-------|-----------|
-| AI Agent | LangGraph + [LLM] |
+| AI Agent | LangGraph + OpenAI/Gemini |
 | Backend | FastAPI + Python 3.11+ |
-| Frontend | React/Next.js + TypeScript |
-| Database | PostgreSQL / SQLite |
+| Frontend | React 18 + Vite + JavaScript |
+| Database | SQLite |
 | DevOps | Docker + GitHub Actions |
 
 ## Quick Start
 
 ```bash
 # 1. Clone repo
-git clone https://github.com/a20-ai-thuc-chien/A20-App-XXX.git
-cd A20-App-XXX
+git clone https://github.com/AI20K-Build-Phase-Cohort-3/P-232.git
+cd P-232
 
 # 2. Setup environment
 cp .env.example .env
@@ -45,30 +43,34 @@ cp .env.example .env
 # 3. Install dependencies
 pip install -r requirements.txt
 
-# 4. Run development server
-uvicorn src.main:app --reload
+# 4. Run FastAPI backend
+python -m uvicorn backend.main:app --reload --port 8000
+
+# 5. Run frontend development server in another terminal
+cd frontend
+npm install
+npm run dev
 ```
 
 ## Project Structure
 
 ```
-├── src/
-│   ├── agents/          # LangGraph agent definitions
-│   │   ├── graph.py     # Main graph (nodes + edges)
-│   │   ├── state.py     # State schema
-│   │   ├── nodes/       # Individual nodes
-│   │   └── tools/       # Agent tools
+├── backend/
+│   ├── agents/          # LangGraph và moderation graph
 │   ├── api/             # FastAPI routes
 │   ├── models/          # Pydantic schemas
-│   ├── services/        # Business logic
+│   ├── services/        # Moderation, RAG, FAQ và platform services
 │   ├── config.py        # Settings
-│   └── main.py          # App entry point
-├── tests/               # Test suite
-├── docs/                # Documentation
+│   └── main.py          # FastAPI entry point
+├── frontend/            # React 18 + Vite admin dashboard
+├── src/ai_models/       # Model-only routing, reranking, relevance và memory
+├── data/                # Data contracts và SQLite runtime data
+├── tests/               # pytest test suite
+├── docs/                # Architecture và technical guide
 ├── eval/                # Evaluation results
 ├── presentation/        # Demo materials
-├── Dockerfile           # Multi-stage build
-├── docker-compose.yml   # Full stack
+├── Dockerfile
+├── docker-compose.yml
 └── .github/workflows/   # CI/CD pipelines
 ```
 
@@ -77,8 +79,9 @@ uvicorn src.main:app --reload
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | /health | Health check |
-| POST | /api/v1/chat | Chat with agent |
-| POST | /api/v1/analyze | Analyze input |
+| POST | /api/v1/chat | Chat với agent mẫu |
+| POST | /api/v1/messages/analyze | Phân tích một message qua moderation pipeline |
+| POST | /api/v1/rag/ask | Hỏi đáp trên Knowledge Hub bằng RAG |
 
 ## Deliverables Checklist
 
@@ -87,19 +90,32 @@ uvicorn src.main:app --reload
 - [x] Architecture Diagram (`docs/architecture_diagram.md`)
 - [x] AI Logs (auto-collected)
 - [ ] Live URL / Deploy
-- [ ] Video Demo
+- [ ] Video Demo (đã có `presentation/gate2_demo_script.md`, chưa có video thật)
 - [ ] Pitch Deck (`presentation/`)
 - [x] Weekly Journal (`JOURNAL.md`)
 - [x] Worklog (`WORKLOG.md`)
-- [ ] Evaluation Evidence (`eval/results/`)
+- [x] Evaluation Evidence (`eval/results/report.md`: 5/5 case Discord PASS)
+
+### Gate 2
+
+| Deliverable | Trạng thái |
+|---|---|
+| MVP demo video tối đa 3 phút | Chưa đạt |
+| Architecture diagram | Đạt |
+| Repo có ít nhất 10 PR merged | Đạt - 12 PR merge riêng biệt |
+| README có setup, env vars và sample queries | Đạt - xem `README.md` |
+| Ít nhất 5 manual eval với output thật | Đạt - 5/5 case Discord |
+
+**Tổng: 4/5.**
 
 ## Team
 
 | Member | Role | Student ID |
 |--------|------|-----------|
-| [Name] | [Role] | [ID] |
-| [Name] | [Role] | [ID] |
-| [Name] | [Role] | [ID] |
+| Nguyễn Chiến Thắng | QA | 2A202601734 |
+| Bùi Hữu Nghĩa | Model | 2A202601880 |
+| Nguyễn Thái Tú | Web Developer | 2A202601504 |
+| Hà Nhật Khánh Duy | Data Analyst | 2A202602031 |
 
 ## License
 

@@ -1,4 +1,255 @@
-# 🤖 AI20K Agent Template
+# CHAT-10 - Community Health & Conflict Mediation Copilot
+
+CHAT-10 hỗ trợ Admin/Moderator quản lý cộng đồng học tập trên Discord và Telegram. Hệ thống kết hợp moderation theo ngữ cảnh, FAQ do Admin duyệt, RAG có reranking/relevance gate và LLM thật cho hội thoại chung.
+
+## Vấn đề
+
+- Admin/Mod phải theo dõi nhiều tin nhắn, đọc lại ngữ cảnh xung đột và xử lý cảnh báo trùng lặp.
+- Thành viên thường hỏi lại cùng một câu; gửi mọi câu hỏi tới LLM gây tốn chi phí và dễ trả lời không có nguồn.
+- Bộ lọc từ khóa đơn giản không đủ phân biệt phản biện, nói đùa, công kích và đe dọa thật.
+
+## Giải pháp
+
+- Phân tích moderation theo ba tầng: lọc nhanh, phân loại policy và đánh giá ngữ cảnh.
+- Gom tin nhắn rủi ro thành incident để Admin/Mod review, hành động và lưu audit trail.
+- Phân luồng chatbot theo thứ tự `Rule -> Moderation -> FAQ -> LLM hoặc RAG`.
+- FAQ trả câu trả lời đã được Admin duyệt mà không gọi LLM.
+- Câu hội thoại chung như tên bot, khả năng, ngày/giờ dùng LLM thật và hiển thị nhãn `[LLM]`.
+- Câu kiến thức dùng retrieval, reranking và relevance gate; chỉ trả nguồn đạt ngưỡng với nhãn `[RAG]` và citation.
+- Câu chưa đủ nguồn được ghi nhận để Admin cân nhắc bổ sung FAQ hoặc tài liệu.
+
+## Người dùng
+
+- Chính: Admin và Moderator của cộng đồng học tập.
+- Phụ: thành viên hỏi đáp, xem nội quy, gửi báo cáo hoặc tra cứu tài liệu đã duyệt.
+
+## Tính năng MVP
+
+| Nhóm | Tính năng |
+|---|---|
+| Chatbot | Lệnh `/help`, `/rule`, `/event`, `/daily`, `/weekly`, `/faq`, `/report`, `/admin`, `/resources` |
+| Hỏi đáp | FAQ match, LLM hội thoại chung, RAG có citation, ghi nhận câu chưa có đáp án |
+| Moderation | Ba gate, incident grouping, review queue, audit log, manual action |
+| Nền tảng | Discord listener, Telegram listener/alert, FastAPI, React/Vite admin dashboard |
+| Dữ liệu | SQLite, import knowledge CSV/JSON/TXT, embedding OpenAI tùy chọn, lexical fallback |
+
+## Kiến trúc
+
+Sơ đồ và mô tả chi tiết nằm tại [docs/architecture_diagram.md](docs/architecture_diagram.md).
+
+```text
+Discord/Telegram/Web
+        |
+        v
+FastAPI + platform listeners
+        |
+        +--> Moderation gates --> Incident/Review/Audit --> Admin dashboard
+        |
+        +--> Rule --> FAQ --> General LLM
+                         \--> Retrieval --> Reranker --> Relevance --> RAG + citation
+        |
+        v
+SQLite + Knowledge/FAQ/Policy data
+```
+
+## Tech Stack
+
+| Layer | Công nghệ |
+|---|---|
+| Model | OpenAI `gpt-4o-mini`, `text-embedding-3-small`; Gemini có thể cấu hình |
+| Agent | LangGraph, LangChain |
+| Backend | Python 3.11+, FastAPI, Uvicorn, Pydantic |
+| Frontend | React 18, Vite |
+| Database | SQLite |
+| Platform | Discord.py, Telegram Bot API |
+| DevOps | Docker, Docker Compose, GitHub Actions |
+| Test | pytest, Ruff |
+
+## Cài đặt
+
+### 1. Clone và tạo môi trường
+
+```powershell
+git clone https://github.com/AI20K-Build-Phase-Cohort-3/P-232.git
+cd P-232
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+```
+
+### 2. Cấu hình biến môi trường
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Biến tối thiểu để chạy backend và LLM:
+
+```dotenv
+OPENAI_API_KEY=your-openai-key
+MODERATION_MODE=openai
+MODERATION_PROVIDER=openai
+DISCORD_RAG_LLM_ENABLED=true
+DISCORD_RAG_MODEL=gpt-4o-mini
+DATABASE_URL=sqlite:///./data/community_channel.db
+```
+
+Để bật Discord:
+
+```dotenv
+DISCORD_BOT_TOKEN=your-discord-token
+DISCORD_LISTENER_ENABLED=true
+```
+
+Để bật Telegram:
+
+```dotenv
+TELEGRAM_BOT_TOKEN=your-telegram-token
+TELEGRAM_LISTENER_ENABLED=true
+```
+
+Không commit `.env`. Danh sách đầy đủ và giá trị mặc định nằm trong [.env.example](.env.example).
+
+### 3. Chạy ứng dụng
+
+Backend và bot listener:
+
+```powershell
+python -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+Swagger UI: `http://127.0.0.1:8000/docs`
+
+Frontend development, trong terminal khác:
+
+```powershell
+Set-Location frontend
+npm install
+npm run dev
+```
+
+Chạy bằng Docker:
+
+```powershell
+docker compose up --build
+```
+
+## Sample Queries
+
+### Discord/Telegram
+
+```text
+@CHAT-10 /help
+@CHAT-10 bạn tên là gì
+@CHAT-10 hôm nay ngày bao nhiêu
+@CHAT-10 tôi đang tham gia một dự án, muốn học bằng dự án thì phương pháp này như nào?
+@CHAT-10 làm sao để báo cáo spam?
+```
+
+Kỳ vọng:
+
+- Lệnh trả từ nhánh `Rule`.
+- Câu hỏi đã có FAQ trả từ `admin-faq`.
+- Tên bot và ngày/giờ trả với nhãn `[LLM]`.
+- Câu hỏi kiến thức đủ liên quan trả `[RAG]` và dòng `Trích từ tài liệu:`.
+
+### API
+
+Health check:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/health
+```
+
+Phân tích moderation:
+
+```powershell
+$body = @{
+  message = @{
+    message_id = "sample-001"
+    platform = "web"
+    author_id = "member-01"
+    text = "Mình không đồng ý, bạn cho mình xin nguồn nhé"
+    timestamp = (Get-Date).ToUniversalTime().ToString("o")
+  }
+  context = @()
+} | ConvertTo-Json -Depth 5
+
+Invoke-RestMethod `
+  -Method Post `
+  -Uri http://127.0.0.1:8000/api/v1/messages/analyze `
+  -ContentType "application/json" `
+  -Body $body
+```
+
+RAG API:
+
+```powershell
+$body = @{ question = "Học bằng dự án là gì?" } | ConvertTo-Json
+Invoke-RestMethod `
+  -Method Post `
+  -Uri http://127.0.0.1:8000/api/v1/rag/ask `
+  -ContentType "application/json" `
+  -Body $body
+```
+
+## Kiểm thử
+
+```powershell
+python -m pytest -q
+python -m ruff check backend src tests eval
+```
+
+Bằng chứng Discord manual sẽ được bổ sung tại [eval/results/report.md](eval/results/report.md) sau khi có đủ 5 ảnh test thực tế.
+
+## Cấu trúc dự án
+
+```text
+backend/                 FastAPI, LangGraph, services và platform bots
+frontend/                React/Vite admin dashboard
+src/ai_models/           Routing, FAQ, reranking, relevance, citation và memory
+data/                    Data contracts, examples và SQLite runtime
+tests/                   Unit/integration tests
+eval/                    Báo cáo và ảnh evaluation thực tế
+docs/                    Architecture và technical guide
+presentation/            Kịch bản/video/pitch artifacts
+scripts/                 AI logging hooks và Phoenix submission
+```
+
+## Trạng thái Gate 2
+
+| Deliverable | Trạng thái | Bằng chứng |
+|---|---|---|
+| MVP demo video 3 phút, end-to-end với LLM thật | Chưa đạt | Có kịch bản tại `presentation/gate2_demo_script.md`, chưa có video |
+| Architecture diagram | Đạt | `docs/architecture_diagram.md` |
+| Repo có ít nhất 10 PR merged | Đạt | 12 PR merge riêng biệt trong lịch sử Git |
+| README có setup, env vars, sample queries | Đạt | README này |
+| Ít nhất 5 manual eval với output thật | Đạt | 5/5 case Discord trong `eval/results/report.md` |
+
+**Tổng hiện tại: 4/5 deliverable Gate 2.**
+
+## Thành viên
+
+| Thành viên | Vai trò | Mã sinh viên |
+|---|---|---|
+| Nguyễn Chiến Thắng | QA | 2A202601734 |
+| Bùi Hữu Nghĩa | Model | 2A202601880 |
+| Nguyễn Thái Tú | Web Developer | 2A202601504 |
+| Hà Nhật Khánh Duy | Data Analyst | 2A202602031 |
+
+## Tài liệu liên quan
+
+- [Architecture](docs/architecture_diagram.md)
+- [Model pipeline](src/ai_models/README.md)
+- [Data rules](data/RULES.md)
+- [Evaluation report](eval/results/report.md)
+- [Demo script](presentation/gate2_demo_script.md)
+
+## License
+
+MIT
+
+<!-- Nội dung starter template cũ được giữ tạm bên dưới để không làm mất lịch sử khi file bị Windows khóa thao tác replace.
 
 Template chính thức cho học viên **VinUni AI20K Build Phase** — cung cấp sẵn cấu trúc dự án, code mẫu, và hướng dẫn kỹ thuật chi tiết để xây dựng AI Agent đạt điểm cao (35+/50).
 
@@ -225,3 +476,4 @@ pytest -q
 ```
 
 Data local nằm trong `data/app.db` và `data/youtube_demo/` (đã được `.gitignore` bảo vệ). Admin feedback được lưu thành reviewed case để các thread sau tham khảo theo escalation score; đây là case-based retrieval, không tự fine-tune model.
+-->

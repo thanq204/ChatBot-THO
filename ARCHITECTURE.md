@@ -1,5 +1,9 @@
 # Architecture Document
 
+> Tài liệu kiến trúc chính thức và đã đối chiếu với code hiện tại: [docs/architecture_diagram.md](docs/architecture_diagram.md).
+
+File này là template lịch sử; không dùng các placeholder bên dưới làm bằng chứng Gate 2.
+
 ## System Overview
 
 [Tóm tắt 2-3 câu về kiến trúc hệ thống]
