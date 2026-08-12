@@ -15,6 +15,7 @@ from backend.models.operations import CommonMessage
 from backend.services.chat_orchestrator import ChatOrchestrator
 from backend.services.operations_pipeline import OperationsPipeline
 from backend.services.operations_store import OperationsStore
+from backend.services.platform_moderation import PlatformModerationService
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,7 @@ class TelegramRagBot:
         self.store = store
         self.pipeline = pipeline or OperationsPipeline(store=store, settings=self.settings)
         self.chat = ChatOrchestrator(store, self.settings, self.pipeline)
+        self.platform_moderation = PlatformModerationService(self.settings)
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
         self._offset: int | None = None
@@ -131,8 +133,13 @@ class TelegramRagBot:
             common = common.model_copy(update={"text": question})
             outcome = self.chat.reply(common, [])
             self._send_message(str(message["chat"]["id"]), outcome.answer)
+            result = outcome.moderation
         else:
-            self.pipeline.analyze(common, [])
+            result = self.pipeline.analyze(common, [])
+        if result:
+            warning = self.platform_moderation.send_automatic_warning(common, result, self.store)
+            if warning:
+                logger.info("Automatic Telegram warning DM for %s completed=%s", common.message_id, warning.completed)
 
     def _question_to_answer(self, message: dict[str, Any], text: str) -> str | None:
         chat_type = str((message.get("chat") or {}).get("type", ""))

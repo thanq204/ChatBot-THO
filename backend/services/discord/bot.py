@@ -20,6 +20,7 @@ from backend.services.chat_orchestrator import ChatOrchestrator
 from backend.services.operations_pipeline import OperationsPipeline
 from backend.services.operations_store import OperationsStore
 from backend.services.telegram.alerts import TelegramAlertSender
+from backend.services.platform_moderation import PlatformModerationService
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,7 @@ class DiscordRagBot:
         self.pipeline = pipeline or OperationsPipeline(store=self.store, settings=self.settings)
         self.chat = ChatOrchestrator(self.store, self.settings, self.pipeline)
         self.telegram_alerts = TelegramAlertSender(self.settings)
+        self.platform_moderation = PlatformModerationService(self.settings)
         self._thread: threading.Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._client: Any = None
@@ -234,6 +236,10 @@ class DiscordRagBot:
                 if result and await asyncio.to_thread(self.telegram_alerts.send_alert, common_message, result):
                     logger.info("Telegram alert sent for Discord message %s", message_id)
                     print(f"[Telegram] Alert sent for Discord message {message_id}", flush=True)
+                if result:
+                    warning = await asyncio.to_thread(self.platform_moderation.send_automatic_warning, common_message, result, self.store)
+                    if warning:
+                        logger.info("Automatic Discord warning DM for %s completed=%s", message_id, warning.completed)
             except Exception:
                 logger.exception("Realtime moderation failed for Discord message %s", message_id)
                 print(f"[Discord] Moderation failed for message {message_id}; listener continues.", flush=True)

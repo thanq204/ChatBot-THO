@@ -1,18 +1,17 @@
-"""Human-triggered moderation actions for Discord and Telegram.
+"""Platform moderation actions for Discord and Telegram.
 
-Nothing in this service is called by the classifier.  An administrator must
-explicitly invoke an API action with ``confirmed=true`` for each case.
+The API actions are always Admin-confirmed. The only automated operation is an
+opt-in private warning for a non-allow decision from a live bot listener.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import Any
-
 import requests
 
 from backend.config import Settings, get_settings
-from backend.models.operations import AdminPlatformActionResponse
+from backend.models.operations import AdminPlatformActionResponse, CommonMessage, MessageDecision
+from backend.services.operations_store import OperationsStore
 
 
 class PlatformModerationError(ValueError):
@@ -33,6 +32,41 @@ class PlatformModerationService:
         if platform == "telegram":
             return self._telegram(channel_id, user_id, message_id, action, text, duration_minutes)
         raise PlatformModerationError("Nền tảng này chưa hỗ trợ hành động quản trị trực tiếp.")
+
+    def send_automatic_warning(self, message: CommonMessage, decision: MessageDecision, store: OperationsStore) -> AdminPlatformActionResponse | None:
+        """Send one opt-in DM for warn/hide/review; never enforce an action."""
+        if not self.settings.moderation_auto_warn_dm_enabled or decision.decision not in {"warn", "hide", "hold_for_review"}:
+            return None
+        if message.platform not in {"discord", "telegram"} or message.author_id == "anonymous":
+            return None
+        status = {
+            "warn": "Tin nhắn của bạn đã bị cảnh báo theo nội quy cộng đồng.",
+            "hide": "Tin nhắn của bạn đã bị đánh dấu ẩn theo nội quy cộng đồng.",
+            "hold_for_review": "Tin nhắn của bạn đang chờ Admin/Mod xem xét theo nội quy cộng đồng.",
+        }[decision.decision]
+        text = (
+            f"{status} "
+            f"Lý do: {decision.explanation[:500]}\n"
+            "Vui lòng điều chỉnh nội dung. Nếu bạn cho rằng đây là nhầm lẫn, hãy liên hệ Admin/Mod."
+        )
+        result = self.execute(
+            platform=message.platform,
+            community_id=message.community_id,
+            channel_id=message.channel_id,
+            user_id=message.author_id,
+            message_id=None,
+            action="dm",
+            text=text,
+            duration_minutes=None,
+        )
+        store.add_audit(
+            decision.incident_id,
+            message.message_id,
+            "automatic_moderation_dm",
+            "system",
+            {"decision": decision.decision, "completed": result.completed, "detail": result.detail, "target_user_id": message.author_id},
+        )
+        return result
 
     def _discord(self, guild_id: str, channel_id: str, user_id: str, message_id: str | None, action: str, text: str, duration: int | None) -> AdminPlatformActionResponse:
         if not self.settings.discord_bot_token:

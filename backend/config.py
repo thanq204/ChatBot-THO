@@ -78,6 +78,8 @@ class Settings(BaseSettings):
     telegram_reply_max_chars: int = Field(default=3500, ge=500, le=4096)
     telegram_alerts_enabled: bool = False
     telegram_alert_risk_threshold: float = Field(default=0.55, ge=0.0, le=1.0)
+    # Opt-in: send one private warning for every non-allow moderation decision.
+    moderation_auto_warn_dm_enabled: bool = False
     zalo_access_token: str = ""
     messenger_page_access_token: str = ""
     operations_demo_mode: bool = True
