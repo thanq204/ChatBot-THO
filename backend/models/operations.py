@@ -101,6 +101,26 @@ class IncidentUpdateRequest(BaseModel):
     note: str = Field(default="", max_length=2000)
 
 
+class AdminPlatformActionRequest(BaseModel):
+    """A deliberately explicit, human-approved action against one case."""
+
+    action: Literal["dm", "delete_message", "timeout", "kick", "ban"]
+    message_id: str | None = Field(default=None, max_length=200)
+    message: str = Field(default="", max_length=1900)
+    duration_minutes: int | None = Field(default=None, ge=1, le=40_320)
+    actor: str = Field(default="Admin", min_length=1, max_length=100)
+    confirmed: bool = False
+
+
+class AdminPlatformActionResponse(BaseModel):
+    action: str
+    platform: Literal["discord", "telegram"]
+    target_user_id: str
+    target_message_id: str | None = None
+    completed: bool
+    detail: str
+
+
 class Policy(BaseModel):
     policy_id: str
     name: str
