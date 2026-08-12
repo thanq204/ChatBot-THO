@@ -6,6 +6,7 @@ import {
   ClipboardText,
   Flask,
   IdentificationBadge,
+  Megaphone,
   GearSix,
 } from "@phosphor-icons/react";
 
@@ -16,6 +17,7 @@ const NAV_ITEMS = [
   { to: "/nhat-ky", label: "Nhật ký kiểm duyệt", icon: ClipboardText },
   { to: "/khu-thu-nghiem-ai", label: "Khu thử nghiệm AI", icon: Flask },
   { to: "/nguoi-dung", label: "Quản lý người dùng", icon: IdentificationBadge },
+  { to: "/thong-bao", label: "Thông báo", icon: Megaphone },
   { to: "/cai-dat", label: "Cài đặt", icon: GearSix },
 ];
 

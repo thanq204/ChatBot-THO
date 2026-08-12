@@ -335,7 +335,7 @@ class OperationsStore:
                  categories_json, message_ids_json, first_seen, last_seen, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (incident_id, message.platform, message.community_id, message.channel_id, message.thread_key, result.severity,
-                 result.risk_score, f"{result.category.title()} in {message.platform}/{message.channel_id}", result.explanation,
+                 result.risk_score, f"{result.category.title()} từ {message.author_name or message.author_id}", result.explanation,
                  _json([result.category]), _json([message.message_id]), message.timestamp.isoformat(), message.timestamp.isoformat(), now.isoformat(), now.isoformat()),
             )
         self.add_audit(incident_id, message.message_id, "incident_created", "system", {"decision": result.decision, "evidence": result.evidence})

@@ -6,6 +6,7 @@ import CommunityPage from "./pages/CommunityPage.jsx";
 import PolicyPage from "./pages/PolicyPage.jsx";
 import ModerationLogPage from "./pages/ModerationLogPage.jsx";
 import UserManagementPage from "./pages/UserManagementPage.jsx";
+import NotificationPage from "./pages/NotificationPage.jsx";
 import SettingsPage from "./pages/SettingsPage.jsx";
 
 export default function App() {
@@ -18,6 +19,7 @@ export default function App() {
         <Route path="/nhat-ky" element={<ModerationLogPage />} />
         <Route path="/khu-thu-nghiem-ai" element={<AiSandboxPage />} />
         <Route path="/nguoi-dung" element={<UserManagementPage />} />
+        <Route path="/thong-bao" element={<NotificationPage />} />
         <Route path="/cai-dat" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
