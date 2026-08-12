@@ -229,6 +229,28 @@ class ChatOutcome(BaseModel):
     moderation: MessageDecision | None = None
     faq_id: str | None = None
     sources: list[KnowledgeDocument] = Field(default_factory=list)
+    retrieval_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    relevance_passed: bool | None = None
+
+
+class CommandContent(BaseModel):
+    command: str
+    body: str
+    updated_at: datetime
+
+
+class CommandContentRequest(BaseModel):
+    body: str = Field(..., min_length=1, max_length=5000)
+
+
+class MemberReport(BaseModel):
+    report_id: str
+    platform: PlatformName
+    reporter_id: str
+    channel_id: str
+    details: str
+    status: Literal["open", "reviewed"] = "open"
+    created_at: datetime
 
 
 class CommunityHealth(BaseModel):

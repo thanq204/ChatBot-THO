@@ -14,11 +14,14 @@ from backend.models.operations import (
     AnnouncementResponse,
     CommonMessage,
     CommunityHealth,
+    CommandContent,
+    CommandContentRequest,
     FAQ,
     FAQSuggestion,
     FAQSuggestionApproveRequest,
     FAQUpsertRequest,
     FAQWriteResponse,
+    MemberReport,
     Incident,
     IncidentUpdateRequest,
     KnowledgeDocument,
@@ -232,6 +235,26 @@ async def dismiss_faq_suggestion(suggestion_id: str) -> FAQSuggestion:
 @router.get("/community-health", response_model=CommunityHealth)
 async def community_health(window_hours: int = Query(default=24, ge=1, le=24 * 90)) -> CommunityHealth:
     return get_operations_store().community_health(window_hours)
+
+
+@router.get("/admin/command-content/{command}", response_model=CommandContent)
+async def command_content(command: str) -> CommandContent:
+    result = get_operations_store().get_command_content(command.strip().lower().lstrip("/"))
+    if not result:
+        raise HTTPException(status_code=404, detail="Command content not found.")
+    return result
+
+
+@router.put("/admin/command-content/{command}", response_model=CommandContent)
+async def upsert_command_content(command: str, payload: CommandContentRequest) -> CommandContent:
+    if command.strip().lower().lstrip("/") not in {"event", "daily", "weekly", "resources", "admin"}:
+        raise HTTPException(status_code=400, detail="Only event, daily, weekly, resources and admin content can be managed.")
+    return get_operations_store().upsert_command_content(command, payload)
+
+
+@router.get("/admin/member-reports", response_model=list[MemberReport])
+async def member_reports() -> list[MemberReport]:
+    return get_operations_store().list_member_reports()
 
 
 @router.post("/admin/announcements", response_model=AnnouncementResponse)
