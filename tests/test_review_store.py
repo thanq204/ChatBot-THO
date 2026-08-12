@@ -1,9 +1,9 @@
 import pytest
 
-from src.config import Settings
-from src.models.moderation import AdminDecisionRequest, MemberSubmission
-from src.services.moderation import ModerationEngine
-from src.services.review_store import ReviewStore
+from backend.config import Settings
+from backend.models.moderation import AdminDecisionRequest, MemberSubmission
+from backend.services.moderation import ModerationEngine
+from backend.services.review_store import ReviewStore
 
 
 @pytest.mark.asyncio
