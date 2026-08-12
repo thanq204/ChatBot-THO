@@ -11,7 +11,7 @@ import {
 } from "@phosphor-icons/react";
 
 const NAV_ITEMS = [
-  { to: "/", label: "Tổng quan", icon: SquaresFour, end: true },
+  { to: "/tong-quan", label: "Tổng quan", icon: SquaresFour, end: true },
   { to: "/cong-dong", label: "Cộng đồng", icon: UsersThree },
   { to: "/quy-tac-ai", label: "Quy tắc AI", icon: ShieldCheck },
   { to: "/nhat-ky", label: "Nhật ký kiểm duyệt", icon: ClipboardText },

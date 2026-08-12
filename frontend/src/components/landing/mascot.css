@@ -1,0 +1,45 @@
+/* ==========================================================================
+   Mascot. Floats slowly so it reads as present rather than animated at you.
+   ========================================================================== */
+
+.mascot {
+  --sk-eye: #3b244a;
+
+  display: block;
+  flex-shrink: 0;
+  will-change: transform;
+  animation: mascot-float 6.5s ease-in-out infinite;
+}
+
+:root[data-theme="dark"] .mascot {
+  --sk-eye: #241635;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .mascot {
+    --sk-eye: #241635;
+  }
+}
+
+.mascot svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+@keyframes mascot-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-7px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mascot {
+    animation: none;
+  }
+}
