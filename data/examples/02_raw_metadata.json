@@ -1,0 +1,10 @@
+{
+  "import_id": "IMP-ABC123",
+  "original_filename": "rules.csv",
+  "stored_filename": "IMP-ABC123/rules.csv",
+  "format": "csv",
+  "source": "admin_web",
+  "sha256": "sha256:example-only",
+  "received_at": "2026-08-12T10:30:00Z",
+  "status": "received"
+}
