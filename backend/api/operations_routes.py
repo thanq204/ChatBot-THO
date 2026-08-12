@@ -17,6 +17,8 @@ from backend.models.operations import (
     KnowledgeImportRequest,
     KnowledgeImportResponse,
     MessageIngestRequest,
+    NotifyRequest,
+    NotifyResult,
     OperationsSummary,
     PlatformStatus,
     Policy,
@@ -25,6 +27,7 @@ from backend.models.operations import (
     RagResponse,
 )
 from backend.services.knowledge_importer import KnowledgeImporter, KnowledgeImportError
+from backend.services.notification_dispatch import NotificationDispatcher
 from backend.services.operations_demo import seed_operations_demo
 from backend.services.operations_pipeline import OperationsPipeline
 from backend.services.operations_store import OperationsStore
@@ -35,6 +38,7 @@ _store: OperationsStore | None = None
 _pipeline: OperationsPipeline | None = None
 _connectors: PlatformConnectors | None = None
 _importer: KnowledgeImporter | None = None
+_dispatcher: NotificationDispatcher | None = None
 
 
 def get_operations_store() -> OperationsStore:
@@ -65,6 +69,13 @@ def get_importer() -> KnowledgeImporter:
     return _importer
 
 
+def get_dispatcher() -> NotificationDispatcher:
+    global _dispatcher
+    if _dispatcher is None:
+        _dispatcher = NotificationDispatcher()
+    return _dispatcher
+
+
 @router.get("/platforms", response_model=list[PlatformStatus])
 async def platform_statuses() -> list[PlatformStatus]:
     return get_connectors().statuses()
@@ -77,6 +88,24 @@ async def pull_platform(platform: str, limit: int = Query(default=100, ge=1, le=
     except ConnectorError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return await ingest_messages(MessageIngestRequest(messages=messages, analyze=True))
+
+
+@router.post("/notify", response_model=list[NotifyResult])
+async def notify(payload: NotifyRequest) -> list[NotifyResult]:
+    results = get_dispatcher().send(payload.platforms, payload.title, payload.message)
+    get_operations_store().add_audit(
+        payload.incident_id,
+        None,
+        "notification_sent",
+        "Admin",
+        {
+            "platforms": payload.platforms,
+            "title": payload.title,
+            "message": payload.message,
+            "results": [result.model_dump() for result in results],
+        },
+    )
+    return results
 
 
 @router.post("/messages/analyze", response_model=AnalyzeMessageResponse)

@@ -74,7 +74,9 @@ class Settings(BaseSettings):
     telegram_alerts_enabled: bool = False
     telegram_alert_risk_threshold: float = Field(default=0.55, ge=0.0, le=1.0)
     zalo_access_token: str = ""
+    zalo_default_recipient_id: str = ""
     messenger_page_access_token: str = ""
+    messenger_default_recipient_id: str = ""
     operations_demo_mode: bool = True
     operations_use_llm: bool = False
     operations_incident_window_minutes: int = Field(default=60, ge=5, le=1440)
