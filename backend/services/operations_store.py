@@ -18,9 +18,12 @@ from backend.config import Settings, get_settings
 from backend.models.operations import (
     CommonMessage,
     CommunityHealth,
+    CommandContent,
+    CommandContentRequest,
     FAQ,
     FAQSuggestion,
     FAQUpsertRequest,
+    MemberReport,
     Incident,
     KnowledgeDocument,
     KnowledgeDocumentRequest,
@@ -148,6 +151,18 @@ class OperationsStore:
                     question_count INTEGER NOT NULL DEFAULT 1, samples_json TEXT NOT NULL DEFAULT '[]',
                     status TEXT NOT NULL DEFAULT 'open', created_at TEXT NOT NULL, updated_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS operations_command_content (
+                    command TEXT PRIMARY KEY, body TEXT NOT NULL, updated_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS operations_member_reports (
+                    report_id TEXT PRIMARY KEY, platform TEXT NOT NULL, reporter_id TEXT NOT NULL,
+                    channel_id TEXT NOT NULL, details TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS operations_notification_preferences (
+                    platform TEXT NOT NULL, member_id TEXT NOT NULL, daily_enabled INTEGER NOT NULL DEFAULT 1,
+                    weekly_enabled INTEGER NOT NULL DEFAULT 1, updated_at TEXT NOT NULL,
+                    PRIMARY KEY (platform, member_id)
+                );
                 """
             )
             columns = {row[1] for row in db.execute("PRAGMA table_info(operations_knowledge)").fetchall()}
@@ -183,6 +198,17 @@ class OperationsStore:
                     ("FAQ-ASK-HELP", "Làm sao để hỏi bài hiệu quả?", "Hãy nêu môn học, phần đang vướng, điều bạn đã thử và câu hỏi cụ thể. Đừng đăng thông tin cá nhân hoặc toàn bộ đề thi đang diễn ra.", ["study", "help"]),
                 ]
                 db.executemany("INSERT INTO operations_faqs VALUES (?, ?, ?, ?, ?, ?)", [(faq_id, question, answer, _json(tags), 1, _now()) for faq_id, question, answer, tags in faqs])
+            if not db.execute("SELECT 1 FROM operations_command_content LIMIT 1").fetchone():
+                db.executemany(
+                    "INSERT INTO operations_command_content VALUES (?, ?, ?)",
+                    [(command, body, _now()) for command, body in {
+                        "event": "Chưa có thông báo mới về sự kiện hoặc lịch học.",
+                        "daily": "Chưa có thông báo mới cho hôm nay.",
+                        "weekly": "Chưa có thông báo mới cho tuần này.",
+                        "resources": "Chưa có tài liệu học tập chính được Admin cập nhật.",
+                        "admin": "Liên hệ Admin/Mod trong kênh quản trị hoặc dùng /report để báo nội dung cần xem xét.",
+                    }.items()],
+                )
 
     def purge_demo_data(self) -> int:
         """Remove seeded/demo and synthetic test records, never live Discord IDs."""
@@ -392,6 +418,37 @@ class OperationsStore:
             db.execute("DELETE FROM operations_knowledge_embeddings WHERE document_id=?", (document_id,))
         return cursor.rowcount > 0
 
+    def get_command_content(self, command: str) -> CommandContent | None:
+        with self._connect() as db:
+            row = db.execute("SELECT * FROM operations_command_content WHERE command=?", (command,)).fetchone()
+        return CommandContent(command=row["command"], body=row["body"], updated_at=datetime.fromisoformat(row["updated_at"])) if row else None
+
+    def upsert_command_content(self, command: str, request: CommandContentRequest) -> CommandContent:
+        command = command.strip().lower().lstrip("/")
+        now = _now()
+        with self._connect() as db:
+            db.execute("INSERT INTO operations_command_content VALUES (?, ?, ?) ON CONFLICT(command) DO UPDATE SET body=excluded.body, updated_at=excluded.updated_at", (command, request.body, now))
+        return self.get_command_content(command)  # type: ignore[return-value]
+
+    def create_member_report(self, message: CommonMessage, details: str) -> MemberReport:
+        report = MemberReport(report_id=f"REP-{uuid.uuid4().hex[:10].upper()}", platform=message.platform, reporter_id=message.author_id, channel_id=message.channel_id, details=details[:4000], created_at=datetime.now(UTC))
+        with self._connect() as db:
+            db.execute("INSERT INTO operations_member_reports VALUES (?, ?, ?, ?, ?, 'open', ?)", (report.report_id, report.platform, report.reporter_id, report.channel_id, report.details, report.created_at.isoformat()))
+        self.add_audit(None, message.message_id, "member_report_created", message.author_id, {"report_id": report.report_id, "details": report.details})
+        return report
+
+    def list_member_reports(self) -> list[MemberReport]:
+        with self._connect() as db:
+            rows = db.execute("SELECT * FROM operations_member_reports ORDER BY created_at DESC").fetchall()
+        return [MemberReport(report_id=row["report_id"], platform=row["platform"], reporter_id=row["reporter_id"], channel_id=row["channel_id"], details=row["details"], status=row["status"], created_at=datetime.fromisoformat(row["created_at"])) for row in rows]
+
+    def set_notification_preference(self, platform: str, member_id: str, kind: str, enabled: bool) -> None:
+        column = "daily_enabled" if kind == "daily" else "weekly_enabled"
+        now = _now()
+        with self._connect() as db:
+            db.execute("INSERT INTO operations_notification_preferences (platform, member_id, daily_enabled, weekly_enabled, updated_at) VALUES (?, ?, 1, 1, ?) ON CONFLICT(platform, member_id) DO NOTHING", (platform, member_id, now))
+            db.execute(f"UPDATE operations_notification_preferences SET {column}=?, updated_at=? WHERE platform=? AND member_id=?", (int(enabled), now, platform, member_id))
+
     @staticmethod
     def _faq(row: sqlite3.Row) -> FAQ:
         return FAQ(faq_id=row["faq_id"], question=row["question"], answer=row["answer"], tags=json.loads(row["tags_json"]), active=bool(row["active"]), updated_at=datetime.fromisoformat(row["updated_at"]))
@@ -520,7 +577,7 @@ class OperationsStore:
         question: str,
         documents: list[KnowledgeDocument],
         limit: int,
-    ) -> list[KnowledgeDocument] | None:
+    ) -> list[tuple[float, KnowledgeDocument]] | None:
         """Retrieve knowledge by opt-in OpenAI embeddings persisted in SQLite."""
         if not self.settings.knowledge_embedding_enabled or not self.settings.openai_api_key or not documents:
             return None
@@ -573,12 +630,25 @@ class OperationsStore:
             if not scored or scored[0][0] < self.settings.knowledge_embedding_min_score:
                 return []
             relevance_floor = max(self.settings.knowledge_embedding_min_score, scored[0][0] - 0.08)
-            return [document for score, document in scored[:limit] if score >= relevance_floor]
+            return [(score, document) for score, document in scored[:limit] if score >= relevance_floor]
         except Exception:
             logger.warning("Knowledge embedding retrieval unavailable; using deterministic fallback.", exc_info=True)
             return None
 
     def search_knowledge(self, question: str, limit: int = 3, dataset: str | None = None) -> list[KnowledgeDocument]:
+        return [document for _score, document in self.search_knowledge_ranked(question, limit, dataset)]
+
+    def search_knowledge_ranked(
+        self,
+        question: str,
+        limit: int = 3,
+        dataset: str | None = None,
+    ) -> list[tuple[float, KnowledgeDocument]]:
+        """Return vector-search candidates and normalized retrieval scores.
+
+        Embeddings are opt-in; the deterministic local index is the fallback
+        when an embedding provider is unavailable.
+        """
         documents = self.list_knowledge(dataset)
         semantic_results = self._semantic_knowledge_search(question, documents, limit)
         if semantic_results is not None:
@@ -653,7 +723,8 @@ class OperationsStore:
             return []
         best_score = ranked[0][0]
         relevance_floor = max(2, best_score * 0.35)
-        return [doc for score, _semantic_hits, doc in ranked[:limit] if score >= relevance_floor]
+        selected = [item for item in ranked[:limit] if item[0] >= relevance_floor]
+        return [(min(1.0, score / best_score), doc) for score, _semantic_hits, doc in selected]
 
     def summary(self) -> OperationsSummary:
         with self._connect() as db:

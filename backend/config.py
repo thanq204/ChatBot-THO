@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     knowledge_embedding_enabled: bool = False
     knowledge_embedding_min_score: float = Field(default=0.38, ge=0.0, le=1.0)
     knowledge_embedding_batch_size: int = Field(default=64, ge=1, le=128)
+    rag_candidate_limit: int = Field(default=6, ge=1, le=20)
+    rag_relevance_threshold: float = Field(default=0.30, ge=0.0, le=1.0)
     llm_temperature: float = Field(default=0.7, ge=0.0, le=2.0)
 
     # Moderation pipeline

@@ -133,12 +133,74 @@ class DiscordRagBot:
         intents.dm_messages = True
         intents.message_content = True
         client = discord.Client(intents=intents)
+        tree = discord.app_commands.CommandTree(client)
         self._client = client
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
 
+        async def run_command(interaction: Any, command: str, argument: str = "") -> None:
+            common = CommonMessage(
+                message_id=f"discord-command-{interaction.id}", platform="discord",
+                community_id=str(getattr(getattr(interaction, "guild", None), "id", "discord")),
+                channel_id=str(getattr(getattr(interaction, "channel", None), "id", "general")),
+                author_id=str(interaction.user.id), text=f"/{command}" + (f" {argument}" if argument else " "),
+                timestamp=datetime.now(UTC), raw={"interaction_id": str(interaction.id)},
+            )
+            outcome = await asyncio.to_thread(self.chat.reply, common, [])
+            await interaction.response.send_message(outcome.answer[: self.settings.discord_reply_max_chars], ephemeral=False)
+
+        @tree.command(name="help", description="Xem danh sách lệnh")
+        async def help_command(interaction: Any) -> None:
+            await run_command(interaction, "help")
+
+        @tree.command(name="start", description="Giới thiệu bot và cách dùng")
+        async def start_command(interaction: Any) -> None:
+            await run_command(interaction, "start")
+
+        @tree.command(name="rule", description="Xem nội quy nhóm học tập")
+        async def rule_command(interaction: Any) -> None:
+            await run_command(interaction, "rule")
+
+        @tree.command(name="event", description="Xem sự kiện hoặc lịch học")
+        async def event_command(interaction: Any) -> None:
+            await run_command(interaction, "event")
+
+        @tree.command(name="daily", description="Xem việc cần làm hôm nay")
+        async def daily_command(interaction: Any) -> None:
+            await run_command(interaction, "daily")
+
+        @tree.command(name="weekly", description="Xem kế hoạch tuần")
+        async def weekly_command(interaction: Any) -> None:
+            await run_command(interaction, "weekly")
+
+        @tree.command(name="faq", description="Xem hướng dẫn FAQ")
+        async def faq_command(interaction: Any) -> None:
+            await run_command(interaction, "faq")
+
+        @tree.command(name="resources", description="Xem tài liệu học tập")
+        async def resources_command(interaction: Any) -> None:
+            await run_command(interaction, "resources")
+
+        @tree.command(name="admin", description="Cách liên hệ Admin hoặc Mod")
+        async def admin_command(interaction: Any) -> None:
+            await run_command(interaction, "admin")
+
+        @tree.command(name="report", description="Báo cáo spam hoặc vi phạm")
+        async def report_command(interaction: Any, details: str) -> None:
+            await run_command(interaction, "report", details)
+
+        @tree.command(name="settings", description="Bật hoặc tắt thông báo daily/weekly")
+        async def settings_command(interaction: Any, kind: str, enabled: bool) -> None:
+            await run_command(interaction, "settings", f"{kind} {'on' if enabled else 'off'}")
+
         @client.event
         async def on_ready() -> None:
+            try:
+                synced = await tree.sync()
+                print(f"[Discord] Slash commands synced: {', '.join(command.name for command in synced)}", flush=True)
+            except Exception as exc:
+                logger.exception("Discord application command registration failed.")
+                print(f"[Discord] Slash command sync failed: {type(exc).__name__}. Reinvite the app with applications.commands scope.", flush=True)
             logger.info("Discord RAG listener ready as %s", client.user)
             print(f"[Discord] RAG listener ready as {client.user}", flush=True)
             telegram_status = "configured" if self.telegram_alerts.configured else "not configured"
@@ -160,7 +222,11 @@ class DiscordRagBot:
             try:
                 if mentioned:
                     question = re.sub(r"<@!?\d+>", "", message.content or "").strip()
-                    outcome = await asyncio.to_thread(self.chat.reply, common_message, [])
+                    # The mention is routing metadata, not user intent. Pass
+                    # only the actual command/question through every chat
+                    # level so e.g. "@bot /help" reaches the Rule router.
+                    chat_message = common_message.model_copy(update={"text": question or " "})
+                    outcome = await asyncio.to_thread(self.chat.reply, chat_message, [])
                     result = outcome.moderation
                 else:
                     result = await asyncio.to_thread(self.pipeline.analyze, common_message, [])
