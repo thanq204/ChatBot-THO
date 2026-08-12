@@ -10,17 +10,15 @@ import { relativeTime } from "../lib/format.js";
 const NOTIFY_PLATFORM_OPTIONS = [
   { value: "telegram", label: "Telegram" },
   { value: "discord", label: "Discord" },
-  { value: "zalo", label: "Zalo" },
-  { value: "messenger", label: "Messenger" },
 ];
 
 export default function NotificationPage() {
   const [platformStatuses, setPlatformStatuses] = useState(null);
   const [selectedPlatforms, setSelectedPlatforms] = useState([]);
-  const [title, setTitle] = useState("");
+  const [actor, setActor] = useState("");
   const [message, setMessage] = useState("");
   const [sending, setSending] = useState(false);
-  const [results, setResults] = useState(null);
+  const [result, setResult] = useState(null);
   const [history, setHistory] = useState(null);
   const [historyError, setHistoryError] = useState(null);
   const [historyLoading, setHistoryLoading] = useState(true);
@@ -37,7 +35,7 @@ export default function NotificationPage() {
     setHistoryError(null);
     ops
       .audit()
-      .then((rows) => setHistory(rows.filter((item) => item.event_type === "notification_sent")))
+      .then((rows) => setHistory(rows.filter((item) => item.event_type === "admin_announcement")))
       .catch((err) => setHistoryError(err.message))
       .finally(() => setHistoryLoading(false));
   }, []);
@@ -50,21 +48,21 @@ export default function NotificationPage() {
     setSelectedPlatforms((prev) => (prev.includes(value) ? prev.filter((item) => item !== value) : [...prev, value]));
   };
 
-  const sendNotify = async (event) => {
+  const sendAnnouncement = async (event) => {
     event.preventDefault();
     if (selectedPlatforms.length === 0 || !message.trim()) return;
     setSending(true);
-    setResults(null);
+    setResult(null);
     try {
-      const response = await ops.notify({
-        platforms: selectedPlatforms,
-        title: title.trim(),
+      const response = await ops.sendAnnouncement({
         message: message.trim(),
+        targets: selectedPlatforms,
+        ...(actor.trim() ? { actor: actor.trim() } : {}),
       });
-      setResults(response);
+      setResult(response);
       loadHistory();
     } catch (err) {
-      setResults([{ platform: "_error", sent: false, detail: err.message }]);
+      setResult({ deliveries: [{ platform: "_error", delivered: false, detail: err.message }] });
     } finally {
       setSending(false);
     }
@@ -74,7 +72,7 @@ export default function NotificationPage() {
     <div className="page-grid">
       <div className="page-grid__row">
         <Card title="Gửi thông báo tới nền tảng" className="span-6">
-          <form className="stack" onSubmit={sendNotify}>
+          <form className="stack" onSubmit={sendAnnouncement}>
             <div className="field">
               Chọn nền tảng
               <div className="chip-row">
@@ -98,8 +96,8 @@ export default function NotificationPage() {
             </div>
 
             <label className="field">
-              Tiêu đề (tuỳ chọn)
-              <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Ví dụ: Cảnh báo hệ thống" maxLength={200} />
+              Người gửi (tuỳ chọn)
+              <input value={actor} onChange={(event) => setActor(event.target.value)} placeholder="Admin" maxLength={100} />
             </label>
 
             <label className="field">
@@ -108,7 +106,7 @@ export default function NotificationPage() {
                 value={message}
                 onChange={(event) => setMessage(event.target.value)}
                 rows={5}
-                maxLength={2000}
+                maxLength={1900}
                 placeholder="Nhập nội dung cần thông báo tới các nền tảng đã chọn..."
                 required
               />
@@ -120,14 +118,14 @@ export default function NotificationPage() {
               </button>
             </div>
 
-            {results && (
+            {result && (
               <div className="stack" style={{ gap: 4 }}>
-                {results.map((result, index) => (
+                {result.deliveries.map((delivery, index) => (
                   <p
-                    key={`${result.platform}-${index}`}
-                    className={`platform-sync__result platform-sync__result--${result.sent ? "success" : "error"}`}
+                    key={`${delivery.platform}-${index}`}
+                    className={`platform-sync__result platform-sync__result--${delivery.delivered ? "success" : "error"}`}
                   >
-                    {result.platform === "_error" ? "Lỗi" : platformLabel(result.platform)}: {result.detail}
+                    {delivery.platform === "_error" ? "Lỗi" : platformLabel(delivery.platform)}: {delivery.detail}
                   </p>
                 ))}
               </div>
@@ -146,18 +144,17 @@ export default function NotificationPage() {
               {history.map((item) => (
                 <div className="list-row" key={item.audit_id}>
                   <div className="list-row__head">
-                    <span className="list-row__title">{item.payload.title || "(không tiêu đề)"}</span>
+                    <span className="list-row__title">{item.payload.announcement_id}</span>
                     <span className="list-row__meta">{relativeTime(item.created_at)}</span>
                   </div>
-                  <p className="list-row__body">{item.payload.message}</p>
                   <div className="chip-row">
-                    {(item.payload.results || []).map((result, index) => (
-                      <span key={`${result.platform}-${index}`} className="chip">
-                        {platformLabel(result.platform)}: {result.sent ? "OK" : "Lỗi"}
+                    {(item.payload.delivered || []).map((delivery, index) => (
+                      <span key={`${delivery.platform}-${index}`} className="chip">
+                        {platformLabel(delivery.platform)}: {delivery.delivered ? "OK" : "Lỗi"}
                       </span>
                     ))}
                   </div>
-                  <span className="list-row__meta">{item.actor}{item.incident_id ? ` · case ${item.incident_id}` : ""}</span>
+                  <span className="list-row__meta">{item.actor}</span>
                 </div>
               ))}
             </div>

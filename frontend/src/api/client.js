@@ -44,7 +44,7 @@ export const ops = {
   importKnowledge: (payload) => post("/knowledge/import", payload),
   knowledgeImports: () => get("/knowledge/imports"),
   seedDemo: () => post("/demo/seed"),
-  notify: (payload) => post("/notify", payload),
+  sendAnnouncement: (payload) => post("/admin/announcements", payload),
 };
 
 /** Sentence-level moderation surface used by the member and review-queue pages. */

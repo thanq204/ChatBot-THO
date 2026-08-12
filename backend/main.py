@@ -10,7 +10,8 @@ from backend.api.operations_routes import get_operations_pipeline
 from backend.api.operations_routes import router as operations_router
 from backend.api.routes import get_review_store, router
 from backend.config import get_settings
-from backend.services.discord_rag_bot import DiscordRagBot
+from backend.services.discord.bot import DiscordRagBot
+from backend.services.telegram.bot import TelegramRagBot
 
 
 @asynccontextmanager
@@ -21,12 +22,15 @@ async def lifespan(app: FastAPI):
     operations_pipeline.store.purge_demo_data()
     operations_pipeline.store.deduplicate_open_incidents()
     discord_rag_bot = DiscordRagBot(operations_pipeline.store, settings, pipeline=operations_pipeline)
+    telegram_rag_bot = TelegramRagBot(operations_pipeline.store, settings, pipeline=operations_pipeline)
     discord_rag_bot.start()
+    telegram_rag_bot.start()
     print(f"Starting {settings.app_name} in {settings.app_env} mode")
     try:
         yield
     finally:
         discord_rag_bot.stop()
+        telegram_rag_bot.stop()
         print("Shutting down...")
 
 
