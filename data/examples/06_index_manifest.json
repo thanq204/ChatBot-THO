@@ -1,0 +1,9 @@
+{
+  "index_name": "knowledge",
+  "collection": "p232_knowledge",
+  "model": "text-embedding-3-small",
+  "dimensions": 1536,
+  "source_chunks": "data/30_chunks/knowledge/",
+  "embedding_version": 1,
+  "built_at": "2026-08-12T10:34:00Z"
+}
