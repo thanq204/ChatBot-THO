@@ -221,6 +221,7 @@ class DiscordRagBot:
             thread_key=str(parent_id or message_id),
             parent_message_id=str(parent_id) if parent_id else None,
             author_id=str(getattr(author, "id", "anonymous")),
+            author_name=getattr(author, "display_name", None) or getattr(author, "global_name", None) or getattr(author, "name", None),
             text=(getattr(message, "content", "") or "").strip() or "[attachment]",
             timestamp=created_at,
             source_url=source_url,

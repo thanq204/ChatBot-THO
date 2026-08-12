@@ -63,7 +63,7 @@ class PlatformConnectors:
             before = items[-1].get("id")
             if len(items) < params["limit"]:
                 break
-        return [CommonMessage(message_id=item["id"], platform="discord", community_id=str(item.get("guild_id") or "discord"), channel_id=channel_id, thread_key=str(item.get("message_reference", {}).get("message_id") or item["id"]), parent_message_id=(item.get("message_reference") or {}).get("message_id"), author_id=str((item.get("author") or {}).get("id") or "anonymous"), text=item.get("content") or "[non-text message]", timestamp=self._date(item.get("timestamp")), source_url=f"https://discord.com/channels/{item.get('guild_id','@me')}/{channel_id}/{item['id']}", raw=item) for item in collected if item.get("content")]
+        return [CommonMessage(message_id=item["id"], platform="discord", community_id=str(item.get("guild_id") or "discord"), channel_id=channel_id, thread_key=str(item.get("message_reference", {}).get("message_id") or item["id"]), parent_message_id=(item.get("message_reference") or {}).get("message_id"), author_id=str((item.get("author") or {}).get("id") or "anonymous"), author_name=(item.get("author") or {}).get("global_name") or (item.get("author") or {}).get("username"), text=item.get("content") or "[non-text message]", timestamp=self._date(item.get("timestamp")), source_url=f"https://discord.com/channels/{item.get('guild_id','@me')}/{channel_id}/{item['id']}", raw=item) for item in collected if item.get("content")]
 
     def _telegram(self, limit: int) -> list[CommonMessage]:
         if not self.settings.telegram_bot_token:
@@ -77,7 +77,9 @@ class PlatformConnectors:
             if not item.get("text"):
                 continue
             chat = item.get("chat") or {}
-            messages.append(CommonMessage(message_id=f"tg-{item.get('chat', {}).get('id')}-{item.get('message_id')}", platform="telegram", community_id=str(chat.get("id") or "telegram"), channel_id=str(chat.get("id") or "general"), thread_key=str(item.get("reply_to_message", {}).get("message_id") or item.get("message_id")), parent_message_id=(item.get("reply_to_message") or {}).get("message_id"), author_id=str((item.get("from") or {}).get("id") or "anonymous"), text=item["text"], timestamp=datetime.fromtimestamp(item.get("date", 0), UTC), raw=update))
+            sender = item.get("from") or {}
+            display_name = sender.get("username") or " ".join(filter(None, [sender.get("first_name"), sender.get("last_name")])) or None
+            messages.append(CommonMessage(message_id=f"tg-{item.get('chat', {}).get('id')}-{item.get('message_id')}", platform="telegram", community_id=str(chat.get("id") or "telegram"), channel_id=str(chat.get("id") or "general"), thread_key=str(item.get("reply_to_message", {}).get("message_id") or item.get("message_id")), parent_message_id=(item.get("reply_to_message") or {}).get("message_id"), author_id=str(sender.get("id") or "anonymous"), author_name=display_name, text=item["text"], timestamp=datetime.fromtimestamp(item.get("date", 0), UTC), raw=update))
         return messages
 
     @staticmethod

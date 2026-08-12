@@ -20,6 +20,7 @@ class CommonMessage(BaseModel):
     thread_key: str | None = Field(default=None, max_length=200)
     parent_message_id: str | None = Field(default=None, max_length=200)
     author_id: str = Field(default="anonymous", min_length=1, max_length=200)
+    author_name: str | None = Field(default=None, max_length=200)
     text: str = Field(..., min_length=1, max_length=10000)
     timestamp: datetime
     source_url: str | None = None
