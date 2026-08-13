@@ -143,6 +143,7 @@ def test_game_invitation_with_ambiguous_danh_is_not_sent_to_admin(tmp_path) -> N
     assert result.gates[1].label == "context_deescalated_benign_activity"
     assert result.decision == "allow"
     assert result.send_to_admin is False
+    assert result.send_to_member is False
     assert result.incident_id is None
     assert TelegramAlertSender.should_alert(result, 0.55) is False
 
@@ -158,6 +159,7 @@ def test_real_threat_with_danh_still_goes_to_admin(tmp_path) -> None:
 
     assert result.decision == "hold_for_review"
     assert result.send_to_admin is True
+    assert result.send_to_member is True
     assert result.incident_id
     assert TelegramAlertSender.should_alert(result, 0.55) is True
 
@@ -211,7 +213,10 @@ def test_identical_threat_is_notified_once_but_escalation_is_not_suppressed(tmp_
     escalation = pipeline.analyze(_message("burst-3", "Bố chém chết m giờ", seconds=2), [])
 
     assert TelegramAlertSender.should_alert(first, 0.55) is True
+    assert first.send_to_member is True
     assert repeated.gates[2].label == "recent_duplicate"
     assert TelegramAlertSender.should_alert(repeated, 0.55) is False
+    assert repeated.send_to_member is False
     assert repeated.incident_id == first.incident_id
     assert TelegramAlertSender.should_alert(escalation, 0.55) is True
+    assert escalation.send_to_member is True

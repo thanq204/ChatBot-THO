@@ -70,6 +70,7 @@ class MessageDecision(BaseModel):
     # Backwards-compatible notification metadata. Existing API consumers can
     # ignore these fields, while realtime connectors can suppress duplicates.
     send_to_admin: bool = True
+    send_to_member: bool = True
     already_marked: bool = False
     can_expand: bool = False
     matched_mark_id: str | None = None

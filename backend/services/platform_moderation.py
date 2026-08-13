@@ -35,8 +35,12 @@ class PlatformModerationService:
         raise PlatformModerationError("Nền tảng này chưa hỗ trợ hành động quản trị trực tiếp.")
 
     def send_automatic_warning(self, message: CommonMessage, decision: MessageDecision, store: OperationsStore) -> AdminPlatformActionResponse | None:
-        """Send one opt-in DM for warn/hide/review; never enforce an action."""
-        if not self.settings.moderation_auto_warn_dm_enabled or decision.decision not in {"warn", "hide", "hold_for_review"}:
+        """DM a member only when the same three gates allow an Admin alert."""
+        if (
+            not self.settings.moderation_auto_warn_dm_enabled
+            or not decision.send_to_member
+            or decision.decision not in {"warn", "hide", "hold_for_review"}
+        ):
             return None
         if message.platform not in {"discord", "telegram"} or message.author_id == "anonymous":
             return None
