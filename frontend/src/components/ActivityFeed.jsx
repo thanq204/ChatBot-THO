@@ -10,7 +10,7 @@ const PLATFORM_ICONS = {
 
 const LIVE_WINDOW_MS = 5 * 60 * 1000;
 
-export default function ActivityFeed({ incidents }) {
+export default function ActivityFeed({ incidents, onSelect }) {
   return (
     <ul className="activity-feed">
       {incidents.map((incident, index) => {
@@ -26,22 +26,29 @@ export default function ActivityFeed({ incidents }) {
             viewport={{ once: true, amount: 0.3 }}
             transition={{ duration: 0.4, delay: index * 0.05, ease: [0.16, 1, 0.3, 1] }}
           >
-            <span className="activity-feed__icon">
-              <Icon size={18} weight="fill" />
-              {isLive && <span className="activity-feed__pulse" aria-hidden="true" />}
-            </span>
-            <div className="activity-feed__body">
-              <div className="activity-feed__meta">
-                <span className="activity-feed__author">
-                  {platformLabel(incident.platform)} · {incident.community_id}
-                </span>
-                <span className="activity-feed__time">{relativeTime(incident.updated_at)}</span>
-              </div>
-              <p className="activity-feed__text">{incident.summary || incident.title}</p>
-              <span className={`badge badge--${incident.severity}`}>
-                {severityLabel(incident.severity)} · {Math.round(incident.risk_score * 100)}%
+            <button
+              type="button"
+              className="activity-feed__button"
+              onClick={() => onSelect(incident.incident_id)}
+              aria-label={`Xem chi tiết: ${incident.title}`}
+            >
+              <span className="activity-feed__icon">
+                <Icon size={18} weight="fill" />
+                {isLive && <span className="activity-feed__pulse" aria-hidden="true" />}
               </span>
-            </div>
+              <span className="activity-feed__body">
+                <span className="activity-feed__meta">
+                  <span className="activity-feed__author">
+                    {platformLabel(incident.platform)} · {incident.community_id}
+                  </span>
+                  <span className="activity-feed__time">{relativeTime(incident.updated_at)}</span>
+                </span>
+                <span className="activity-feed__text">{incident.summary || incident.title}</span>
+                <span className={`badge badge--${incident.severity}`}>
+                  {severityLabel(incident.severity)} · {Math.round(incident.risk_score * 100)}%
+                </span>
+              </span>
+            </button>
           </motion.li>
         );
       })}

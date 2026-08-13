@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { MagnifyingGlass, PencilSimple, Trash, FloppyDisk, Plus, X, UploadSimple, PaperPlaneRight } from "@phosphor-icons/react";
+import { MagnifyingGlass, PencilSimple, Trash, FloppyDisk, Plus, UploadSimple, PaperPlaneRight } from "@phosphor-icons/react";
 import Card from "../components/Card.jsx";
+import Modal from "../components/Modal.jsx";
 import { SkeletonBlock, SkeletonLine } from "../components/Skeleton.jsx";
 import { ErrorState, EmptyState } from "../components/StatePanels.jsx";
 import { ops, fileToBase64 } from "../api/client.js";
@@ -23,6 +24,17 @@ export default function SettingsPage() {
   const [formError, setFormError] = useState("");
   const [saving, setSaving] = useState(false);
 
+  // "manual" types one document, "file" uploads a batch. Both write to the same
+  // knowledge store, so they belong behind the same "Thêm tài liệu" action.
+  const [mode, setMode] = useState("manual");
+  const fileRef = useRef(null);
+  const [importTarget, setImportTarget] = useState("auto");
+  const [importState, setImportState] = useState(null);
+  const [importing, setImporting] = useState(false);
+
+  const [imports, setImports] = useState(null);
+  const [loadingImports, setLoadingImports] = useState(true);
+
   const load = useCallback(() => {
     setLoading(true);
     setError(null);
@@ -33,9 +45,19 @@ export default function SettingsPage() {
       .finally(() => setLoading(false));
   }, []);
 
+  const loadImports = useCallback(() => {
+    setLoadingImports(true);
+    ops
+      .knowledgeImports()
+      .then(setImports)
+      .catch(() => setImports([]))
+      .finally(() => setLoadingImports(false));
+  }, []);
+
   useEffect(() => {
     load();
-  }, [load]);
+    loadImports();
+  }, [load, loadImports]);
 
   const visible = useMemo(() => {
     if (!knowledge) return [];
@@ -45,34 +67,42 @@ export default function SettingsPage() {
 
   const update = (key) => (event) => setForm((prev) => ({ ...prev, [key]: event.target.value }));
 
+  function resetImport() {
+    if (fileRef.current) fileRef.current.value = "";
+    setImportTarget("auto");
+    setImportState(null);
+  }
+
   function startCreate() {
     setEditingId(null);
     setForm(BLANK);
     setFormError("");
+    setMode("manual");
+    resetImport();
     setFormOpen(true);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   function startEdit(item) {
-    console.log("startEdit called with item:", item);
-    try {
-      setEditingId(item.document_id);
-      setForm({ title: item.title, dataset: item.dataset || "", body: item.body || "", tags: (item.tags || []).join(", ") });
-      setFormError("");
-      setFormOpen(true);
-      window.scrollTo({ top: 0, behavior: "smooth" });
-      console.log("startEdit state set successfully");
-    } catch (e) {
-      console.error("Error in startEdit:", e);
-    }
+    setEditingId(item.document_id);
+    setForm({
+      title: item.title,
+      dataset: item.dataset || "",
+      body: item.body || "",
+      tags: (item.tags || []).join(", "),
+    });
+    setFormError("");
+    setMode("manual");
+    setFormOpen(true);
   }
-
-  function cancelEdit() {
+  // identity every render would re-focus the dialog on every keystroke.
+  const cancelEdit = useCallback(() => {
     setEditingId(null);
     setForm(BLANK);
     setFormError("");
+    setImportState(null);
     setFormOpen(false);
-  }
+  }, []);
 
   async function submit(event) {
     event.preventDefault();
@@ -92,6 +122,30 @@ export default function SettingsPage() {
       setFormError(err.message);
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function runImport(event) {
+    event.preventDefault();
+    const file = fileRef.current?.files?.[0];
+    if (!file) return;
+    setImporting(true);
+    setImportState({ tone: "", text: `Đang đọc và chuẩn hóa ${file.name}...` });
+    try {
+      const data = await ops.importKnowledge({ filename: file.name, content_base64: await fileToBase64(file), target: importTarget });
+      setImportState({
+        tone: "success",
+        text: `Đã xử lý ${data.normalized_count} bản ghi bằng ${data.normalized_by}. Bỏ qua: ${data.skipped_count}.${
+          data.warnings?.length ? ` ${data.warnings.join(" | ")}` : ""
+        }`,
+      });
+      if (fileRef.current) fileRef.current.value = "";
+      load();
+      loadImports();
+    } catch (err) {
+      setImportState({ tone: "error", text: err.message });
+    } finally {
+      setImporting(false);
     }
   }
 
@@ -119,13 +173,11 @@ export default function SettingsPage() {
       <div className="page-grid__row">
         <Card
           title="Tài liệu tri thức (RAG)"
-          className={formOpen ? "span-7" : "span-12"}
+          className="span-12"
           action={
-            !formOpen && (
-              <button type="button" className="btn btn--primary" onClick={startCreate}>
-                <Plus size={14} weight="bold" /> Thêm tài liệu
-              </button>
-            )
+            <button type="button" className="btn btn--primary" onClick={startCreate}>
+              <Plus size={14} weight="bold" /> Thêm tài liệu
+            </button>
           }
         >
           <div className="search-box">
@@ -167,18 +219,38 @@ export default function SettingsPage() {
             </div>
           )}
         </Card>
+      </div>
 
-        {formOpen && (
-          <Card
-            title={editingId ? "Sửa tài liệu" : "Thêm tài liệu mới"}
-            className="span-5"
-            delay={0.05}
-            action={
-              <button type="button" className="btn btn--ghost" onClick={cancelEdit} aria-label="Đóng">
-                <X size={16} />
-              </button>
-            }
-          >
+      <div className="page-grid__row">
+        <ImportHistoryCard imports={imports} loading={loadingImports} />
+        <RagAskCard />
+      </div>
+
+      <Modal open={formOpen} title={editingId ? "Sửa tài liệu" : "Thêm tài liệu"} onClose={cancelEdit}>
+        {!editingId && (
+          <div className="segmented" role="tablist" aria-label="Cách thêm tài liệu">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === "manual"}
+              className={`segmented__option ${mode === "manual" ? "is-active" : ""}`.trim()}
+              onClick={() => setMode("manual")}
+            >
+              <PencilSimple size={14} /> Nhập tay
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === "file"}
+              className={`segmented__option ${mode === "file" ? "is-active" : ""}`.trim()}
+              onClick={() => setMode("file")}
+            >
+              <UploadSimple size={14} /> Tải file lên
+            </button>
+          </div>
+        )}
+
+        {(editingId || mode === "manual") && (
           <form className="stack" onSubmit={submit}>
             <label className="field">
               Tiêu đề
@@ -208,91 +280,64 @@ export default function SettingsPage() {
               </button>
             </div>
           </form>
-          </Card>
         )}
-      </div>
 
-      <div className="page-grid__row">
-        <ImportCard onImported={load} />
-        <RagAskCard />
-      </div>
+        {!editingId && mode === "file" && (
+          <form className="stack" onSubmit={runImport}>
+            <p className="muted small">
+              JSON, JSONL, CSV, Markdown, TXT, DOCX hoặc PDF, tối đa 5MB. Hệ thống tự chuẩn hóa về schema canonical và có thể
+              tách một file thành nhiều tài liệu.
+            </p>
+            <label className="field">
+              File
+              <input ref={fileRef} type="file" accept=".json,.jsonl,.csv,.md,.markdown,.txt,.docx,.pdf" required />
+            </label>
+            <label className="field">
+              Đích đến
+              <select value={importTarget} onChange={(event) => setImportTarget(event.target.value)}>
+                <option value="auto">Tự nhận diện knowledge/policy</option>
+                <option value="knowledge">Knowledge document</option>
+                <option value="policy">Policy / rule</option>
+              </select>
+            </label>
+            <div className="form-actions">
+              <button type="submit" className="btn btn--primary" disabled={importing}>
+                <UploadSimple size={14} /> {importing ? "Đang xử lý..." : "Import và chuẩn hóa"}
+              </button>
+              <button type="button" className="btn btn--ghost" onClick={cancelEdit}>
+                Đóng
+              </button>
+            </div>
+            {importState && (
+              <p
+                style={{
+                  fontSize: 12.5,
+                  color:
+                    importState.tone === "error"
+                      ? "var(--sev-critical)"
+                      : importState.tone === "success"
+                        ? "var(--sev-low)"
+                        : "var(--text-secondary)",
+                }}
+              >
+                {importState.text}
+              </p>
+            )}
+          </form>
+        )}
+      </Modal>
     </div>
   );
 }
 
-function ImportCard({ onImported }) {
-  const fileRef = useRef(null);
-  const [target, setTarget] = useState("auto");
-  const [state, setState] = useState(null);
-  const [imports, setImports] = useState(null);
-  const [loadingImports, setLoadingImports] = useState(true);
-
-  const loadImports = useCallback(() => {
-    setLoadingImports(true);
-    ops
-      .knowledgeImports()
-      .then(setImports)
-      .catch(() => setImports([]))
-      .finally(() => setLoadingImports(false));
-  }, []);
-
-  useEffect(() => {
-    loadImports();
-  }, [loadImports]);
-
-  async function runImport(event) {
-    event.preventDefault();
-    const file = fileRef.current?.files?.[0];
-    if (!file) return;
-    setState({ tone: "", text: `Đang đọc và chuẩn hóa ${file.name}...` });
-    try {
-      const data = await ops.importKnowledge({ filename: file.name, content_base64: await fileToBase64(file), target });
-      setState({
-        tone: "success",
-        text: `Đã xử lý ${data.normalized_count} bản ghi bằng ${data.normalized_by}. Bỏ qua: ${data.skipped_count}.${
-          data.warnings?.length ? ` ${data.warnings.join(" | ")}` : ""
-        }`,
-      });
-      if (fileRef.current) fileRef.current.value = "";
-      loadImports();
-      onImported();
-    } catch (err) {
-      setState({ tone: "error", text: err.message });
-    }
-  }
-
+function ImportHistoryCard({ imports, loading }) {
   return (
-    <Card title="Import tài liệu" className="span-5">
-      <p className="muted small">JSON, JSONL, CSV, Markdown, TXT, DOCX hoặc PDF. Hệ thống tự chuẩn hóa về schema canonical.</p>
-      <form className="stack" onSubmit={runImport}>
-        <label className="field">
-          File
-          <input ref={fileRef} type="file" accept=".json,.jsonl,.csv,.md,.markdown,.txt,.docx,.pdf" required />
-        </label>
-        <label className="field">
-          Đích đến
-          <select value={target} onChange={(event) => setTarget(event.target.value)}>
-            <option value="auto">Tự nhận diện knowledge/policy</option>
-            <option value="knowledge">Knowledge document</option>
-            <option value="policy">Policy / rule</option>
-          </select>
-        </label>
-        <div className="form-actions">
-          <button type="submit" className="btn btn--primary">
-            <UploadSimple size={14} /> Import và chuẩn hóa
-          </button>
-        </div>
-        {state && (
-          <p style={{ fontSize: 12.5, color: state.tone === "error" ? "var(--sev-critical)" : state.tone === "success" ? "var(--sev-low)" : "var(--text-secondary)" }}>
-            {state.text}
-          </p>
-        )}
-      </form>
-
-      <span className="section-heading">Lịch sử import</span>
-      {loadingImports && <SkeletonLine width="80%" />}
-      {!loadingImports && (!imports || imports.length === 0) && <EmptyState message="Chưa import lần nào." />}
-      {!loadingImports && imports && imports.length > 0 && (
+    <Card title="Lịch sử import" className="span-5">
+      {loading && <SkeletonLine width="80%" />}
+      {!loading && (!imports || imports.length === 0) && (
+        <EmptyState message="Chưa import lần nào. Dùng “Thêm tài liệu → Tải file lên” để nạp hàng loạt." />
+      )}
+      {!loading && imports && imports.length > 0 && (
         <div className="list">
           {imports.map((item) => (
             <div className="list-row" key={item.import_id}>
