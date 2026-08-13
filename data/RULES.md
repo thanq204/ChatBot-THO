@@ -15,7 +15,7 @@ File này là quy ước bắt buộc cho mọi thành viên và mọi Chat AI l
 9. Liên kết bản ghi bằng ID, không liên kết bằng tên file hoặc tên thư mục.
 10. Không lưu API key, password, token hoặc secret trong thư mục này.
 11. Không commit database, raw upload, embedding, index, lock hoặc log sinh tự động nếu team chưa thống nhất.
-12. Không tạo database riêng cho FAQ, RAG hoặc embedding. `data/app.db` vẫn là database chính hiện tại.
+12. `data/app.db` vẫn là database nghiệp vụ chính. PostgreSQL + pgvector (Docker) được dùng riêng cho vector search và embedding index theo spec FAQ/RAG module. Dữ liệu normalized và chunks vẫn phải tồn tại dưới dạng JSONL trong pipeline chuẩn.
 13. File lỗi phải giữ trong `quarantine/`, không được âm thầm xóa.
 14. Trước khi đổi schema, phải cập nhật README mini tương ứng và nêu rõ ảnh hưởng migration.
 

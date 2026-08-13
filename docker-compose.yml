@@ -17,3 +17,23 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: faq_rag_postgres
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: faq_rag
+      POSTGRES_USER: faq_user
+      POSTGRES_PASSWORD: faq_pass_dev
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U faq_user -d faq_rag"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:

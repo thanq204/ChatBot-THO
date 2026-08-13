@@ -14,6 +14,8 @@ from html import unescape
 from pathlib import Path, PurePath
 from xml.etree import ElementTree
 
+import PyPDF2
+
 from backend.config import Settings, get_settings
 from backend.models.operations import (
     KnowledgeDocumentRequest,
@@ -23,7 +25,7 @@ from backend.models.operations import (
 from backend.services.operations_store import OperationsStore
 from backend.services.semantic_extractor import SemanticDocumentExtractor, SemanticExtractionError
 
-ALLOWED_FORMATS = {"json", "jsonl", "csv", "md", "markdown", "txt", "docx"}
+ALLOWED_FORMATS = {"json", "jsonl", "csv", "md", "markdown", "txt", "docx", "pdf"}
 VALID_ACTIONS = {"allow", "warn", "hide", "hold_for_review"}
 
 
@@ -42,7 +44,7 @@ class KnowledgeImporter:
         if extension == "markdown":
             extension = "md"
         if extension not in ALLOWED_FORMATS:
-            raise KnowledgeImportError("Định dạng chưa được phép. Chỉ nhận JSON, JSONL, CSV, MD, TXT hoặc DOCX.")
+            raise KnowledgeImportError("Định dạng chưa được phép. Chỉ nhận JSON, JSONL, CSV, MD, TXT, DOCX hoặc PDF.")
         if len(content) > 5 * 1024 * 1024:
             raise KnowledgeImportError("File vượt quá giới hạn 5MB.")
         try:
@@ -121,6 +123,8 @@ class KnowledgeImporter:
             return f"Original file archive skipped: {type(exc).__name__}. Normalized records were still saved."
 
     def _parse(self, extension: str, content: bytes, filename: str) -> list[dict[str, object]]:
+        if extension == "pdf":
+            return [{"title": PurePath(filename).stem, "body": self._pdf_text(content), "tags": ["document"]}]
         if extension == "docx":
             return [{"title": PurePath(filename).stem, "body": self._docx_text(content), "tags": ["document"]}]
         text = content.decode("utf-8-sig", errors="replace")
@@ -184,3 +188,16 @@ class KnowledgeImporter:
             return "\n\n".join(paragraphs)
         except (KeyError, zipfile.BadZipFile, ElementTree.ParseError) as exc:
             raise KnowledgeImportError("DOCX không đọc được hoặc bị hỏng.") from exc
+
+    @staticmethod
+    def _pdf_text(content: bytes) -> str:
+        try:
+            reader = PyPDF2.PdfReader(io.BytesIO(content))
+            pages = []
+            for page in reader.pages:
+                text = page.extract_text()
+                if text:
+                    pages.append(text.strip())
+            return "\n\n".join(pages)
+        except Exception as exc:
+            raise KnowledgeImportError("PDF không đọc được hoặc bị hỏng.") from exc
