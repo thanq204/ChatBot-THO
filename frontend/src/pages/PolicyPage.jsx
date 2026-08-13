@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { MagnifyingGlass, PencilSimple, Trash, FloppyDisk, Plus, X } from "@phosphor-icons/react";
+import { MagnifyingGlass, PencilSimple, Trash, FloppyDisk, Plus } from "@phosphor-icons/react";
 import Card from "../components/Card.jsx";
 import Badge from "../components/Badge.jsx";
+import Modal from "../components/Modal.jsx";
 import { SkeletonBlock } from "../components/Skeleton.jsx";
 import { ErrorState, EmptyState } from "../components/StatePanels.jsx";
 import { ops } from "../api/client.js";
@@ -69,12 +70,14 @@ export default function PolicyPage() {
     setFormOpen(true);
   }
 
-  function cancelEdit() {
+  // Memoised: Modal keys its Escape/scroll-lock effect on onClose, and a fresh
+  // identity every render would re-focus the dialog on every keystroke.
+  const cancelEdit = useCallback(() => {
     setEditingId(null);
     setForm(BLANK);
     setFormError("");
     setFormOpen(false);
-  }
+  }, []);
 
   async function submit(event) {
     event.preventDefault();
@@ -122,13 +125,11 @@ export default function PolicyPage() {
       <div className="page-grid__row">
         <Card
           title="Rules đang áp dụng"
-          className={formOpen ? "span-7" : "span-12"}
+          className="span-12"
           action={
-            !formOpen && (
-              <button type="button" className="btn btn--primary" onClick={startCreate}>
-                <Plus size={14} weight="bold" /> Thêm policy
-              </button>
-            )
+            <button type="button" className="btn btn--primary" onClick={startCreate}>
+              <Plus size={14} weight="bold" /> Thêm policy
+            </button>
           }
         >
           <div className="search-box">
@@ -173,65 +174,54 @@ export default function PolicyPage() {
             </div>
           )}
         </Card>
-
-        {formOpen && (
-          <Card
-            title={editingId ? "Sửa policy" : "Thêm policy mới"}
-            className="span-5"
-            delay={0.05}
-            action={
-              <button type="button" className="btn btn--ghost" onClick={cancelEdit} aria-label="Đóng">
-                <X size={16} />
-              </button>
-            }
-          >
-          <form className="stack" onSubmit={submit}>
-            <label className="field">
-              Tên policy
-              <input value={form.name} onChange={update("name")} placeholder="Tên policy" required maxLength={200} />
-            </label>
-            <div className="field-row">
-              <label className="field">
-                Category
-                <select value={form.category} onChange={update("category")}>
-                  <option value="other">Khác</option>
-                  <option value="spam">Spam</option>
-                  <option value="harassment">Công kích</option>
-                  <option value="violence">Đe dọa / bạo lực</option>
-                  <option value="hate">Thù ghét</option>
-                </select>
-              </label>
-              <label className="field">
-                Action
-                <select value={form.action} onChange={update("action")}>
-                  <option value="hold_for_review">Chờ review</option>
-                  <option value="allow">Cho phép</option>
-                  <option value="warn">Cảnh báo</option>
-                  <option value="hide">Ẩn</option>
-                </select>
-              </label>
-            </div>
-            <label className="field">
-              Từ khóa kích hoạt
-              <input value={form.terms} onChange={update("terms")} placeholder="Từ khóa, cách nhau bằng dấu phẩy" />
-            </label>
-            <label className="field">
-              Mô tả
-              <textarea value={form.description} onChange={update("description")} rows={3} placeholder="Mô tả policy" required maxLength={1000} />
-            </label>
-            {formError && <p style={{ color: "var(--sev-critical)", fontSize: 12.5 }}>{formError}</p>}
-            <div className="form-actions">
-              <button type="submit" className="btn btn--primary" disabled={saving}>
-                <FloppyDisk size={14} weight="bold" /> {editingId ? "Cập nhật" : "Lưu policy"}
-              </button>
-              <button type="button" className="btn btn--ghost" onClick={cancelEdit}>
-                Hủy
-              </button>
-            </div>
-          </form>
-        </Card>
-        )}
       </div>
+
+      <Modal open={formOpen} title={editingId ? "Sửa policy" : "Thêm policy mới"} onClose={cancelEdit}>
+        <form className="stack" onSubmit={submit}>
+          <label className="field">
+            Tên policy
+            <input value={form.name} onChange={update("name")} placeholder="Tên policy" required maxLength={200} />
+          </label>
+          <div className="field-row">
+            <label className="field">
+              Category
+              <select value={form.category} onChange={update("category")}>
+                <option value="other">Khác</option>
+                <option value="spam">Spam</option>
+                <option value="harassment">Công kích</option>
+                <option value="violence">Đe dọa / bạo lực</option>
+                <option value="hate">Thù ghét</option>
+              </select>
+            </label>
+            <label className="field">
+              Action
+              <select value={form.action} onChange={update("action")}>
+                <option value="hold_for_review">Chờ review</option>
+                <option value="allow">Cho phép</option>
+                <option value="warn">Cảnh báo</option>
+                <option value="hide">Ẩn</option>
+              </select>
+            </label>
+          </div>
+          <label className="field">
+            Từ khóa kích hoạt
+            <input value={form.terms} onChange={update("terms")} placeholder="Từ khóa, cách nhau bằng dấu phẩy" />
+          </label>
+          <label className="field">
+            Mô tả
+            <textarea value={form.description} onChange={update("description")} rows={3} placeholder="Mô tả policy" required maxLength={1000} />
+          </label>
+          {formError && <p style={{ color: "var(--sev-critical)", fontSize: 12.5 }}>{formError}</p>}
+          <div className="form-actions">
+            <button type="submit" className="btn btn--primary" disabled={saving}>
+              <FloppyDisk size={14} weight="bold" /> {editingId ? "Cập nhật" : "Lưu policy"}
+            </button>
+            <button type="button" className="btn btn--ghost" onClick={cancelEdit}>
+              Hủy
+            </button>
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 }

@@ -60,6 +60,22 @@ export const STATUS_COLORS = {
   snoozed: "var(--text-muted)",
 };
 
+/** event_type values written by OperationsStore.add_audit and the admin routes. */
+export const AUDIT_EVENT_LABELS = {
+  incident_created: "Mở case",
+  message_grouped: "Gộp thêm message",
+  analysis_completed: "AI phân tích xong",
+  incident_updated: "Admin cập nhật case",
+  admin_platform_action: "Admin xử lý trên nền tảng",
+  automatic_moderation_dm: "Tự động nhắn nhắc nhở",
+  member_report_created: "Thành viên báo cáo",
+  admin_announcement: "Admin gửi thông báo",
+};
+
+export function auditEventLabel(value) {
+  return AUDIT_EVENT_LABELS[value] ?? value;
+}
+
 /** operations.py Decision enum: shared by incidents, policy actions and message decisions. */
 export const DECISION_LABELS = {
   allow: "Cho phép",

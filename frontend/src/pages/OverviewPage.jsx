@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChatsCircle, WarningCircle, ArrowsClockwise } from "@phosphor-icons/react";
 import Card from "../components/Card.jsx";
+import IncidentDetailModal from "../components/IncidentDetailModal.jsx";
 import StatTile from "../components/StatTile.jsx";
 import RankList from "../components/RankList.jsx";
 import PlatformRing from "../components/PlatformRing.jsx";
@@ -10,6 +11,7 @@ import { SkeletonLine, SkeletonBlock } from "../components/Skeleton.jsx";
 import { ErrorState, EmptyState } from "../components/StatePanels.jsx";
 import { ops } from "../api/client.js";
 import { categoryLabel, platformLabel, CATEGORY_COLORS, decisionLabel, DECISION_COLORS } from "../lib/taxonomy.js";
+import { caseHeadline } from "../lib/incidents.js";
 
 function buildCategoryRanks(summary) {
   const entries = Object.entries(summary.by_category).filter(([category]) => category !== "safe");
@@ -36,6 +38,7 @@ export default function OverviewPage() {
   const [pullLimit, setPullLimit] = useState("100");
   const [syncing, setSyncing] = useState("");
   const [syncResult, setSyncResult] = useState(null);
+  const [openId, setOpenId] = useState(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -53,6 +56,13 @@ export default function OverviewPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const closeDetail = useCallback(() => setOpenId(null), []);
+
+  const openIncident = useMemo(
+    () => (incidents ?? []).find((item) => item.incident_id === openId) ?? null,
+    [incidents, openId],
+  );
 
   const seedDemo = async () => {
     setSeeding(true);
@@ -215,7 +225,7 @@ export default function OverviewPage() {
         <Card title="Luồng hoạt động thời gian thực" className="span-5" delay={0.1}>
           {loading && <SkeletonBlock height={260} />}
           {!loading && (incidents && incidents.length > 0 ? (
-            <ActivityFeed incidents={incidents} />
+            <ActivityFeed incidents={incidents} onSelect={setOpenId} />
           ) : (
             <EmptyState message="Hệ thống chưa ghi nhận sự cố nào gần đây." />
           ))}
@@ -240,6 +250,13 @@ export default function OverviewPage() {
           />
         </div>
       </div>
+
+      <IncidentDetailModal
+        incidentId={openId}
+        headline={openIncident ? caseHeadline(openIncident) : ""}
+        onClose={closeDetail}
+        onUpdated={load}
+      />
     </div>
   );
 }
