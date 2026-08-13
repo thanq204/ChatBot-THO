@@ -359,9 +359,21 @@ a {
   color: var(--text-primary);
 }
 
-.account__role {
+.account__meta {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+
+.account__name {
   font-size: 13px;
   font-weight: 600;
+  white-space: nowrap;
+}
+
+.account__role {
+  font-size: 11px;
+  color: var(--text-muted);
   white-space: nowrap;
 }
 
@@ -1387,7 +1399,7 @@ button.list-row:hover {
     width: 160px;
   }
 
-  .account__role {
+  .account__meta {
     display: none;
   }
 

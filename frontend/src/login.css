@@ -1,0 +1,420 @@
+/* ==========================================================================
+   Login. Same sakura system as the landing page so the portal lands on a
+   surface the user already recognises. Tokens live in anime.css.
+   ========================================================================== */
+
+.auth {
+  --l-danger: #c2185b;
+
+  position: relative;
+  overflow: hidden;
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 44px 20px;
+  font-size: 16px;
+  color: var(--sk-text);
+  /* Soft pink at the top, white through the middle, lavender at the base. */
+  background:
+    radial-gradient(78% 42% at 50% 0%, var(--sk-wash-top), transparent 72%),
+    radial-gradient(88% 46% at 50% 100%, var(--sk-wash-bottom), transparent 74%),
+    var(--sk-bg);
+}
+
+:root[data-theme="dark"] .auth {
+  --l-danger: #f9a8d4;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .auth {
+    --l-danger: #f9a8d4;
+  }
+}
+
+.auth__blobs {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.auth__blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(84px);
+  will-change: transform;
+  animation: auth-blob 20s ease-in-out infinite;
+}
+
+.auth__blob--pink {
+  top: -120px;
+  left: 8%;
+  width: 420px;
+  height: 420px;
+  background: var(--sk-glow-pink);
+}
+
+.auth__blob--lavender {
+  bottom: -140px;
+  right: 6%;
+  width: 440px;
+  height: 440px;
+  background: var(--sk-glow-lavender);
+  animation-delay: -10s;
+}
+
+@keyframes auth-blob {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(-22px, 26px, 0) scale(1.07);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .auth__blob {
+    animation: none;
+  }
+}
+
+.auth__card {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 432px;
+  padding: 30px 34px 30px;
+  border-radius: var(--sk-radius-card);
+  border: 1px solid var(--sk-border);
+  background: color-mix(in srgb, var(--sk-surface) 90%, transparent);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  /* Pink halo as a shadow, not a pseudo-element. A negative z-index child
+     would paint over the card's own background and tint the form. */
+  box-shadow: var(--sk-shadow-lift), 0 0 64px -12px rgb(219 39 119 / 0.34),
+    0 0 40px -18px rgb(139 92 246 / 0.3);
+}
+
+.auth__back {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  color: var(--sk-text-2);
+  text-decoration: none;
+  border-radius: 6px;
+  transition: color 0.2s var(--sk-ease);
+}
+
+.auth__back:hover {
+  color: var(--sk-accent);
+}
+
+.auth__head {
+  margin-top: 18px;
+  text-align: center;
+}
+
+.auth__mascot {
+  margin: 0 auto 14px;
+}
+
+.auth__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--sk-text-2);
+}
+
+.auth__title {
+  margin-top: 12px;
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: -0.02em;
+  color: var(--sk-text);
+}
+
+.auth__form {
+  margin-top: 26px;
+  display: grid;
+  gap: 16px;
+}
+
+/* --------------------------------------------------------------------------
+   Fields
+   -------------------------------------------------------------------------- */
+
+.field {
+  display: grid;
+  gap: 7px;
+}
+
+.field__label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--sk-text);
+}
+
+.field__wrap {
+  position: relative;
+}
+
+.field__input {
+  width: 100%;
+  padding: 12px 14px;
+  font-size: 14px;
+  border-radius: var(--sk-radius-control);
+  border: 1px solid var(--sk-border);
+  background: var(--sk-surface);
+  color: var(--sk-text);
+  transition: border-color 0.2s var(--sk-ease), box-shadow 0.2s var(--sk-ease);
+}
+
+.field__wrap .field__input {
+  padding-right: 46px;
+}
+
+.field__input:focus {
+  outline: none;
+  border-color: var(--sk-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--sk-accent) 20%, transparent);
+}
+
+.field__input--invalid {
+  border-color: var(--l-danger);
+}
+
+.field__input--invalid:focus {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--l-danger) 22%, transparent);
+}
+
+.field__reveal {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: none;
+  background: transparent;
+  border-radius: var(--sk-radius-control);
+  color: var(--sk-text-3);
+  transition: color 0.2s var(--sk-ease), background-color 0.2s var(--sk-ease);
+}
+
+.field__reveal:hover {
+  color: var(--sk-accent);
+  background: var(--sk-surface-2);
+}
+
+.field__error {
+  font-size: 12.5px;
+  color: var(--l-danger);
+}
+
+/* --------------------------------------------------------------------------
+   Actions
+   -------------------------------------------------------------------------- */
+
+.auth__submit {
+  margin-top: 4px;
+  width: 100%;
+  padding: 13px 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 14.5px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--sk-btn);
+  border: 1px solid transparent;
+  border-radius: var(--sk-radius-chip);
+  box-shadow: 0 4px 14px rgb(219 39 119 / 0.24);
+  transition: transform 0.24s var(--sk-ease), box-shadow 0.24s var(--sk-ease);
+}
+
+.auth__submit:hover:not(:disabled) {
+  transform: scale(1.02);
+  box-shadow: 0 8px 26px rgb(219 39 119 / 0.36);
+}
+
+.auth__submit:active:not(:disabled) {
+  transform: scale(0.985);
+}
+
+.auth__submit:disabled {
+  opacity: 0.74;
+  cursor: progress;
+}
+
+.sk-mark--on-dark {
+  color: #fff;
+}
+
+.auth__alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 11px 13px;
+  border-radius: var(--sk-radius-control);
+  border: 1px solid color-mix(in srgb, var(--l-danger) 38%, transparent);
+  background: color-mix(in srgb, var(--l-danger) 10%, transparent);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--l-danger);
+}
+
+.auth__alert svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+/* --------------------------------------------------------------------------
+   Demo accounts. Visible on purpose: there is no real auth service behind
+   this form yet, so the credentials are not a secret.
+   -------------------------------------------------------------------------- */
+
+.auth__demo {
+  margin-top: 22px;
+  padding: 14px;
+  border-radius: var(--sk-radius-control);
+  border: 1px dashed var(--sk-border-2);
+  background: color-mix(in srgb, var(--sk-surface-2) 70%, transparent);
+}
+
+.auth__demo-lead {
+  font-size: 11.5px;
+  color: var(--sk-text-3);
+}
+
+.auth__demo-row {
+  margin-top: 8px;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 11px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: var(--sk-surface);
+  text-align: left;
+  transition: border-color 0.2s var(--sk-ease), transform 0.2s var(--sk-ease);
+}
+
+.auth__demo-row:hover {
+  border-color: color-mix(in srgb, var(--sk-accent) 40%, transparent);
+  transform: translateY(-1px);
+}
+
+.auth__demo-row:active {
+  transform: scale(0.99);
+}
+
+.auth__demo-email {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--sk-text);
+}
+
+.auth__demo-role {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--sk-accent);
+  white-space: nowrap;
+}
+
+.auth__minor {
+  justify-self: center;
+  font-size: 13px;
+  color: var(--sk-text-2);
+  text-decoration: none;
+  border-radius: 6px;
+}
+
+.auth__minor:hover {
+  color: var(--sk-accent);
+  text-decoration: underline;
+}
+
+/* --------------------------------------------------------------------------
+   Alternate sign in
+   -------------------------------------------------------------------------- */
+
+.auth__divider {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 14px;
+  margin: 24px 0;
+  font-size: 12.5px;
+  color: var(--sk-text-3);
+}
+
+.auth__divider::before,
+.auth__divider::after {
+  content: "";
+  height: 1px;
+  background: var(--sk-border);
+}
+
+.auth__google {
+  width: 100%;
+  padding: 12px 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--sk-text);
+  background: transparent;
+  border: 1px solid var(--sk-border);
+  border-radius: var(--sk-radius-chip);
+  transition: background-color 0.2s var(--sk-ease), border-color 0.2s var(--sk-ease);
+}
+
+.auth__google:hover:not(:disabled) {
+  background: var(--sk-surface-2);
+  border-color: var(--sk-border-2);
+}
+
+.auth__google:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.auth__foot {
+  margin-top: 22px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--sk-text-2);
+}
+
+.auth__foot a {
+  font-weight: 600;
+  color: var(--sk-accent);
+  text-decoration: none;
+  border-radius: 6px;
+}
+
+.auth__foot a:hover {
+  text-decoration: underline;
+}
+
+@media (max-width: 480px) {
+  .auth {
+    padding: 24px 16px;
+    align-items: start;
+  }
+
+  .auth__card {
+    padding: 24px 22px 24px;
+  }
+}

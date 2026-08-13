@@ -1,0 +1,116 @@
+/* ==========================================================================
+   Ambient sakura layer and cursor trail. Purely decorative, never
+   interactive. Only transform and opacity animate, so both stay on the
+   compositor.
+   ========================================================================== */
+
+.sakura {
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* Contained inside a section, e.g. the login screen. */
+.sakura--block {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+
+/* Pinned to the viewport so petals keep falling the whole way down the page.
+   Sits behind content: .landing > main is lifted to z-index 1. */
+.sakura--page {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+}
+
+.sakura__petal {
+  position: absolute;
+  top: 0;
+  width: var(--sk-size);
+  height: var(--sk-size);
+  color: var(--sk-petal);
+  opacity: var(--sk-petal-opacity);
+  will-change: transform;
+  animation: sk-fall var(--sk-dur) linear var(--sk-delay) infinite;
+}
+
+.sakura__petal svg,
+.sakura__sparkle svg,
+.sakura-trail__bit svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+@keyframes sk-fall {
+  from {
+    transform: translate3d(0, -12vh, 0) rotate(var(--sk-tilt));
+  }
+  to {
+    transform: translate3d(var(--sk-drift), 112vh, 0) rotate(calc(var(--sk-tilt) + 300deg));
+  }
+}
+
+.sakura__sparkle {
+  position: absolute;
+  width: var(--sk-size);
+  height: var(--sk-size);
+  color: var(--sk-pink-soft);
+  opacity: 0;
+  will-change: transform, opacity;
+  animation: sk-twinkle var(--sk-dur) ease-in-out var(--sk-delay) infinite;
+}
+
+@keyframes sk-twinkle {
+  0%,
+  100% {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  45% {
+    opacity: 0.85;
+    transform: scale(1);
+  }
+  70% {
+    opacity: 0.25;
+    transform: scale(0.85);
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Cursor trail
+   -------------------------------------------------------------------------- */
+
+.sakura-trail {
+  position: fixed;
+  inset: 0;
+  /* Above the sticky nav (20) but under the page portal (90). */
+  z-index: 30;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.sakura-trail__bit {
+  position: fixed;
+  width: var(--sk-size);
+  height: var(--sk-size);
+  /* Centred on the cursor without a translate, so the JS animation owns
+     transform outright. */
+  margin: calc(var(--sk-size) / -2) 0 0 calc(var(--sk-size) / -2);
+  opacity: 0;
+  color: var(--sk-accent);
+  will-change: transform, opacity;
+}
+
+.sakura-trail__bit--petal {
+  color: var(--sk-pink-soft);
+}
+
+/* Atmosphere, not information. Remove both layers when asked. */
+@media (prefers-reduced-motion: reduce) {
+  .sakura,
+  .sakura-trail {
+    display: none;
+  }
+}

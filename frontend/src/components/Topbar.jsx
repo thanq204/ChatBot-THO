@@ -1,8 +1,26 @@
-import { List, MagnifyingGlass, ChatCircleDots, Bell, Moon, Sun, UserCircle } from "@phosphor-icons/react";
+import { useNavigate } from "react-router-dom";
+import {
+  List,
+  MagnifyingGlass,
+  ChatCircleDots,
+  Bell,
+  Moon,
+  SignOut,
+  Sun,
+  UserCircle,
+} from "@phosphor-icons/react";
+import { useAuth } from "../auth/AuthProvider.jsx";
 import { useTheme } from "../theme/ThemeProvider.jsx";
 
 export default function Topbar({ breadcrumb, onMenuClick }) {
   const { theme, toggleTheme } = useTheme();
+  const { user, signOut } = useAuth();
+  const navigate = useNavigate();
+
+  const handleSignOut = () => {
+    signOut();
+    navigate("/", { replace: true });
+  };
 
   return (
     <header className="topbar">
@@ -39,7 +57,13 @@ export default function Topbar({ breadcrumb, onMenuClick }) {
 
         <div className="account">
           <UserCircle size={26} weight="fill" />
-          <span className="account__role">Quản trị viên</span>
+          <span className="account__meta">
+            <span className="account__name">{user?.name ?? "Khách"}</span>
+            <span className="account__role">{user?.role ?? "Chưa đăng nhập"}</span>
+          </span>
+          <button type="button" className="icon-btn" onClick={handleSignOut} aria-label="Đăng xuất" title="Đăng xuất">
+            <SignOut size={18} />
+          </button>
         </div>
       </div>
     </header>
