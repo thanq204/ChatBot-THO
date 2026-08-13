@@ -38,6 +38,22 @@ Luồng moderation memory riêng:
   -> 14_moderation_match_result.json
 ```
 
+## Dữ liệu cần thu thập thủ công
+
+Mỗi file từ `15` đến `21` chỉ chứa đúng một record để minh họa trên Git. Thành viên Data tạo thêm record theo cùng schema tại nơi tiếp nhận/chuẩn hóa tương ứng, không sửa file mẫu thành dữ liệu production.
+
+| Loại dữ liệu | File mẫu | Nơi tiếp nhận | Nơi chuẩn hóa | Bảng runtime |
+|---|---|---|---|---|
+| Tài liệu RAG | `15_manual_knowledge_example.jsonl` | `data/00_inbox/web_uploads/` | `data/20_normalized/knowledge/knowledge.jsonl` | `operations_knowledge` |
+| FAQ đã duyệt | `16_manual_faq_example.jsonl` | `data/00_inbox/member_questions/` hoặc trang Admin | `data/20_normalized/faq/published_faq.jsonl` | `operations_faqs` |
+| Policy moderation | `17_manual_policy_example.jsonl` | Trang Quy tắc AI | `data/20_normalized/policies/policies.jsonl` | `operations_policies` |
+| Case Admin/Mod đã duyệt | `18_manual_moderation_mark_example.jsonl` | Incident đã review | `data/20_normalized/moderation_memory/moderation_marks.jsonl` | `operations_moderation_marks` |
+| Context moderation có nhãn | `19_manual_context_case_example.jsonl` | Phiên review thủ công | `data/20_normalized/messages/moderation_context_cases.jsonl` | Chưa có bảng riêng |
+| Case eval thủ công | `20_manual_eval_example.jsonl` | Tổng hợp từ QA | `data/90_exports/eval/moderation_eval.jsonl` | Không dùng runtime |
+| Nội dung command | `21_manual_command_content_example.jsonl` | Trang Admin/API | `data/90_exports/command_content.jsonl` | `operations_command_content` |
+
+`moderation mark` chỉ được đưa vào runtime sau khi Admin/Mod xác nhận. Case mẫu không phải dữ liệu production và không được dùng để tự động ban, kick hoặc xóa message.
+
 ## Quy tắc cho Chat AI
 
 ```text

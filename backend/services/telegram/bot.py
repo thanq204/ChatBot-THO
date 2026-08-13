@@ -16,6 +16,7 @@ from backend.services.chat_orchestrator import ChatOrchestrator
 from backend.services.operations_pipeline import OperationsPipeline
 from backend.services.operations_store import OperationsStore
 from backend.services.platform_moderation import PlatformModerationService
+from backend.services.telegram.alerts import TelegramAlertSender
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,7 @@ class TelegramRagBot:
         self.store = store
         self.pipeline = pipeline or OperationsPipeline(store=store, settings=self.settings)
         self.chat = ChatOrchestrator(store, self.settings, self.pipeline)
+        self.telegram_alerts = TelegramAlertSender(self.settings)
         self.platform_moderation = PlatformModerationService(self.settings)
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
@@ -137,6 +139,8 @@ class TelegramRagBot:
         else:
             result = self.pipeline.analyze(common, [])
         if result:
+            if self.telegram_alerts.send_alert(common, result):
+                logger.info("Admin Telegram alert sent for Telegram message %s", common.message_id)
             warning = self.platform_moderation.send_automatic_warning(common, result, self.store)
             if warning:
                 logger.info("Automatic Telegram warning DM for %s completed=%s", common.message_id, warning.completed)

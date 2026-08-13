@@ -32,7 +32,7 @@ class TelegramAlertSender:
 
     @staticmethod
     def should_alert(result: MessageDecision, threshold: float) -> bool:
-        return result.decision != "allow" or result.risk_score >= threshold
+        return result.send_to_admin and (result.decision != "allow" or result.risk_score >= threshold)
 
     def send_alert(
         self,
