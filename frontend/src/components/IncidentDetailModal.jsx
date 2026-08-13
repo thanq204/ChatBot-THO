@@ -1,0 +1,187 @@
+import { useCallback, useEffect, useState } from "react";
+import Badge from "./Badge.jsx";
+import Modal from "./Modal.jsx";
+import Disclosure from "./Disclosure.jsx";
+import { SkeletonBlock, SkeletonLine } from "./Skeleton.jsx";
+import { ErrorState, EmptyState } from "./StatePanels.jsx";
+import { ops } from "../api/client.js";
+import {
+  platformLabel,
+  severityLabel,
+  SEVERITY_COLORS,
+  statusLabel,
+  STATUS_COLORS,
+  categoryLabel,
+  CATEGORY_COLORS,
+  decisionLabel,
+  DECISION_COLORS,
+  auditEventLabel,
+} from "../lib/taxonomy.js";
+import { primaryCategory } from "../lib/incidents.js";
+import { relativeTime, percent } from "../lib/format.js";
+
+const STATUS_OPTIONS = ["open", "monitoring", "resolved", "snoozed"];
+
+/**
+ * Case detail as a dialog, shared by the community list and the overview feed.
+ * `onClose` must be a stable reference — Modal keys its Escape/scroll-lock
+ * effect on it.
+ */
+export default function IncidentDetailModal({ incidentId, headline, onClose, onUpdated }) {
+  const [detail, setDetail] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [savingStatus, setSavingStatus] = useState(false);
+
+  const loadDetail = useCallback((id) => {
+    setDetail(null);
+    setLoading(true);
+    setError("");
+    ops
+      .incident(id)
+      .then(setDetail)
+      .catch((err) => setError(err.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    if (!incidentId) return;
+    loadDetail(incidentId);
+  }, [incidentId, loadDetail]);
+
+  async function updateStatus(status) {
+    if (!incidentId) return;
+    setSavingStatus(true);
+    try {
+      await ops.updateIncident(incidentId, { status });
+      setDetail(await ops.incident(incidentId));
+      onUpdated?.();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSavingStatus(false);
+    }
+  }
+
+  return (
+    <Modal open={Boolean(incidentId)} title={headline || "Chi tiết case"} onClose={onClose}>
+      {loading && (
+        <div className="stack">
+          <SkeletonLine width="70%" />
+          <SkeletonBlock height={260} />
+        </div>
+      )}
+      {!loading && error && <ErrorState message={error} onRetry={() => loadDetail(incidentId)} />}
+      {!loading && !error && detail && (
+        <DetailBody detail={detail} onStatusChange={updateStatus} savingStatus={savingStatus} />
+      )}
+    </Modal>
+  );
+}
+
+function Fact({ label, value }) {
+  return (
+    <div className="case-fact">
+      <dt>{label}</dt>
+      <dd>{value}</dd>
+    </div>
+  );
+}
+
+function DetailBody({ detail, onStatusChange, savingStatus }) {
+  const { incident, messages = [], audit = [] } = detail;
+  const root = messages.find((item) => !item.parent_message_id) || messages[0];
+  const category = primaryCategory(incident);
+
+  return (
+    <div className="stack">
+      <div className="chip-row" style={{ marginTop: 0 }}>
+        <Badge tone={CATEGORY_COLORS[category]}>{categoryLabel(category)}</Badge>
+        <Badge tone={SEVERITY_COLORS[incident.severity]}>{severityLabel(incident.severity)}</Badge>
+        <Badge tone={STATUS_COLORS[incident.status]}>{statusLabel(incident.status)}</Badge>
+      </div>
+
+      <div className="case-callout">
+        <span className="case-callout__label">Vì sao case này được mở</span>
+        <p>{incident.summary}</p>
+      </div>
+
+      <dl className="case-facts">
+        <Fact label="Nền tảng" value={platformLabel(incident.platform)} />
+        <Fact label="Mức rủi ro" value={percent(incident.risk_score)} />
+        <Fact label="Số message" value={incident.message_count} />
+        <Fact label="Cập nhật" value={relativeTime(incident.updated_at)} />
+      </dl>
+
+      {root && (
+        <div className="quote">
+          <span className="section-heading">Message gốc</span>
+          <p style={{ marginTop: 6 }}>{root.text}</p>
+          <span className="muted small">
+            {root.author_id} · {relativeTime(root.timestamp)}
+          </span>
+        </div>
+      )}
+
+      <div className="field-row">
+        <label className="field">
+          Đổi trạng thái
+          <select value={incident.status} disabled={savingStatus} onChange={(event) => onStatusChange(event.target.value)}>
+            {STATUS_OPTIONS.map((status) => (
+              <option key={status} value={status}>
+                {statusLabel(status)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          Phụ trách
+          <span className="muted small">{incident.assigned_to || "Chưa gán"}</span>
+        </label>
+      </div>
+
+      <Disclosure label="Tất cả message trong case" count={messages.length}>
+        {messages.length === 0 ? (
+          <EmptyState message="Case này chưa có message chi tiết." />
+        ) : (
+          <div className="list">
+            {messages.map((item, index) => (
+              <div className="list-row" key={item.message_id || index}>
+                <div className="list-row__head">
+                  <span className="list-row__title">
+                    {item.parent_message_id ? "Reply" : "Message gốc"} · {item.author_id}
+                  </span>
+                  <span className="list-row__meta">{relativeTime(item.timestamp)}</span>
+                </div>
+                <p className="list-row__body">{item.text}</p>
+                <div className="chip-row">
+                  {item.decision && <Badge tone={DECISION_COLORS[item.decision]}>{decisionLabel(item.decision)}</Badge>}
+                  {item.category && <span className="chip">{categoryLabel(item.category)}</span>}
+                  {item.risk_score != null && <span className="chip">risk {percent(item.risk_score)}</span>}
+                </div>
+                {item.explanation && <p className="muted small">Vì sao: {item.explanation}</p>}
+              </div>
+            ))}
+          </div>
+        )}
+      </Disclosure>
+
+      <Disclosure label="Nhật ký xử lý" count={audit.length}>
+        {audit.length === 0 ? (
+          <EmptyState message="Chưa có nhật ký xử lý cho case này." />
+        ) : (
+          <ol className="case-timeline">
+            {audit.map((item) => (
+              <li key={item.audit_id} className="case-timeline__row">
+                <span className="case-timeline__event">{auditEventLabel(item.event_type)}</span>
+                <span className="muted small">
+                  {item.actor} · {relativeTime(item.created_at)}
+                </span>
+              </li>
+            ))}
+          </ol>
+        )}
+      </Disclosure>
+    </div>
+  );
+}
