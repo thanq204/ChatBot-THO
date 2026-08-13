@@ -50,13 +50,21 @@ export default function SettingsPage() {
     setForm(BLANK);
     setFormError("");
     setFormOpen(true);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   function startEdit(item) {
-    setEditingId(item.document_id);
-    setForm({ title: item.title, dataset: item.dataset || "", body: item.body, tags: (item.tags || []).join(", ") });
-    setFormError("");
-    setFormOpen(true);
+    console.log("startEdit called with item:", item);
+    try {
+      setEditingId(item.document_id);
+      setForm({ title: item.title, dataset: item.dataset || "", body: item.body || "", tags: (item.tags || []).join(", ") });
+      setFormError("");
+      setFormOpen(true);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      console.log("startEdit state set successfully");
+    } catch (e) {
+      console.error("Error in startEdit:", e);
+    }
   }
 
   function cancelEdit() {
@@ -255,11 +263,11 @@ function ImportCard({ onImported }) {
 
   return (
     <Card title="Import tài liệu" className="span-5">
-      <p className="muted small">JSON, JSONL, CSV, Markdown, TXT hoặc DOCX. Hệ thống tự chuẩn hóa về schema canonical.</p>
+      <p className="muted small">JSON, JSONL, CSV, Markdown, TXT, DOCX hoặc PDF. Hệ thống tự chuẩn hóa về schema canonical.</p>
       <form className="stack" onSubmit={runImport}>
         <label className="field">
           File
-          <input ref={fileRef} type="file" accept=".json,.jsonl,.csv,.md,.markdown,.txt,.docx" required />
+          <input ref={fileRef} type="file" accept=".json,.jsonl,.csv,.md,.markdown,.txt,.docx,.pdf" required />
         </label>
         <label className="field">
           Đích đến

@@ -43,17 +43,22 @@ class TelegramRagBot:
         self._username = ""
 
     def start(self) -> None:
+        print(f"[Telegram] start() called: listener_enabled={self.settings.telegram_listener_enabled}, token={'SET' if self.settings.telegram_bot_token else 'EMPTY'}", flush=True)
         if not self.settings.telegram_listener_enabled:
             logger.info("Telegram listener disabled by TELEGRAM_LISTENER_ENABLED.")
+            print("[Telegram] Listener DISABLED by config.", flush=True)
             return
         if not self.settings.telegram_bot_token:
             logger.warning("Telegram listener skipped: TELEGRAM_BOT_TOKEN is missing.")
+            print("[Telegram] Listener SKIPPED: no bot token.", flush=True)
             return
         if self._thread and self._thread.is_alive():
+            print("[Telegram] Listener thread already alive, skipping.", flush=True)
             return
         self._stop.clear()
         self._thread = threading.Thread(target=self._run, name="telegram-rag-listener", daemon=True)
         self._thread.start()
+        print("[Telegram] Listener thread started.", flush=True)
 
     def stop(self) -> None:
         self._stop.set()
@@ -88,14 +93,17 @@ class TelegramRagBot:
             logger.warning("Telegram command menu registration failed; text commands remain available.")
 
     def _run(self) -> None:
+        print("[Telegram] _run() entered, calling getMe...", flush=True)
         try:
             response = requests.get(f"{self._api_base}/getMe", timeout=15)
             response.raise_for_status()
             self._username = str(response.json().get("result", {}).get("username", "")).lower()
             self._register_commands()
             logger.info("Telegram RAG listener ready as @%s", self._username or "bot")
-        except requests.RequestException:
+            print(f"[Telegram] RAG listener ready as @{self._username}", flush=True)
+        except requests.RequestException as exc:
             logger.exception("Telegram listener stopped: getMe failed.")
+            print(f"[Telegram] getMe FAILED: {exc}", flush=True)
             return
 
         while not self._stop.is_set():

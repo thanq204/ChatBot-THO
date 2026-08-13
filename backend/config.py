@@ -63,6 +63,14 @@ class Settings(BaseSettings):
 
     # Database
     database_url: str = "sqlite:///./data/app.db"
+    
+    # PostgreSQL Database for FAQ RAG
+    faq_pg_dsn: str = ""  # If set, overrides individual parameters (useful for Supabase/Neon)
+    faq_pg_host: str = "localhost"
+    faq_pg_port: int = 5433
+    faq_pg_db: str = "faq_rag"
+    faq_pg_user: str = "faq_user"
+    faq_pg_password: str = "faq_pass_dev"
 
     # Vector Store
     chroma_persist_dir: str = "./data/chroma"
