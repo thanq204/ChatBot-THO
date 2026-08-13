@@ -6,7 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 PlatformName = Literal["discord", "telegram", "zalo", "messenger", "web", "demo"]
-GateName = Literal["gate1_fast_filter", "gate2_classifier", "gate3_context_review"]
+GateName = Literal["gate1_fast_filter", "gate2_context_review", "gate3_approved_case_retrieval"]
 Decision = Literal["allow", "warn", "hide", "hold_for_review"]
 IncidentStatus = Literal["open", "monitoring", "resolved", "snoozed"]
 Severity = Literal["low", "medium", "high", "critical"]
@@ -67,6 +67,14 @@ class MessageDecision(BaseModel):
     model_used: str
     gates: list[GateResult] = Field(default_factory=list)
     incident_id: str | None = None
+    # Backwards-compatible notification metadata. Existing API consumers can
+    # ignore these fields, while realtime connectors can suppress duplicates.
+    send_to_admin: bool = True
+    already_marked: bool = False
+    can_expand: bool = False
+    matched_mark_id: str | None = None
+    similarity: float | None = Field(default=None, ge=0.0, le=1.0)
+    banner: str | None = None
 
 
 class AnalyzeMessageResponse(BaseModel):

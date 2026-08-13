@@ -16,19 +16,19 @@ from typing import Any
 
 from backend.config import Settings, get_settings
 from backend.models.operations import (
-    CommonMessage,
-    CommunityHealth,
+    FAQ,
     CommandContent,
     CommandContentRequest,
-    FAQ,
+    CommonMessage,
+    CommunityHealth,
     FAQSuggestion,
     FAQUpsertRequest,
-    MemberReport,
     Incident,
     KnowledgeDocument,
     KnowledgeDocumentRequest,
     KnowledgeImportRecord,
     KnowledgeImportResponse,
+    MemberReport,
     MessageDecision,
     OperationsSummary,
     Policy,
@@ -124,6 +124,19 @@ class OperationsStore:
                     policy_id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL, category TEXT NOT NULL,
                     action TEXT NOT NULL, trigger_terms_json TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1,
                     version INTEGER NOT NULL DEFAULT 1, updated_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS operations_moderation_marks (
+                    mark_id TEXT PRIMARY KEY, incident_id TEXT NOT NULL, message_id TEXT NOT NULL,
+                    text TEXT NOT NULL, normalized_text TEXT NOT NULL, category TEXT NOT NULL,
+                    decision TEXT NOT NULL, reason TEXT NOT NULL, marked_by TEXT NOT NULL,
+                    marked_at TEXT NOT NULL, source_url TEXT, active INTEGER NOT NULL DEFAULT 1,
+                    version INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_ops_moderation_marks_category
+                    ON operations_moderation_marks(category, active);
+                CREATE TABLE IF NOT EXISTS operations_moderation_embeddings (
+                    mark_id TEXT PRIMARY KEY, text_hash TEXT NOT NULL, model TEXT NOT NULL,
+                    vector_json TEXT NOT NULL, updated_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS operations_knowledge (
                     document_id TEXT PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL, tags_json TEXT NOT NULL,
@@ -289,6 +302,208 @@ class OperationsStore:
                  for gate in result.gates],
             )
 
+    def recent_context(self, message: CommonMessage) -> list[CommonMessage]:
+        """Load nearby messages from the same live conversation for Gate 2."""
+        since = message.timestamp - timedelta(minutes=self.settings.moderation_context_window_minutes)
+        with self._connect() as db:
+            rows = db.execute(
+                """SELECT * FROM operations_messages
+                WHERE platform=? AND community_id=? AND channel_id=? AND message_id<>?
+                  AND timestamp>=? AND timestamp<=?
+                  AND (? IS NULL OR thread_key=? OR parent_message_id=?)
+                ORDER BY timestamp DESC LIMIT ?""",
+                (
+                    message.platform,
+                    message.community_id,
+                    message.channel_id,
+                    message.message_id,
+                    since.isoformat(),
+                    message.timestamp.isoformat(),
+                    message.thread_key,
+                    message.thread_key,
+                    message.parent_message_id,
+                    self.settings.moderation_context_message_limit,
+                ),
+            ).fetchall()
+        context = [
+            CommonMessage(
+                message_id=row["message_id"],
+                platform=row["platform"],
+                community_id=row["community_id"],
+                channel_id=row["channel_id"],
+                thread_key=row["thread_key"],
+                parent_message_id=row["parent_message_id"],
+                author_id=row["author_id"],
+                text=row["text"],
+                timestamp=datetime.fromisoformat(row["timestamp"]),
+                source_url=row["source_url"],
+                raw=json.loads(row["raw_json"] or "{}"),
+            )
+            for row in reversed(rows)
+        ]
+        return context
+
+    def find_recent_equivalent_incident_id(self, message: CommonMessage, category: str) -> str | None:
+        """Find an identical recent alert so connectors do not notify twice."""
+        since = message.timestamp - timedelta(minutes=self.settings.moderation_context_window_minutes)
+        with self._connect() as db:
+            rows = db.execute(
+                """SELECT text, incident_id FROM operations_messages
+                WHERE platform=? AND community_id=? AND channel_id=? AND category=?
+                  AND incident_id IS NOT NULL AND timestamp>=? AND timestamp<=?
+                ORDER BY timestamp DESC LIMIT 30""",
+                (
+                    message.platform,
+                    message.community_id,
+                    message.channel_id,
+                    category,
+                    since.isoformat(),
+                    message.timestamp.isoformat(),
+                ),
+            ).fetchall()
+        normalized = _fold_search_text(message.text)
+        match = next((row for row in rows if _fold_search_text(row["text"]) == normalized), None)
+        return str(match["incident_id"]) if match else None
+
+    @staticmethod
+    def _local_moderation_embedding(text: str, dimensions: int = 256) -> list[float]:
+        """Deterministic fallback embedding used when no provider is available."""
+        tokens = _fold_search_text(text).split()
+        features = [*tokens, *(f"{left}_{right}" for left, right in zip(tokens, tokens[1:]))]
+        vector = [0.0] * dimensions
+        for feature in features:
+            digest = hashlib.sha256(feature.encode("utf-8")).digest()
+            index = int.from_bytes(digest[:4], "big") % dimensions
+            vector[index] += 1.0 if digest[4] % 2 == 0 else -1.0
+        norm = math.sqrt(sum(value * value for value in vector))
+        return [value / norm for value in vector] if norm else vector
+
+    def _moderation_embedding(self, text: str, preferred_model: str | None = None) -> tuple[str, list[float]]:
+        local_model = "local-hash-embedding-v1"
+        model = preferred_model or self.settings.openai_embedding_model
+        can_use_provider = (
+            model != local_model
+            and self.settings.moderation_memory_embedding_enabled
+            and bool(self.settings.openai_api_key)
+        )
+        if can_use_provider:
+            try:
+                from openai import OpenAI
+
+                response = OpenAI(api_key=self.settings.openai_api_key).embeddings.create(model=model, input=[text])
+                return model, list(response.data[0].embedding)
+            except Exception:
+                logger.warning("Moderation embedding provider unavailable; using local fallback.", exc_info=True)
+        return local_model, self._local_moderation_embedding(text)
+
+    def remember_incident(self, incident_id: str, marked_by: str, reason: str = "") -> str | None:
+        """Persist one human-reviewed case and its separate embedding chunk."""
+        incident = self.get_incident(incident_id)
+        message = self.get_incident_message(incident_id)
+        if not incident or not message:
+            return None
+        now = _now()
+        mark_id = f"MM-{incident_id.removeprefix('INC-')}"
+        text = str(message["text"])
+        model, vector = self._moderation_embedding(text)
+        with self._connect() as db:
+            old = db.execute(
+                "SELECT version, created_at FROM operations_moderation_marks WHERE mark_id=?",
+                (mark_id,),
+            ).fetchone()
+            version = int(old["version"]) + 1 if old else 1
+            created_at = str(old["created_at"]) if old else now
+            db.execute(
+                """INSERT INTO operations_moderation_marks
+                (mark_id, incident_id, message_id, text, normalized_text, category, decision, reason,
+                 marked_by, marked_at, source_url, active, version, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+                ON CONFLICT(mark_id) DO UPDATE SET message_id=excluded.message_id, text=excluded.text,
+                normalized_text=excluded.normalized_text, category=excluded.category,
+                decision=excluded.decision, reason=excluded.reason, marked_by=excluded.marked_by,
+                marked_at=excluded.marked_at, source_url=excluded.source_url, active=1,
+                version=excluded.version, updated_at=excluded.updated_at""",
+                (
+                    mark_id,
+                    incident_id,
+                    message["message_id"],
+                    text,
+                    _fold_search_text(text),
+                    str(message.get("category") or incident.categories[0]),
+                    str(message.get("decision") or "hold_for_review"),
+                    reason.strip() or incident.summary,
+                    marked_by.strip() or "Admin",
+                    now,
+                    message.get("source_url"),
+                    version,
+                    created_at,
+                    now,
+                ),
+            )
+            db.execute(
+                """INSERT INTO operations_moderation_embeddings
+                (mark_id, text_hash, model, vector_json, updated_at) VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(mark_id) DO UPDATE SET text_hash=excluded.text_hash, model=excluded.model,
+                vector_json=excluded.vector_json, updated_at=excluded.updated_at""",
+                (mark_id, self._embedding_hash(text), model, _json(vector), now),
+            )
+        self.add_audit(
+            incident_id,
+            str(message["message_id"]),
+            "moderation_memory_updated",
+            marked_by.strip() or "Admin",
+            {"mark_id": mark_id, "category": str(message.get("category") or incident.categories[0]), "version": version},
+        )
+        return mark_id
+
+    def match_reviewed_case(self, text: str, category: str):
+        """Return the closest human-reviewed case using semantic + lexical score."""
+        from src.ai_models.contracts import ModerationMark, ModerationMemoryMatch
+        from src.ai_models.moderation_memory import ModerationMemoryConfig, ModerationMemoryIndex
+
+        if not self.settings.enable_case_based_learning:
+            return ModerationMemoryMatch(False, 0.0, True, False)
+        with self._connect() as db:
+            rows = db.execute(
+                """SELECT m.*, e.model embedding_model, e.vector_json
+                FROM operations_moderation_marks m
+                JOIN operations_moderation_embeddings e ON e.mark_id=m.mark_id
+                WHERE m.active=1 AND m.category=? ORDER BY m.updated_at DESC LIMIT ?""",
+                (category, self.settings.similar_case_limit),
+            ).fetchall()
+        if not rows:
+            return ModerationMemoryMatch(False, 0.0, True, False)
+        query_vectors: dict[str, list[float]] = {}
+        matches = []
+        config = ModerationMemoryConfig(minimum_score=self.settings.moderation_memory_similarity_threshold)
+        for row in rows:
+            model = str(row["embedding_model"])
+            if model not in query_vectors:
+                returned_model, query_vector = self._moderation_embedding(text, preferred_model=model)
+                query_vectors[model] = query_vector if returned_model == model else []
+            mark = ModerationMark(
+                mark_id=row["mark_id"],
+                message_id=row["message_id"],
+                text=row["text"],
+                category=row["category"],
+                decision=row["decision"],
+                reason=row["reason"],
+                marked_by=row["marked_by"],
+                marked_at=datetime.fromisoformat(row["marked_at"]),
+                embedding=tuple(json.loads(row["vector_json"])),
+                source_url=row["source_url"],
+                active=bool(row["active"]),
+                version=int(row["version"]),
+            )
+            matches.append(
+                ModerationMemoryIndex([mark], config).match(
+                    text,
+                    tuple(query_vectors[model]),
+                    category=category,
+                )
+            )
+        return max(matches, key=lambda item: item.similarity)
+
     def find_open_incident(self, message: CommonMessage) -> Incident | None:
         with self._connect() as db:
             row = db.execute(
@@ -378,6 +593,8 @@ class OperationsStore:
             db.execute("UPDATE operations_incidents SET status=COALESCE(?,status), assigned_to=COALESCE(?,assigned_to), updated_at=? WHERE incident_id=?", (status, assigned_to, _now(), incident_id))
         if note or status:
             self.add_audit(incident_id, None, "incident_updated", assigned_to or "Admin", {"status": status, "note": note})
+        if status == "resolved":
+            self.remember_incident(incident_id, assigned_to or "Admin", note)
         return self.get_incident(incident_id)
 
     def add_audit(self, incident_id: str | None, message_id: str | None, event_type: str, actor: str, payload: dict[str, Any]) -> None:

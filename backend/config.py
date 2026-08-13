@@ -56,6 +56,10 @@ class Settings(BaseSettings):
     escalation_critical_threshold: float = Field(default=0.85, ge=0.0, le=1.0)
     similar_case_limit: int = Field(default=5, ge=1, le=20)
     enable_case_based_learning: bool = True
+    moderation_context_window_minutes: int = Field(default=10, ge=1, le=120)
+    moderation_context_message_limit: int = Field(default=12, ge=1, le=30)
+    moderation_memory_embedding_enabled: bool = True
+    moderation_memory_similarity_threshold: float = Field(default=0.90, ge=0.0, le=1.0)
 
     # Database
     database_url: str = "sqlite:///./data/app.db"

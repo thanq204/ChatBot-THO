@@ -9,22 +9,21 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, HTTPException, Query, status
 
 from backend.models.operations import (
-    AnalyzeMessageRequest,
-    AnalyzeMessageResponse,
+    FAQ,
     AdminPlatformActionRequest,
     AdminPlatformActionResponse,
+    AnalyzeMessageRequest,
+    AnalyzeMessageResponse,
     AnnouncementRequest,
     AnnouncementResponse,
-    CommonMessage,
-    CommunityHealth,
     CommandContent,
     CommandContentRequest,
-    FAQ,
+    CommonMessage,
+    CommunityHealth,
     FAQSuggestion,
     FAQSuggestionApproveRequest,
     FAQUpsertRequest,
     FAQWriteResponse,
-    MemberReport,
     Incident,
     IncidentUpdateRequest,
     KnowledgeDocument,
@@ -32,6 +31,7 @@ from backend.models.operations import (
     KnowledgeImportRecord,
     KnowledgeImportRequest,
     KnowledgeImportResponse,
+    MemberReport,
     MessageIngestRequest,
     OperationsSummary,
     PlatformStatus,
@@ -40,8 +40,8 @@ from backend.models.operations import (
     RagRequest,
     RagResponse,
 )
-from backend.services.knowledge_importer import KnowledgeImporter, KnowledgeImportError
 from backend.services.admin_announcements import AdminAnnouncementSender
+from backend.services.knowledge_importer import KnowledgeImporter, KnowledgeImportError
 from backend.services.operations_demo import seed_operations_demo
 from backend.services.operations_pipeline import OperationsPipeline
 from backend.services.operations_store import OperationsStore
@@ -272,6 +272,8 @@ async def execute_incident_action(incident_id: str, payload: AdminPlatformAction
         payload.actor,
         {"action": payload.action, "completed": result.completed, "detail": result.detail, "target_user_id": message["author_id"], "duration_minutes": payload.duration_minutes},
     )
+    if result.completed:
+        store.remember_incident(incident_id, payload.actor, payload.message or f"Admin action: {payload.action}")
     return result
 
 

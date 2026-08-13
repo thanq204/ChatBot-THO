@@ -100,7 +100,8 @@ class ChatOrchestrator:
 
         moderation = self.pipeline.analyze(message, context or [])
         if moderation.decision != "allow":
-            return ChatOutcome(answer="Tin nhắn này cần được kiểm tra theo quy định cộng đồng trước khi mình có thể trả lời thêm.", stage="moderation", model_used=moderation.model_used, moderation=moderation)
+            answer = moderation.banner or "Tin nhắn này cần được kiểm tra theo quy định cộng đồng trước khi mình có thể trả lời thêm."
+            return ChatOutcome(answer=answer, stage="moderation", model_used=moderation.model_used, moderation=moderation)
 
         faq = self.store.find_faq(message.text)
         if faq:

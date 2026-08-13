@@ -7,6 +7,7 @@ opt-in private warning for a non-allow decision from a live bot listener.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+
 import requests
 
 from backend.config import Settings, get_settings
@@ -39,7 +40,7 @@ class PlatformModerationService:
             return None
         if message.platform not in {"discord", "telegram"} or message.author_id == "anonymous":
             return None
-        status = {
+        status = decision.banner or {
             "warn": "Tin nhắn của bạn đã bị cảnh báo theo nội quy cộng đồng.",
             "hide": "Tin nhắn của bạn đã bị đánh dấu ẩn theo nội quy cộng đồng.",
             "hold_for_review": "Tin nhắn của bạn đang chờ Admin/Mod xem xét theo nội quy cộng đồng.",
