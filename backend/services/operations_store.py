@@ -10,7 +10,10 @@ import re
 import sqlite3
 import unicodedata
 import uuid
-from datetime import UTC, datetime, timedelta
+import urllib.request
+import psycopg2
+import psycopg2.extras
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -37,7 +40,7 @@ from backend.models.operations import (
 
 
 def _now() -> str:
-    return datetime.now(UTC).isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _json(value: Any) -> str:
@@ -89,6 +92,22 @@ class OperationsStore:
         db = sqlite3.connect(self.path)
         db.row_factory = sqlite3.Row
         return db
+
+    def _connect_pg(self):
+        import psycopg2
+        import psycopg2.extras
+        dsn = getattr(self.settings, "faq_pg_dsn", "")
+        if dsn:
+            conn = psycopg2.connect(dsn)
+        else:
+            conn = psycopg2.connect(
+                host=getattr(self.settings, "faq_pg_host", "localhost"),
+                port=getattr(self.settings, "faq_pg_port", 5433),
+                dbname=getattr(self.settings, "faq_pg_db", "faq_rag"),
+                user=getattr(self.settings, "faq_pg_user", "faq_user"),
+                password=getattr(self.settings, "faq_pg_password", "faq_pass_dev"),
+            )
+        return conn
 
     def _create_tables(self) -> None:
         with self._connect() as db:
@@ -625,24 +644,102 @@ class OperationsStore:
         return cursor.rowcount > 0
 
     def list_knowledge(self, dataset: str | None = None) -> list[KnowledgeDocument]:
-        with self._connect() as db:
-            if dataset:
-                rows = db.execute("SELECT * FROM operations_knowledge WHERE dataset=? ORDER BY updated_at DESC", (dataset,)).fetchall()
-            else:
-                rows = db.execute("SELECT * FROM operations_knowledge ORDER BY updated_at DESC").fetchall()
-        return [KnowledgeDocument(document_id=r["document_id"], title=r["title"], body=r["body"], tags=json.loads(r["tags_json"]), dataset=r["dataset"] or "general", active=bool(r["active"]), updated_at=datetime.fromisoformat(r["updated_at"])) for r in rows]
+        try:
+            conn = self._connect_pg()
+            with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+                if dataset:
+                    cur.execute("SELECT * FROM knowledge_documents WHERE dataset=%s ORDER BY updated_at DESC", (dataset,))
+                else:
+                    cur.execute("SELECT * FROM knowledge_documents ORDER BY updated_at DESC")
+                rows = cur.fetchall()
+            conn.close()
+            return [KnowledgeDocument(
+                document_id=r["document_id"], 
+                title=r["title"], 
+                body=r["body"], 
+                tags=r["tags"] if isinstance(r["tags"], list) else json.loads(r["tags"]), 
+                dataset=r["dataset"] or "general", 
+                active=bool(r["active"]), 
+                updated_at=r["updated_at"]
+            ) for r in rows]
+        except Exception:
+            logger.error("Failed to list knowledge from PostgreSQL", exc_info=True)
+            return []
 
     def upsert_knowledge(self, document_id: str, request: KnowledgeDocumentRequest) -> KnowledgeDocument:
+        import psycopg2
+        from openai import OpenAI
+        
         now = _now()
-        with self._connect() as db:
-            db.execute("""INSERT INTO operations_knowledge (document_id, title, body, tags_json, dataset, active, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(document_id) DO UPDATE SET title=excluded.title, body=excluded.body, tags_json=excluded.tags_json, dataset=excluded.dataset, active=excluded.active, updated_at=excluded.updated_at""", (document_id, request.title, request.body, _json(request.tags), request.dataset, int(request.active), now))
+        
+        # 1. Chunking
+        chunks = []
+        text = request.title + "\n\n" + request.body
+        paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+        current_chunk = ""
+        for p in paragraphs:
+            if len(current_chunk) + len(p) < 1500:
+                current_chunk += p + "\n\n"
+            else:
+                if current_chunk:
+                    chunks.append(current_chunk.strip())
+                current_chunk = p + "\n\n"
+        if current_chunk:
+            chunks.append(current_chunk.strip())
+        if not chunks:
+            chunks = [text[:1500]]
+            
+        # 2. Get embeddings
+        client = OpenAI(api_key=self.settings.openai_api_key)
+        response = client.embeddings.create(model=self.settings.openai_embedding_model, input=chunks)
+        embeddings = [list(item.embedding) for item in response.data]
+        
+        # 3. Upsert into PostgreSQL
+        try:
+            conn = self._connect_pg()
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO knowledge_documents (document_id, title, body, tags, dataset, active, updated_at, created_at) 
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT(document_id) DO UPDATE SET 
+                        title=EXCLUDED.title, body=EXCLUDED.body, tags=EXCLUDED.tags, 
+                        dataset=EXCLUDED.dataset, active=EXCLUDED.active, updated_at=EXCLUDED.updated_at
+                """, (document_id, request.title, request.body, json.dumps(request.tags), request.dataset, bool(request.active), now, now))
+                
+                cur.execute("DELETE FROM knowledge_sections WHERE document_id=%s", (document_id,))
+                
+                for i, (chunk_text, embedding) in enumerate(zip(chunks, embeddings)):
+                    chunk_id = f"{document_id}-{i}"
+                    cur.execute("""
+                        INSERT INTO knowledge_sections (chunk_id, document_id, chunk_index, content, created_at)
+                        VALUES (%s, %s, %s, %s, %s)
+                    """, (chunk_id, document_id, i, chunk_text, now))
+                    
+                    vector_str = "[" + ",".join(str(f) for f in embedding) + "]"
+                    cur.execute("""
+                        INSERT INTO knowledge_section_embeddings (chunk_id, embedding, updated_at)
+                        VALUES (%s, %s::vector, %s)
+                    """, (chunk_id, vector_str, now))
+            conn.commit()
+            conn.close()
+        except Exception:
+            logger.error("Failed to upsert knowledge to PostgreSQL", exc_info=True)
+            raise
+            
         return next(item for item in self.list_knowledge() if item.document_id == document_id)
 
     def delete_knowledge(self, document_id: str) -> bool:
-        with self._connect() as db:
-            cursor = db.execute("DELETE FROM operations_knowledge WHERE document_id=?", (document_id,))
-            db.execute("DELETE FROM operations_knowledge_embeddings WHERE document_id=?", (document_id,))
-        return cursor.rowcount > 0
+        try:
+            conn = self._connect_pg()
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM knowledge_documents WHERE document_id=%s", (document_id,))
+                rowcount = cur.rowcount
+            conn.commit()
+            conn.close()
+            return rowcount > 0
+        except Exception:
+            logger.error("Failed to delete knowledge from PostgreSQL", exc_info=True)
+            return False
 
     def get_command_content(self, command: str) -> CommandContent | None:
         with self._connect() as db:
@@ -804,61 +901,84 @@ class OperationsStore:
         documents: list[KnowledgeDocument],
         limit: int,
     ) -> list[tuple[float, KnowledgeDocument]] | None:
-        """Retrieve knowledge by opt-in OpenAI embeddings persisted in SQLite."""
-        if not self.settings.knowledge_embedding_enabled or not self.settings.openai_api_key or not documents:
+        """Retrieve knowledge by opt-in OpenAI embeddings persisted in PostgreSQL pgvector."""
+        if not self.settings.knowledge_embedding_enabled or not self.settings.openai_api_key:
             return None
         try:
             from openai import OpenAI
-
+            import psycopg2
+            import psycopg2.extras
+            
             client = OpenAI(api_key=self.settings.openai_api_key)
             model = self.settings.openai_embedding_model
-            records: dict[str, list[float]] = {}
-            document_texts = {document.document_id: self._knowledge_embedding_text(document) for document in documents}
-            document_hashes = {document_id: self._embedding_hash(text) for document_id, text in document_texts.items()}
-            placeholders = ",".join("?" for _ in documents)
-            with self._connect() as db:
-                cached_rows = db.execute(
-                    f"SELECT document_id, text_hash, model, vector_json FROM operations_knowledge_embeddings WHERE document_id IN ({placeholders})",
-                    [document.document_id for document in documents],
-                ).fetchall()
-            for row in cached_rows:
-                if row["text_hash"] == document_hashes.get(row["document_id"]) and row["model"] == model:
-                    records[row["document_id"]] = json.loads(row["vector_json"])
-            pending = [
-                (document, document_texts[document.document_id], document_hashes[document.document_id])
-                for document in documents if document.document_id not in records
-            ]
-            batch_size = self.settings.knowledge_embedding_batch_size
-            for start in range(0, len(pending), batch_size):
-                batch = pending[start:start + batch_size]
-                response = client.embeddings.create(model=model, input=[item[1] for item in batch])
-                vectors_by_index = {int(item.index): list(item.embedding) for item in response.data}
-                if len(vectors_by_index) != len(batch):
-                    raise ValueError("Embedding response was incomplete.")
-                rows_to_save = []
-                for index, (document, _text, text_hash) in enumerate(batch):
-                    vector = vectors_by_index[index]
-                    records[document.document_id] = vector
-                    rows_to_save.append((document.document_id, text_hash, model, _json(vector), _now()))
-                with self._connect() as db:
-                    db.executemany(
-                        "INSERT INTO operations_knowledge_embeddings (document_id, text_hash, model, vector_json, updated_at) VALUES (?, ?, ?, ?, ?) "
-                        "ON CONFLICT(document_id) DO UPDATE SET text_hash=excluded.text_hash, model=excluded.model, vector_json=excluded.vector_json, updated_at=excluded.updated_at",
-                        rows_to_save,
-                    )
+            
             query_response = client.embeddings.create(model=model, input=[question])
             query_vector = list(query_response.data[0].embedding)
-            scored = sorted(
-                ((self._cosine_similarity(query_vector, records[document.document_id]), document) for document in documents),
-                key=lambda item: item[0],
-                reverse=True,
+            
+            conn = psycopg2.connect(
+                host=getattr(self.settings, "faq_pg_host", "localhost"),
+                port=getattr(self.settings, "faq_pg_port", 5433),
+                dbname=getattr(self.settings, "faq_pg_db", "faq_rag"),
+                user=getattr(self.settings, "faq_pg_user", "faq_user"),
+                password=getattr(self.settings, "faq_pg_password", "faq_pass_dev"),
             )
-            if not scored or scored[0][0] < self.settings.knowledge_embedding_min_score:
+            
+            with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+                vector_str = "[" + ",".join(str(f) for f in query_vector) + "]"
+                
+                query = """
+                    WITH ranked_chunks AS (
+                        SELECT 
+                            s.document_id,
+                            1 - (e.embedding <=> %s::vector) AS similarity_score
+                        FROM knowledge_section_embeddings e
+                        JOIN knowledge_sections s ON e.chunk_id = s.chunk_id
+                        ORDER BY e.embedding <=> %s::vector
+                        LIMIT 50
+                    ),
+                    best_per_doc AS (
+                        SELECT document_id, MAX(similarity_score) AS max_score
+                        FROM ranked_chunks
+                        GROUP BY document_id
+                        ORDER BY max_score DESC
+                        LIMIT %s
+                    )
+                    SELECT 
+                        d.document_id, d.title, d.body, d.tags, d.dataset, d.active, d.updated_at,
+                        b.max_score AS similarity_score
+                    FROM best_per_doc b
+                    JOIN knowledge_documents d ON b.document_id = d.document_id
+                    ORDER BY b.max_score DESC;
+                """
+                cur.execute(query, (vector_str, vector_str, limit))
+                rows = cur.fetchall()
+                
+            conn.close()
+            
+            scored = []
+            for row in rows:
+                score = row["similarity_score"]
+                if score < self.settings.knowledge_embedding_min_score:
+                    continue
+                doc = KnowledgeDocument(
+                    document_id=row["document_id"],
+                    title=row["title"],
+                    body=row["body"],
+                    tags=row["tags"] if isinstance(row["tags"], list) else json.loads(row["tags"]),
+                    dataset=row["dataset"],
+                    active=row["active"],
+                    updated_at=row["updated_at"]
+                )
+                scored.append((score, doc))
+                
+            if not scored:
                 return []
+            
             relevance_floor = max(self.settings.knowledge_embedding_min_score, scored[0][0] - 0.08)
-            return [(score, document) for score, document in scored[:limit] if score >= relevance_floor]
+            return [(score, document) for score, document in scored if score >= relevance_floor]
+            
         except Exception:
-            logger.warning("Knowledge embedding retrieval unavailable; using deterministic fallback.", exc_info=True)
+            logger.warning("PostgreSQL pgvector retrieval unavailable; using deterministic fallback.", exc_info=True)
             return None
 
     def search_knowledge(self, question: str, limit: int = 3, dataset: str | None = None) -> list[KnowledgeDocument]:

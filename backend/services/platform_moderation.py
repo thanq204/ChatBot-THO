@@ -7,7 +7,6 @@ opt-in private warning for a non-allow decision from a live bot listener.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-
 import requests
 
 from backend.config import Settings, get_settings

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 from backend.models.operations import CommonMessage
 from backend.services.operations_pipeline import OperationsPipeline

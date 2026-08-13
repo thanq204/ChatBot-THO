@@ -80,17 +80,21 @@ export default function SettingsPage() {
     setMode("manual");
     resetImport();
     setFormOpen(true);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   function startEdit(item) {
     setEditingId(item.document_id);
-    setForm({ title: item.title, dataset: item.dataset || "", body: item.body, tags: (item.tags || []).join(", ") });
+    setForm({
+      title: item.title,
+      dataset: item.dataset || "",
+      body: item.body || "",
+      tags: (item.tags || []).join(", "),
+    });
     setFormError("");
     setMode("manual");
     setFormOpen(true);
   }
-
-  // Memoised: Modal keys its Escape/scroll-lock effect on onClose, and a fresh
   // identity every render would re-focus the dialog on every keystroke.
   const cancelEdit = useCallback(() => {
     setEditingId(null);
@@ -281,12 +285,12 @@ export default function SettingsPage() {
         {!editingId && mode === "file" && (
           <form className="stack" onSubmit={runImport}>
             <p className="muted small">
-              JSON, JSONL, CSV, Markdown, TXT hoặc DOCX, tối đa 5MB. Hệ thống tự chuẩn hóa về schema canonical và có thể
+              JSON, JSONL, CSV, Markdown, TXT, DOCX hoặc PDF, tối đa 5MB. Hệ thống tự chuẩn hóa về schema canonical và có thể
               tách một file thành nhiều tài liệu.
             </p>
             <label className="field">
               File
-              <input ref={fileRef} type="file" accept=".json,.jsonl,.csv,.md,.markdown,.txt,.docx" required />
+              <input ref={fileRef} type="file" accept=".json,.jsonl,.csv,.md,.markdown,.txt,.docx,.pdf" required />
             </label>
             <label className="field">
               Đích đến
