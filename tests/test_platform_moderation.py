@@ -64,3 +64,36 @@ def test_automatic_warning_sends_dm_for_hide_and_review() -> None:
     assert service.send_automatic_warning(message, review, store).completed is True
     assert service.execute.call_count == 2
     assert store.add_audit.call_count == 2
+
+
+def test_discord_dm_is_suppressed_when_three_gates_reject_notification() -> None:
+    service = PlatformModerationService(Settings(moderation_auto_warn_dm_enabled=True))
+    service.execute = Mock()
+    store = Mock()
+    message = CommonMessage(
+        message_id="discord-duplicate",
+        platform="discord",
+        community_id="guild",
+        channel_id="channel",
+        author_id="member",
+        text="repeated case",
+        timestamp=datetime.now(UTC),
+    )
+    decision = MessageDecision(
+        decision="hold_for_review",
+        category="violence",
+        severity="critical",
+        risk_score=0.9,
+        confidence=0.9,
+        explanation="Case đã được Gate 3 chặn thông báo lặp.",
+        model_used="test",
+        send_to_admin=False,
+        send_to_member=False,
+        already_marked=True,
+    )
+
+    result = service.send_automatic_warning(message, decision, store)
+
+    assert result is None
+    service.execute.assert_not_called()
+    store.add_audit.assert_not_called()

@@ -63,6 +63,7 @@ class OperationsPipeline:
             model_used=gate2.model_used,
             gates=gates,
             send_to_admin=send_to_admin,
+            send_to_member=send_to_admin,
             already_marked=memory_match.matched,
             can_expand=memory_match.can_expand,
             matched_mark_id=memory_match.mark.mark_id if memory_match.mark else None,
