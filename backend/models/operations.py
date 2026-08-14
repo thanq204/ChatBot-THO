@@ -102,6 +102,7 @@ class Incident(BaseModel):
     assigned_to: str | None = None
     created_at: datetime
     updated_at: datetime
+    source_url: str | None = None
 
 
 class IncidentUpdateRequest(BaseModel):

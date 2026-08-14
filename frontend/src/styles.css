@@ -1112,6 +1112,20 @@ a {
   color: var(--text-secondary);
 }
 
+.chip--link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent-solid);
+  border-color: color-mix(in srgb, var(--accent-solid) 40%, var(--border));
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.chip--link:hover {
+  background: color-mix(in srgb, var(--accent-solid) 10%, var(--surface-alt));
+}
+
 .platform-check {
   display: inline-flex;
   align-items: center;
@@ -1336,6 +1350,21 @@ button.list-row:hover {
   border-radius: 0 var(--radius-control) var(--radius-control) 0;
   font-size: 13.5px;
   color: var(--text-primary);
+}
+
+.quote__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--accent-solid);
+  text-decoration: none;
+}
+
+.quote__link:hover {
+  text-decoration: underline;
 }
 
 .section-heading {
@@ -1634,6 +1663,26 @@ button.list-row:hover {
 .case-row__severity {
   color: var(--case-accent);
   font-weight: 700;
+}
+
+.case-row__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--accent-solid);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.case-row__link::before {
+  content: "·";
+  margin-right: 6px;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.case-row__link:hover {
+  text-decoration: underline;
 }
 
 .case-head {

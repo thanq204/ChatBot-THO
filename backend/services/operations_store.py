@@ -134,7 +134,7 @@ class OperationsStore:
                     channel_id TEXT NOT NULL, thread_key TEXT, status TEXT NOT NULL, severity TEXT NOT NULL,
                     risk_score REAL NOT NULL, title TEXT NOT NULL, summary TEXT NOT NULL, categories_json TEXT NOT NULL,
                     message_ids_json TEXT NOT NULL, first_seen TEXT NOT NULL, last_seen TEXT NOT NULL,
-                    assigned_to TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+                    assigned_to TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, source_url TEXT
                 );
                 CREATE INDEX IF NOT EXISTS idx_ops_incidents_status ON operations_incidents(status);
                 CREATE TABLE IF NOT EXISTS operations_audit (
@@ -208,6 +208,9 @@ class OperationsStore:
                 db.execute("ALTER TABLE operations_command_content ADD COLUMN description TEXT NOT NULL DEFAULT ''")
             if "platforms_json" not in command_columns:
                 db.execute("ALTER TABLE operations_command_content ADD COLUMN platforms_json TEXT NOT NULL DEFAULT '[\"telegram\",\"discord\"]'")
+            incident_columns = {row[1] for row in db.execute("PRAGMA table_info(operations_incidents)").fetchall()}
+            if "source_url" not in incident_columns:
+                db.execute("ALTER TABLE operations_incidents ADD COLUMN source_url TEXT")
 
     def seed_defaults(self) -> None:
         with self._connect() as db:
@@ -575,11 +578,11 @@ class OperationsStore:
             db.execute(
                 """INSERT INTO operations_incidents
                 (incident_id, platform, community_id, channel_id, thread_key, status, severity, risk_score, title, summary,
-                 categories_json, message_ids_json, first_seen, last_seen, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                 categories_json, message_ids_json, first_seen, last_seen, created_at, updated_at, source_url)
+                VALUES (?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (incident_id, message.platform, message.community_id, message.channel_id, message.thread_key, result.severity,
                  result.risk_score, f"{result.category.title()} từ {message.author_name or message.author_id}", result.explanation,
-                 _json([result.category]), _json([message.message_id]), message.timestamp.isoformat(), message.timestamp.isoformat(), now.isoformat(), now.isoformat()),
+                 _json([result.category]), _json([message.message_id]), message.timestamp.isoformat(), message.timestamp.isoformat(), now.isoformat(), now.isoformat(), message.source_url),
             )
         self.add_audit(incident_id, message.message_id, "incident_created", "system", {"decision": result.decision, "evidence": result.evidence})
         return self.get_incident(incident_id)  # type: ignore[return-value]
@@ -1189,4 +1192,4 @@ class OperationsStore:
 
     @staticmethod
     def _incident(row: sqlite3.Row) -> Incident:
-        return Incident(incident_id=row["incident_id"], platform=row["platform"], community_id=row["community_id"], channel_id=row["channel_id"], thread_key=row["thread_key"], status=row["status"], severity=row["severity"], risk_score=row["risk_score"], title=row["title"], summary=row["summary"], categories=json.loads(row["categories_json"]), message_ids=json.loads(row["message_ids_json"]), message_count=len(json.loads(row["message_ids_json"])), first_seen=datetime.fromisoformat(row["first_seen"]), last_seen=datetime.fromisoformat(row["last_seen"]), assigned_to=row["assigned_to"], created_at=datetime.fromisoformat(row["created_at"]), updated_at=datetime.fromisoformat(row["updated_at"]))
+        return Incident(incident_id=row["incident_id"], platform=row["platform"], community_id=row["community_id"], channel_id=row["channel_id"], thread_key=row["thread_key"], status=row["status"], severity=row["severity"], risk_score=row["risk_score"], title=row["title"], summary=row["summary"], categories=json.loads(row["categories_json"]), message_ids=json.loads(row["message_ids_json"]), message_count=len(json.loads(row["message_ids_json"])), first_seen=datetime.fromisoformat(row["first_seen"]), last_seen=datetime.fromisoformat(row["last_seen"]), assigned_to=row["assigned_to"], created_at=datetime.fromisoformat(row["created_at"]), updated_at=datetime.fromisoformat(row["updated_at"]), source_url=row["source_url"])
