@@ -295,6 +295,23 @@ class CommunityHealth(BaseModel):
     generated_at: datetime
 
 
+class TimelineBucket(BaseModel):
+    """One slot of the activity grid. Emitted even when empty."""
+
+    start: datetime
+    scanned: int
+    violations: int
+
+
+class ActivityTimeline(BaseModel):
+    window_hours: int
+    bucket_hours: int
+    scanned_total: int
+    violations_total: int
+    buckets: list[TimelineBucket] = Field(default_factory=list)
+    generated_at: datetime
+
+
 class AnnouncementRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=1900)
     targets: list[Literal["discord", "telegram"]] = Field(..., min_length=1, max_length=2)

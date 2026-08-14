@@ -19,6 +19,7 @@ from backend.models.operations import (
     CommandContent,
     CommandContentRequest,
     CommonMessage,
+    ActivityTimeline,
     CommunityHealth,
     FAQSuggestion,
     FAQSuggestionApproveRequest,
@@ -332,6 +333,15 @@ async def rag_ask(payload: RagRequest) -> RagResponse:
 @router.get("/analytics", response_model=OperationsSummary)
 async def operations_analytics() -> OperationsSummary:
     return get_operations_store().summary()
+
+
+@router.get("/analytics/timeline", response_model=ActivityTimeline)
+async def operations_timeline(
+    window_hours: int = Query(default=48, ge=1, le=24 * 30),
+    bucket_hours: int = Query(default=1, ge=1, le=24),
+) -> ActivityTimeline:
+    """Scanned-vs-violation counts over time, for the overview trend chart."""
+    return get_operations_store().activity_timeline(window_hours, bucket_hours)
 
 
 @router.post("/demo/seed")

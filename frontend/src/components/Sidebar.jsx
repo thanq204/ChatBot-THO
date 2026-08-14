@@ -7,7 +7,7 @@ import {
   Flask,
   IdentificationBadge,
   Megaphone,
-  GearSix,
+  Books,
 } from "@phosphor-icons/react";
 
 const NAV_ITEMS = [
@@ -18,7 +18,7 @@ const NAV_ITEMS = [
   { to: "/khu-thu-nghiem-ai", label: "Khu thử nghiệm AI", icon: Flask },
   { to: "/nguoi-dung", label: "Quản lý người dùng", icon: IdentificationBadge },
   { to: "/thong-bao", label: "Thông báo", icon: Megaphone },
-  { to: "/cai-dat", label: "Cài đặt", icon: GearSix },
+  { to: "/cai-dat", label: "Quản lý nội dung", icon: Books },
 ];
 
 export default function Sidebar({ open, onNavigate }) {
