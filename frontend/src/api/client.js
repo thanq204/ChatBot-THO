@@ -53,6 +53,14 @@ export const ops = {
   executeAction: (incidentId, payload) =>
     post(`/incidents/${encodeURIComponent(incidentId)}/actions`, payload),
 
+  /** Bot command bodies the Admin manages: the seeded built-ins plus any custom command created from the dashboard. */
+  commandContents: () => get("/admin/command-content"),
+  commandContent: (command) => get(`/admin/command-content/${encodeURIComponent(command)}`),
+  /** payload: { body, description, platforms: ["telegram"|"discord", ...] } */
+  saveCommandContent: (command, payload) =>
+    put(`/admin/command-content/${encodeURIComponent(command)}`, payload),
+  deleteCommandContent: (command) => del(`/admin/command-content/${encodeURIComponent(command)}`),
+
   /** Inbox of /report submissions from members. */
   memberReports: () => get("/admin/member-reports"),
   updateMemberReport: (reportId, payload) =>

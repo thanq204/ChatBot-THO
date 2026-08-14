@@ -2290,6 +2290,87 @@ button.list-row:hover {
 }
 
 /* ==========================================================================
+   Bot command content editor
+   ========================================================================== */
+
+.cmd {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.cmd__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cmd__tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 14px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-secondary);
+  transition: background-color 0.18s var(--ease-out), color 0.18s var(--ease-out);
+}
+
+.cmd__tab:hover {
+  background: var(--surface-alt);
+  color: var(--text-primary);
+}
+
+.cmd__tab.is-active {
+  background: var(--surface-alt);
+  border-color: var(--accent-solid);
+  color: var(--text-primary);
+}
+
+.cmd__tab--add {
+  border-style: dashed;
+  color: var(--text-secondary);
+}
+
+/* Real semantic state: this command still answers with the placeholder. */
+.cmd__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--sev-medium);
+}
+
+.cmd__flag {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-control);
+  border: 1px solid color-mix(in srgb, var(--sev-medium) 40%, transparent);
+  background: color-mix(in srgb, var(--sev-medium) 9%, transparent);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.cmd__flag svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--sev-medium);
+}
+
+.cmd code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--surface-alt);
+}
+
+/* ==========================================================================
    Member report inbox
    ========================================================================== */
 
