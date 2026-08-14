@@ -10,9 +10,10 @@ const PAGE_TITLES = {
   "/quy-tac-ai": "Quy tắc AI",
   "/nhat-ky": "Nhật ký kiểm duyệt",
   "/khu-thu-nghiem-ai": "Khu thử nghiệm AI",
-  "/nguoi-dung": "Quản lý người dùng",
+  "/quan-ly-mod": "Quản lý Mod",
   "/thong-bao": "Thông báo",
   "/cai-dat": "Quản lý nội dung",
+  "/lenh-bot": "Nội dung lệnh bot",
 };
 
 export default function AppLayout() {
