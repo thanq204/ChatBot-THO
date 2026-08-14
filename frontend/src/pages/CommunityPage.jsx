@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Card from "../components/Card.jsx";
+import MemberReportInbox from "../components/MemberReportInbox.jsx";
 import IncidentDetailModal from "../components/IncidentDetailModal.jsx";
 import { SkeletonBlock, SkeletonLine } from "../components/Skeleton.jsx";
 import { ErrorState, EmptyState } from "../components/StatePanels.jsx";
@@ -125,6 +126,14 @@ export default function CommunityPage() {
               </div>
             </>
           )}
+        </Card>
+      </div>
+
+      <div className="page-grid__row">
+        {/* Member-submitted reports, kept beside the AI queue rather than inside
+            it: different origin, different trust level. */}
+        <Card title="Báo cáo từ thành viên (/report)" className="span-12" delay={0.05}>
+          <MemberReportInbox />
         </Card>
       </div>
 

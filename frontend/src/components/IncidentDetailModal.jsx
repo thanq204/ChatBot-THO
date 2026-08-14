@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import Badge from "./Badge.jsx";
+import CaseActions from "./CaseActions.jsx";
 import Modal from "./Modal.jsx";
 import Disclosure from "./Disclosure.jsx";
 import { SkeletonBlock, SkeletonLine } from "./Skeleton.jsx";
@@ -73,7 +74,16 @@ export default function IncidentDetailModal({ incidentId, headline, onClose, onU
       )}
       {!loading && error && <ErrorState message={error} onRetry={() => loadDetail(incidentId)} />}
       {!loading && !error && detail && (
-        <DetailBody detail={detail} onStatusChange={updateStatus} savingStatus={savingStatus} />
+        <DetailBody
+          detail={detail}
+          onStatusChange={updateStatus}
+          savingStatus={savingStatus}
+          onActed={() => {
+            // A completed action writes an audit entry, so refresh the case.
+            loadDetail(incidentId);
+            onUpdated?.();
+          }}
+        />
       )}
     </Modal>
   );
@@ -88,7 +98,7 @@ function Fact({ label, value }) {
   );
 }
 
-function DetailBody({ detail, onStatusChange, savingStatus }) {
+function DetailBody({ detail, onStatusChange, savingStatus, onActed }) {
   const { incident, messages = [], audit = [] } = detail;
   const root = messages.find((item) => !item.parent_message_id) || messages[0];
   const category = primaryCategory(incident);
@@ -139,6 +149,14 @@ function DetailBody({ detail, onStatusChange, savingStatus }) {
           <span className="muted small">{incident.assigned_to || "Chưa gán"}</span>
         </label>
       </div>
+
+      <Disclosure label="Xử lý thủ công người vi phạm" count={messages.length ? undefined : 0}>
+        {messages.length === 0 ? (
+          <EmptyState message="Case này chưa có message nên chưa xác định được người vi phạm." />
+        ) : (
+          <CaseActions incident={incident} messages={messages} onDone={onActed} />
+        )}
+      </Disclosure>
 
       <Disclosure label="Tất cả message trong case" count={messages.length}>
         {messages.length === 0 ? (

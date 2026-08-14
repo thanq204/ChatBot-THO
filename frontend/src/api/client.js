@@ -48,6 +48,15 @@ export const ops = {
   knowledgeImports: () => get("/knowledge/imports"),
   seedDemo: () => post("/demo/seed"),
   sendAnnouncement: (payload) => post("/admin/announcements", payload),
+
+  /** Admin-confirmed platform action against one case. Never fires automatically. */
+  executeAction: (incidentId, payload) =>
+    post(`/incidents/${encodeURIComponent(incidentId)}/actions`, payload),
+
+  /** Inbox of /report submissions from members. */
+  memberReports: () => get("/admin/member-reports"),
+  updateMemberReport: (reportId, payload) =>
+    patch(`/admin/member-reports/${encodeURIComponent(reportId)}`, payload),
 };
 
 /** Sentence-level moderation surface used by the member and review-queue pages. */

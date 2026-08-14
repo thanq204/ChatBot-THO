@@ -282,6 +282,11 @@ class MemberReport(BaseModel):
     created_at: datetime
 
 
+class MemberReportUpdateRequest(BaseModel):
+    status: Literal["open", "reviewed"]
+    actor: str = Field(default="Admin", min_length=1, max_length=100)
+
+
 class CommunityHealth(BaseModel):
     window_hours: int
     messages_total: int

@@ -33,6 +33,7 @@ from backend.models.operations import (
     KnowledgeImportRequest,
     KnowledgeImportResponse,
     MemberReport,
+    MemberReportUpdateRequest,
     MessageIngestRequest,
     OperationsSummary,
     PlatformStatus,
@@ -301,6 +302,15 @@ async def upsert_command_content(command: str, payload: CommandContentRequest) -
 @router.get("/admin/member-reports", response_model=list[MemberReport])
 async def member_reports() -> list[MemberReport]:
     return get_operations_store().list_member_reports()
+
+
+@router.patch("/admin/member-reports/{report_id}", response_model=MemberReport)
+async def update_member_report(report_id: str, payload: MemberReportUpdateRequest) -> MemberReport:
+    """Mark a /report submission handled so it leaves the Admin inbox."""
+    result = get_operations_store().set_member_report_status(report_id, payload.status, payload.actor)
+    if not result:
+        raise HTTPException(status_code=404, detail="Member report not found.")
+    return result
 
 
 @router.post("/admin/announcements", response_model=AnnouncementResponse)

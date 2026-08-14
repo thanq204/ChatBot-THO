@@ -767,6 +767,17 @@ class OperationsStore:
             rows = db.execute("SELECT * FROM operations_member_reports ORDER BY created_at DESC").fetchall()
         return [MemberReport(report_id=row["report_id"], platform=row["platform"], reporter_id=row["reporter_id"], channel_id=row["channel_id"], details=row["details"], status=row["status"], created_at=datetime.fromisoformat(row["created_at"])) for row in rows]
 
+    def set_member_report_status(self, report_id: str, status: str, actor: str = "Admin") -> MemberReport | None:
+        """Close out a /report submission. Returns None when the id is unknown."""
+        with self._connect() as db:
+            cursor = db.execute(
+                "UPDATE operations_member_reports SET status=? WHERE report_id=?", (status, report_id)
+            )
+            if cursor.rowcount == 0:
+                return None
+        self.add_audit(None, None, "member_report_reviewed", actor, {"report_id": report_id, "status": status})
+        return next((item for item in self.list_member_reports() if item.report_id == report_id), None)
+
     def set_notification_preference(self, platform: str, member_id: str, kind: str, enabled: bool) -> None:
         column = "daily_enabled" if kind == "daily" else "weekly_enabled"
         now = _now()

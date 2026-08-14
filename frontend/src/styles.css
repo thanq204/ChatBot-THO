@@ -2141,3 +2141,190 @@ button.list-row:hover {
     grid-template-columns: 70px 1fr 26px;
   }
 }
+
+/* ==========================================================================
+   Destructive button
+   Kick and ban must not look like "Sửa". Same shape, unmistakable colour.
+   ========================================================================== */
+
+.btn--danger {
+  background: var(--sev-critical);
+  color: #fff;
+}
+
+.btn--danger:hover:not(:disabled) {
+  filter: brightness(0.93);
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* ==========================================================================
+   Manual moderation actions
+   ========================================================================== */
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.actions__picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.actions__option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 13px;
+  font-size: 12.5px;
+  font-weight: 600;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-secondary);
+  transition: border-color 0.18s var(--ease-out), color 0.18s var(--ease-out),
+    background-color 0.18s var(--ease-out);
+}
+
+.actions__option:hover {
+  background: var(--surface-alt);
+  color: var(--text-primary);
+}
+
+.actions__option.is-active {
+  color: var(--text-primary);
+  border-color: currentColor;
+}
+
+.actions__option--safe.is-active {
+  color: var(--sev-low);
+  background: color-mix(in srgb, var(--sev-low) 10%, transparent);
+}
+
+.actions__option--warn.is-active {
+  color: var(--sev-medium);
+  background: color-mix(in srgb, var(--sev-medium) 12%, transparent);
+}
+
+.actions__option--danger.is-active {
+  color: var(--sev-critical);
+  background: color-mix(in srgb, var(--sev-critical) 10%, transparent);
+}
+
+.actions__help {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+/* Spells out target and consequence before the confirmation is offered. */
+.actions__preview {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-control);
+  font-size: 12.5px;
+  line-height: 1.5;
+  border: 1px solid var(--border);
+  background: var(--surface-alt);
+  color: var(--text-secondary);
+}
+
+.actions__preview svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.actions__preview--warn {
+  border-color: color-mix(in srgb, var(--sev-medium) 40%, transparent);
+  background: color-mix(in srgb, var(--sev-medium) 9%, transparent);
+}
+
+.actions__preview--danger {
+  border-color: color-mix(in srgb, var(--sev-critical) 40%, transparent);
+  background: color-mix(in srgb, var(--sev-critical) 9%, transparent);
+  color: var(--text-primary);
+}
+
+.actions__confirm {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.actions__confirm input {
+  margin-top: 2px;
+  accent-color: var(--accent-solid);
+}
+
+.actions__result {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.actions__result svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.actions__result--ok {
+  color: var(--sev-low);
+}
+
+.actions__result--fail {
+  color: var(--sev-critical);
+}
+
+/* ==========================================================================
+   Member report inbox
+   ========================================================================== */
+
+.reports__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.reports__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.reports__toggle input {
+  accent-color: var(--accent-solid);
+}
+
+.reports__done {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--sev-low);
+}
+
+.list-row__title svg {
+  vertical-align: -2px;
+  margin-right: 4px;
+  color: var(--text-muted);
+}
