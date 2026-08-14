@@ -13,7 +13,7 @@ import uuid
 import urllib.request
 import psycopg2
 import psycopg2.extras
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +23,7 @@ from backend.models.operations import (
     CommandContent,
     CommandContentRequest,
     CommonMessage,
+    ActivityTimeline,
     CommunityHealth,
     FAQSuggestion,
     FAQUpsertRequest,
@@ -36,6 +37,7 @@ from backend.models.operations import (
     OperationsSummary,
     Policy,
     PolicyUpsertRequest,
+    TimelineBucket,
 )
 
 
@@ -853,9 +855,68 @@ class OperationsStore:
         categories = [str(row["category"] or "") for row in rows]
         terms: dict[str, int] = {}
         for row in rows:
-            for term in set(term for term in _fold_search_text(row["text"]).split() if len(term) >= 4):
+            # Numeric tokens are Discord/Telegram snowflake ids, never topics.
+            for term in set(
+                term
+                for term in _fold_search_text(row["text"]).split()
+                if len(term) >= 4 and not term.isdigit()
+            ):
                 terms[term] = terms.get(term, 0) + 1
         return CommunityHealth(window_hours=window_hours, messages_total=len(rows), spam_count=categories.count("spam"), toxic_count=sum(item in {"harassment", "hate", "violence"} for item in categories), risky_count=sum(str(row["decision"] or "allow") != "allow" for row in rows), unique_members=len({row["author_id"] for row in rows}), new_members=sum(str(row["first_seen"]) >= since for row in first_seen), top_topics=sorted(terms.items(), key=lambda item: (-item[1], item[0]))[:10], open_faq_suggestions=open_suggestions, generated_at=datetime.now(UTC))
+
+    @staticmethod
+    def _as_utc(value: object) -> datetime | None:
+        """Rows written by different connectors mix naive and aware stamps."""
+        try:
+            stamp = datetime.fromisoformat(str(value))
+        except (TypeError, ValueError):
+            return None
+        return stamp if stamp.tzinfo else stamp.replace(tzinfo=UTC)
+
+    def activity_timeline(self, window_hours: int = 48, bucket_hours: int = 1) -> ActivityTimeline:
+        """Scanned messages and violations bucketed into a fixed grid of slots.
+
+        Empty slots are emitted too. A gap in the chart has to read as "nothing
+        happened here", which only works if the slot exists with a zero.
+        """
+        bucket = timedelta(hours=bucket_hours)
+        slots = max(1, math.ceil(window_hours / bucket_hours))
+
+        # Align the newest slot to a bucket boundary so labels land on round hours.
+        newest = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
+        newest -= timedelta(hours=newest.hour % bucket_hours)
+        start = newest - bucket * (slots - 1)
+
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT timestamp, COALESCE(decision,'allow') decision FROM operations_messages WHERE timestamp>=?",
+                (start.isoformat(),),
+            ).fetchall()
+
+        scanned = [0] * slots
+        violations = [0] * slots
+        for row in rows:
+            stamp = self._as_utc(row["timestamp"])
+            if stamp is None:
+                continue
+            index = int((stamp - start) // bucket)
+            if not 0 <= index < slots:
+                continue
+            scanned[index] += 1
+            if str(row["decision"]) != "allow":
+                violations[index] += 1
+
+        return ActivityTimeline(
+            window_hours=window_hours,
+            bucket_hours=bucket_hours,
+            scanned_total=sum(scanned),
+            violations_total=sum(violations),
+            buckets=[
+                TimelineBucket(start=start + bucket * index, scanned=scanned[index], violations=violations[index])
+                for index in range(slots)
+            ],
+            generated_at=datetime.now(UTC),
+        )
 
     def record_import(self, response: KnowledgeImportResponse) -> KnowledgeImportResponse:
         with self._connect() as db:

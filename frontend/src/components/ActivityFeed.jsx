@@ -39,7 +39,10 @@ export default function ActivityFeed({ incidents, onSelect }) {
               <span className="activity-feed__body">
                 <span className="activity-feed__meta">
                   <span className="activity-feed__author">
-                    {platformLabel(incident.platform)} · {incident.community_id}
+                    {/* community_id is often just the platform name again; only
+                        show a second token when it actually adds something. */}
+                    {platformLabel(incident.platform)}
+                    {incident.channel_id && ` · ${incident.channel_id}`}
                   </span>
                   <span className="activity-feed__time">{relativeTime(incident.updated_at)}</span>
                 </span>

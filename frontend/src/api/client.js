@@ -20,6 +20,9 @@ const del = (path) => request(path, { method: "DELETE" });
 /** Operations surface: incidents, connectors, policies, knowledge, RAG. */
 export const ops = {
   analytics: () => get("/analytics"),
+  timeline: (windowHours = 48, bucketHours = 1) =>
+    get(`/analytics/timeline?window_hours=${windowHours}&bucket_hours=${bucketHours}`),
+  communityHealth: (windowHours = 24) => get(`/community-health?window_hours=${windowHours}`),
   platforms: () => get("/platforms"),
   pullPlatform: (platform, limit) => post(`/platforms/${platform}/pull?limit=${limit}`),
   incidents: (filters = {}) => {

@@ -3,14 +3,16 @@ import { Outlet, useLocation } from "react-router-dom";
 import Sidebar from "../components/Sidebar.jsx";
 import Topbar from "../components/Topbar.jsx";
 
+// Must stay in sync with NAV_ITEMS in components/Sidebar.jsx.
 const PAGE_TITLES = {
-  "/": "Tổng quan",
+  "/tong-quan": "Tổng quan",
   "/cong-dong": "Cộng đồng",
   "/quy-tac-ai": "Quy tắc AI",
   "/nhat-ky": "Nhật ký kiểm duyệt",
   "/khu-thu-nghiem-ai": "Khu thử nghiệm AI",
   "/nguoi-dung": "Quản lý người dùng",
-  "/cai-dat": "Cài đặt",
+  "/thong-bao": "Thông báo",
+  "/cai-dat": "Quản lý nội dung",
 };
 
 export default function AppLayout() {
