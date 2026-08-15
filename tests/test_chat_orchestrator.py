@@ -57,7 +57,13 @@ def test_community_health_counts_spam(tmp_path) -> None:
 
 def test_level_one_commands_bypass_moderation() -> None:
     store = Mock()
-    store.get_command_content.return_value = Mock(body="Daily task: review chapter 2")
+    store.list_command_content.return_value = [
+        Mock(command="daily", description="Daily task", platforms=["telegram", "discord"])
+    ]
+    store.get_command_content.return_value = Mock(
+        body="Daily task: review chapter 2",
+        platforms=["telegram", "discord"],
+    )
     pipeline = Mock()
     chat = ChatOrchestrator(store, Settings(discord_rag_llm_enabled=False), pipeline)
 
@@ -74,8 +80,10 @@ def test_level_one_commands_bypass_moderation() -> None:
 
 
 def test_unknown_command_stops_at_rule() -> None:
+    store = Mock()
+    store.get_command_content.return_value = None
     pipeline = Mock()
-    outcome = ChatOrchestrator(Mock(), Settings(discord_rag_llm_enabled=False), pipeline).reply(message("unknown-command", "/not-a-command"))
+    outcome = ChatOrchestrator(store, Settings(discord_rag_llm_enabled=False), pipeline).reply(message("unknown-command", "/not-a-command"))
 
     assert outcome.stage == "rule"
     assert "Không nhận ra lệnh" in outcome.answer
