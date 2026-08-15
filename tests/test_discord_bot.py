@@ -7,7 +7,11 @@ from backend.services.discord.bot import DiscordRagBot
 
 
 def test_discord_mention_is_removed_before_chat_routing() -> None:
-    bot = DiscordRagBot(Mock(), Settings(discord_rag_llm_enabled=False), pipeline=Mock())
+    store = Mock()
+    store.list_command_content.return_value = [
+        Mock(command="daily", description="Daily task", platforms=["discord"])
+    ]
+    bot = DiscordRagBot(store, Settings(discord_rag_llm_enabled=False), pipeline=Mock())
     message = SimpleNamespace(
         id=1,
         guild=SimpleNamespace(id=2),
