@@ -34,24 +34,32 @@ class ChatOrchestrator:
 5. Không đăng thông tin cá nhân, link lừa đảo hoặc quảng cáo không liên quan.
 6. Báo Admin khi thấy nội dung vi phạm hoặc cần hoà giải."""
 
-    HELP_TEXT = """Các lệnh có thể dùng:
-/start — Giới thiệu bot và cách dùng
-/help — Xem danh sách lệnh
-/rule — Xem nội quy nhóm học tập
-/event — Xem sự kiện/lịch học gần nhất
-/daily — Xem việc cần làm hôm nay
-/weekly — Xem kế hoạch tuần
-/faq — Hướng dẫn FAQ
-/report <link/message ID và mô tả> — Báo cáo vi phạm
-/admin — Cách liên hệ Admin/Mod
-/resources — Tài liệu học tập chính
-/settings daily|weekly on|off — Bật/tắt thông báo trong chat riêng"""
-
     def __init__(self, store: OperationsStore, settings: Settings | None = None, pipeline: OperationsPipeline | None = None) -> None:
         self.settings = settings or get_settings()
         self.store = store
         self.pipeline = pipeline or OperationsPipeline(store=store, settings=self.settings)
         self.ai_pipeline = CommunityAIPipeline()
+
+    def _help_text(self, platform: str) -> str:
+        """Built fresh every time so a command Admin just added/removed from
+        the dashboard shows up immediately, without a code change or deploy."""
+        lines = [
+            "Các lệnh có thể dùng:",
+            "/start — Giới thiệu bot và cách dùng",
+            "/help — Xem danh sách lệnh",
+            "/rule — Xem nội quy nhóm học tập",
+        ]
+        for entry in self.store.list_command_content():
+            if platform not in entry.platforms:
+                continue
+            note = entry.description.strip() or f"Lệnh /{entry.command}"
+            lines.append(f"/{entry.command} — {note}")
+        lines += [
+            "/faq — Hướng dẫn FAQ",
+            "/report <link/message ID và mô tả> — Báo cáo vi phạm",
+            "/settings daily|weekly on|off — Bật/tắt thông báo trong chat riêng",
+        ]
+        return "\n".join(lines)
 
     def _rule_answer(self, message: CommonMessage) -> str | None:
         cleaned = message.text.strip().lower()
@@ -63,14 +71,11 @@ class ChatOrchestrator:
             if command == "/start":
                 return "Chào bạn! Mình là trợ lý nhóm học tập. Dùng /help để xem các lệnh và gửi câu hỏi học tập bất kỳ để được hỗ trợ."
             if command == "/help":
-                return self.HELP_TEXT
+                return self._help_text(message.platform)
             if command in {"/rule", "/rules"}:
                 return self.STUDY_GROUP_RULES
             if command == "/faq":
                 return "FAQ là các câu trả lời do Admin/Mod duyệt. Nếu nhiều người hỏi một vấn đề chưa có FAQ, hệ thống sẽ đề xuất Admin tạo FAQ mới."
-            if command in {"/event", "/daily", "/weekly", "/resources", "/admin"}:
-                content = self.store.get_command_content(command[1:])
-                return content.body if content else "Chưa có thông báo mới, vui lòng quay lại sau."
             if command == "/report":
                 if not argument.strip():
                     return "Hãy gửi /report kèm link hoặc message ID và mô tả ngắn. Ví dụ: /report 123456 - spam link lừa đảo."
@@ -84,6 +89,14 @@ class ChatOrchestrator:
                     return "Hãy dùng /settings trong chat riêng với bot để bảo vệ lựa chọn thông báo của bạn."
                 self.store.set_notification_preference(message.platform, message.author_id, parts[0], parts[1] == "on")
                 return f"Đã {'bật' if parts[1] == 'on' else 'tắt'} thông báo {parts[0]} cho bạn."
+            # Everything else falls back to Admin-managed content: the seeded
+            # built-ins (/event, /daily, ...) and any command created later
+            # from the dashboard, without needing a code change per command.
+            # A command scoped to only one platform stays "unrecognized" on
+            # the other, matching what a member there actually experiences.
+            content = self.store.get_command_content(command[1:])
+            if content and message.platform in content.platforms:
+                return content.body
             return "Không nhận ra lệnh. Dùng /help để xem các lệnh."
         if cleaned in {"nội quy", "noi quy", "quy định nhóm", "quy dinh nhom"}:
             return self.STUDY_GROUP_RULES
