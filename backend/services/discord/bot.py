@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from backend.config import Settings, get_settings
-from backend.models.operations import CommonMessage
+from backend.models.operations import RESERVED_BOT_COMMANDS, CommonMessage
 from backend.services.chat_orchestrator import ChatOrchestrator
 from backend.services.operations_pipeline import OperationsPipeline
 from backend.services.operations_store import OperationsStore
@@ -23,6 +23,21 @@ from backend.services.telegram.alerts import TelegramAlertSender
 from backend.services.platform_moderation import PlatformModerationService
 
 logger = logging.getLogger(__name__)
+
+# The one Discord listener running in this process, if any. The admin API
+# uses this to ask a live bot to re-register slash commands right after an
+# Admin adds/edits/deletes one, instead of waiting for the next restart.
+_active_bot: "DiscordRagBot | None" = None
+
+
+def notify_commands_changed() -> None:
+    """Best-effort: re-sync Discord slash commands after a command-content write.
+
+    No-ops quietly if no Discord listener is running in this process (e.g.
+    the token isn't configured, or we're in a worker that only serves HTTP).
+    """
+    if _active_bot is not None:
+        _active_bot.resync_commands()
 
 
 class DiscordRagBot:
@@ -51,6 +66,9 @@ class DiscordRagBot:
         self._thread: threading.Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._client: Any = None
+        self._tree: Any = None
+        self._run_command_async: Any = None
+        self._dynamic_command_names: set[str] = set()
         self._lock_handle: Any = None
         self._seen_message_ids: set[str] = set()
 
@@ -109,8 +127,13 @@ class DiscordRagBot:
         print("[Discord] Starting realtime RAG listener...", flush=True)
         self._thread = threading.Thread(target=self._run, name="discord-rag-listener", daemon=True)
         self._thread.start()
+        global _active_bot
+        _active_bot = self
 
     def stop(self) -> None:
+        global _active_bot
+        if _active_bot is self:
+            _active_bot = None
         if self._client and self._loop and not self._loop.is_closed():
             future = asyncio.run_coroutine_threadsafe(self._client.close(), self._loop)
             try:
@@ -120,6 +143,71 @@ class DiscordRagBot:
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=5)
         self._release_process_lock()
+
+    def resync_commands(self) -> None:
+        """Ask the running bot to re-register custom slash commands.
+
+        Called from the FastAPI request thread after an Admin add/edit/delete;
+        schedules the actual Discord API work on the bot's own event loop and
+        returns immediately without waiting on it.
+        """
+        if not self._client or not self._loop or self._loop.is_closed():
+            return
+        try:
+            asyncio.run_coroutine_threadsafe(self._resync_commands_async(), self._loop)
+        except RuntimeError:
+            logger.debug("Discord command resync skipped; listener loop not ready.", exc_info=True)
+
+    def _register_dynamic_commands(self) -> set[str]:
+        """Register a slash command for every Admin-created command that isn't
+        already covered by the decorators below (event/daily/weekly/... and
+        the reserved built-ins) and is scoped to Discord."""
+        if self._tree is None or self._run_command_async is None:
+            return set()
+        registered: set[str] = set()
+        try:
+            entries = self.store.list_command_content()
+        except Exception:
+            logger.exception("Could not load command content for Discord slash-command sync.")
+            return registered
+        for entry in entries:
+            if entry.command in RESERVED_BOT_COMMANDS or "discord" not in entry.platforms:
+                continue
+            handler = self._make_dynamic_handler(entry.command)
+            description = (entry.description or f"Lệnh /{entry.command}").strip()[:100] or f"Lệnh /{entry.command}"
+            self._tree.command(name=entry.command, description=description)(handler)
+            registered.add(entry.command)
+        return registered
+
+    def _make_dynamic_handler(self, command_name: str):
+        async def _handler(interaction: Any) -> None:
+            await self._run_command_async(interaction, command_name)
+
+        _handler.__name__ = f"dynamic_{command_name}"
+        return _handler
+
+    async def _sync_tree(self) -> list[Any]:
+        """Push the command tree to Discord: the normal global sync, plus an
+        instant guild-scoped copy for every server the bot is already in.
+        Global propagation alone can take Discord up to an hour."""
+        synced = await self._tree.sync()
+        for guild in self._client.guilds:
+            self._tree.copy_global_to(guild=guild)
+            await self._tree.sync(guild=guild)
+        return synced
+
+    async def _resync_commands_async(self) -> None:
+        if self._tree is None or self._client is None:
+            return
+        try:
+            for name in list(self._dynamic_command_names):
+                self._tree.remove_command(name)
+            self._dynamic_command_names = self._register_dynamic_commands()
+            await self._sync_tree()
+            print(f"[Discord] Slash commands re-synced after Admin update ({len(self._dynamic_command_names)} custom).", flush=True)
+        except Exception:
+            logger.exception("Discord slash command resync failed.")
+            print("[Discord] Slash command resync failed; retry from the dashboard or restart the bot.", flush=True)
 
     def _run(self) -> None:
         try:
@@ -137,6 +225,7 @@ class DiscordRagBot:
         client = discord.Client(intents=intents)
         tree = discord.app_commands.CommandTree(client)
         self._client = client
+        self._tree = tree
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
 
@@ -150,6 +239,10 @@ class DiscordRagBot:
             )
             outcome = await asyncio.to_thread(self.chat.reply, common, [])
             await interaction.response.send_message(outcome.answer[: self.settings.discord_reply_max_chars], ephemeral=False)
+
+        # Exposed so resync_commands() can reuse this handler for commands
+        # created from the dashboard after the bot has already started.
+        self._run_command_async = run_command
 
         @tree.command(name="help", description="Xem danh sách lệnh")
         async def help_command(interaction: Any) -> None:
@@ -195,10 +288,14 @@ class DiscordRagBot:
         async def settings_command(interaction: Any, kind: str, enabled: bool) -> None:
             await run_command(interaction, "settings", f"{kind} {'on' if enabled else 'off'}")
 
+        # Anything an Admin created from the dashboard beyond the fixed set
+        # above (e.g. /gioithieu), scoped to Discord in its platform list.
+        self._dynamic_command_names = self._register_dynamic_commands()
+
         @client.event
         async def on_ready() -> None:
             try:
-                synced = await tree.sync()
+                synced = await self._sync_tree()
                 print(f"[Discord] Slash commands synced: {', '.join(command.name for command in synced)}", flush=True)
             except Exception as exc:
                 logger.exception("Discord application command registration failed.")

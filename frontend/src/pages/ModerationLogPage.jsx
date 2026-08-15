@@ -5,22 +5,33 @@ import StatTile from "../components/StatTile.jsx";
 import Badge from "../components/Badge.jsx";
 import { SkeletonBlock } from "../components/Skeleton.jsx";
 import { ErrorState, EmptyState } from "../components/StatePanels.jsx";
-import { moderation } from "../api/client.js";
-import { moderationCategoryLabel, moderationActionLabel, MODERATION_ACTION_COLORS, severityLabel } from "../lib/taxonomy.js";
+import { moderation, ops } from "../api/client.js";
+import {
+  moderationCategoryLabel,
+  moderationActionLabel,
+  MODERATION_ACTION_COLORS,
+  severityLabel,
+  auditEventLabel,
+  ADMIN_ACTION_EVENT_TYPES,
+  describeAuditEntry,
+  auditToneFor,
+} from "../lib/taxonomy.js";
 import { relativeTime, percent } from "../lib/format.js";
 
 export default function ModerationLogPage() {
   const [queue, setQueue] = useState([]);
   const [audit, setAudit] = useState([]);
+  const [adminActions, setAdminActions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   const load = useCallback(() => {
     setError(null);
-    return Promise.all([moderation.reviewQueue(), moderation.auditLogs()])
-      .then(([pending, entries]) => {
+    return Promise.all([moderation.reviewQueue(), moderation.auditLogs(), ops.audit()])
+      .then(([pending, entries, realAudit]) => {
         setQueue(pending);
         setAudit(entries);
+        setAdminActions(realAudit.filter((item) => ADMIN_ACTION_EVENT_TYPES.has(item.event_type)));
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
@@ -42,16 +53,19 @@ export default function ModerationLogPage() {
     <div className="page-grid">
       <div className="page-grid__row">
         <div className="span-3">
-          <StatTile label="Đang chờ review" value={loading ? 0 : queue.length} tone="alert" />
+          <StatTile label="Đang chờ review (thử nghiệm)" value={loading ? 0 : queue.length} tone="alert" />
         </div>
         <div className="span-3">
-          <StatTile label="Quyết định đã ghi" value={loading ? 0 : audit.length} tone="brand" />
+          <StatTile label="Hành động Admin đã ghi" value={loading ? 0 : adminActions.length} tone="brand" />
+        </div>
+        <div className="span-3">
+          <StatTile label="Quyết định thử nghiệm đã ghi" value={loading ? 0 : audit.length} tone="brand" />
         </div>
       </div>
 
       <div className="page-grid__row">
         <Card
-          title="Cases đang chờ"
+          title="Cases đang chờ (thử nghiệm)"
           className="span-7"
           action={
             <button type="button" className="btn btn--ghost" onClick={load} disabled={loading}>
@@ -59,6 +73,9 @@ export default function ModerationLogPage() {
             </button>
           }
         >
+          <p className="muted small">
+            Danh sách này đến từ tin nhắn giả lập gửi ở "Khu thử nghiệm AI", không phải tin nhắn thật từ Discord/Telegram.
+          </p>
           {loading && <SkeletonBlock height={260} />}
           {!loading && queue.length === 0 && <EmptyState message="Không có nội dung nào đang chờ review." />}
           {!loading && queue.length > 0 && (
@@ -70,9 +87,38 @@ export default function ModerationLogPage() {
           )}
         </Card>
 
-        <Card title="Audit log" className="span-5" delay={0.05}>
+        <Card title="Nhật ký hành động Admin" className="span-5" delay={0.05}>
+          <p className="muted small">Những gì Admin/Mod đã thực sự làm trên các case thật: xoá tin, timeout, kick, ban, gửi thông báo...</p>
           {loading && <SkeletonBlock height={260} />}
-          {!loading && audit.length === 0 && <EmptyState message="Chưa có quyết định nào." />}
+          {!loading && adminActions.length === 0 && <EmptyState message="Chưa có hành động Admin nào được ghi nhận." />}
+          {!loading && adminActions.length > 0 && (
+            <div className="list">
+              {adminActions.map((item) => (
+                <div className="list-row" key={item.audit_id}>
+                  <div className="list-row__head">
+                    <span className="list-row__title">{item.actor}</span>
+                    <Badge tone={auditToneFor(item)}>{auditEventLabel(item.event_type)}</Badge>
+                  </div>
+                  <p className="list-row__body">{describeAuditEntry(item)}</p>
+                  <span className="list-row__meta">
+                    {item.incident_id ? `${item.incident_id} · ` : ""}
+                    {relativeTime(item.created_at)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      </div>
+
+      <div className="page-grid__row">
+        <Card title="Nhật ký quyết định (thử nghiệm)" className="span-12" delay={0.1}>
+          <p className="muted small">
+            Quyết định allow/warn/hide trên các tin nhắn giả lập gửi ở "Khu thử nghiệm AI" — không phải hành động trên tin nhắn
+            thật.
+          </p>
+          {loading && <SkeletonBlock height={160} />}
+          {!loading && audit.length === 0 && <EmptyState message="Chưa có quyết định thử nghiệm nào." />}
           {!loading && audit.length > 0 && (
             <div className="list">
               {audit.map((item) => (
