@@ -134,7 +134,7 @@ class OperationsStore:
                     channel_id TEXT NOT NULL, thread_key TEXT, status TEXT NOT NULL, severity TEXT NOT NULL,
                     risk_score REAL NOT NULL, title TEXT NOT NULL, summary TEXT NOT NULL, categories_json TEXT NOT NULL,
                     message_ids_json TEXT NOT NULL, first_seen TEXT NOT NULL, last_seen TEXT NOT NULL,
-                    assigned_to TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+                    assigned_to TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, source_url TEXT
                 );
                 CREATE INDEX IF NOT EXISTS idx_ops_incidents_status ON operations_incidents(status);
                 CREATE TABLE IF NOT EXISTS operations_audit (
@@ -186,7 +186,8 @@ class OperationsStore:
                     status TEXT NOT NULL DEFAULT 'open', created_at TEXT NOT NULL, updated_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS operations_command_content (
-                    command TEXT PRIMARY KEY, body TEXT NOT NULL, updated_at TEXT NOT NULL
+                    command TEXT PRIMARY KEY, body TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
+                    platforms_json TEXT NOT NULL DEFAULT '["telegram","discord"]', updated_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS operations_member_reports (
                     report_id TEXT PRIMARY KEY, platform TEXT NOT NULL, reporter_id TEXT NOT NULL,
@@ -202,6 +203,14 @@ class OperationsStore:
             columns = {row[1] for row in db.execute("PRAGMA table_info(operations_knowledge)").fetchall()}
             if "dataset" not in columns:
                 db.execute("ALTER TABLE operations_knowledge ADD COLUMN dataset TEXT NOT NULL DEFAULT 'general'")
+            command_columns = {row[1] for row in db.execute("PRAGMA table_info(operations_command_content)").fetchall()}
+            if "description" not in command_columns:
+                db.execute("ALTER TABLE operations_command_content ADD COLUMN description TEXT NOT NULL DEFAULT ''")
+            if "platforms_json" not in command_columns:
+                db.execute("ALTER TABLE operations_command_content ADD COLUMN platforms_json TEXT NOT NULL DEFAULT '[\"telegram\",\"discord\"]'")
+            incident_columns = {row[1] for row in db.execute("PRAGMA table_info(operations_incidents)").fetchall()}
+            if "source_url" not in incident_columns:
+                db.execute("ALTER TABLE operations_incidents ADD COLUMN source_url TEXT")
 
     def seed_defaults(self) -> None:
         with self._connect() as db:
@@ -233,15 +242,16 @@ class OperationsStore:
                 ]
                 db.executemany("INSERT INTO operations_faqs VALUES (?, ?, ?, ?, ?, ?)", [(faq_id, question, answer, _json(tags), 1, _now()) for faq_id, question, answer, tags in faqs])
             if not db.execute("SELECT 1 FROM operations_command_content LIMIT 1").fetchone():
+                command_defaults = {
+                    "event": ("Chưa có thông báo mới về sự kiện hoặc lịch học.", "Sự kiện và lịch học sắp tới"),
+                    "daily": ("Chưa có thông báo mới cho hôm nay.", "Việc cần làm hôm nay"),
+                    "weekly": ("Chưa có thông báo mới cho tuần này.", "Kế hoạch tuần"),
+                    "resources": ("Chưa có tài liệu học tập chính được Admin cập nhật.", "Tài liệu học tập chính"),
+                    "admin": ("Liên hệ Admin/Mod trong kênh quản trị hoặc dùng /report để báo nội dung cần xem xét.", "Cách liên hệ Admin/Mod"),
+                }
                 db.executemany(
-                    "INSERT INTO operations_command_content VALUES (?, ?, ?)",
-                    [(command, body, _now()) for command, body in {
-                        "event": "Chưa có thông báo mới về sự kiện hoặc lịch học.",
-                        "daily": "Chưa có thông báo mới cho hôm nay.",
-                        "weekly": "Chưa có thông báo mới cho tuần này.",
-                        "resources": "Chưa có tài liệu học tập chính được Admin cập nhật.",
-                        "admin": "Liên hệ Admin/Mod trong kênh quản trị hoặc dùng /report để báo nội dung cần xem xét.",
-                    }.items()],
+                    "INSERT INTO operations_command_content (command, body, description, platforms_json, updated_at) VALUES (?, ?, ?, ?, ?)",
+                    [(command, body, description, _json(["telegram", "discord"]), _now()) for command, (body, description) in command_defaults.items()],
                 )
 
     def purge_demo_data(self) -> int:
@@ -568,11 +578,11 @@ class OperationsStore:
             db.execute(
                 """INSERT INTO operations_incidents
                 (incident_id, platform, community_id, channel_id, thread_key, status, severity, risk_score, title, summary,
-                 categories_json, message_ids_json, first_seen, last_seen, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                 categories_json, message_ids_json, first_seen, last_seen, created_at, updated_at, source_url)
+                VALUES (?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (incident_id, message.platform, message.community_id, message.channel_id, message.thread_key, result.severity,
                  result.risk_score, f"{result.category.title()} từ {message.author_name or message.author_id}", result.explanation,
-                 _json([result.category]), _json([message.message_id]), message.timestamp.isoformat(), message.timestamp.isoformat(), now.isoformat(), now.isoformat()),
+                 _json([result.category]), _json([message.message_id]), message.timestamp.isoformat(), message.timestamp.isoformat(), now.isoformat(), now.isoformat(), message.source_url),
             )
         self.add_audit(incident_id, message.message_id, "incident_created", "system", {"decision": result.decision, "evidence": result.evidence})
         return self.get_incident(incident_id)  # type: ignore[return-value]
@@ -743,17 +753,43 @@ class OperationsStore:
             logger.error("Failed to delete knowledge from PostgreSQL", exc_info=True)
             return False
 
+    @staticmethod
+    def _command_content(row: sqlite3.Row) -> CommandContent:
+        return CommandContent(
+            command=row["command"],
+            body=row["body"],
+            description=row["description"] or "",
+            platforms=json.loads(row["platforms_json"] or "null") or ["telegram", "discord"],
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+        )
+
     def get_command_content(self, command: str) -> CommandContent | None:
         with self._connect() as db:
             row = db.execute("SELECT * FROM operations_command_content WHERE command=?", (command,)).fetchone()
-        return CommandContent(command=row["command"], body=row["body"], updated_at=datetime.fromisoformat(row["updated_at"])) if row else None
+        return self._command_content(row) if row else None
+
+    def list_command_content(self) -> list[CommandContent]:
+        with self._connect() as db:
+            rows = db.execute("SELECT * FROM operations_command_content ORDER BY command").fetchall()
+        return [self._command_content(row) for row in rows]
 
     def upsert_command_content(self, command: str, request: CommandContentRequest) -> CommandContent:
         command = command.strip().lower().lstrip("/")
         now = _now()
         with self._connect() as db:
-            db.execute("INSERT INTO operations_command_content VALUES (?, ?, ?) ON CONFLICT(command) DO UPDATE SET body=excluded.body, updated_at=excluded.updated_at", (command, request.body, now))
+            db.execute(
+                """INSERT INTO operations_command_content (command, body, description, platforms_json, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(command) DO UPDATE SET body=excluded.body, description=excluded.description,
+                platforms_json=excluded.platforms_json, updated_at=excluded.updated_at""",
+                (command, request.body, request.description.strip(), _json(request.platforms), now),
+            )
         return self.get_command_content(command)  # type: ignore[return-value]
+
+    def delete_command_content(self, command: str) -> bool:
+        with self._connect() as db:
+            cursor = db.execute("DELETE FROM operations_command_content WHERE command=?", (command,))
+        return cursor.rowcount > 0
 
     def create_member_report(self, message: CommonMessage, details: str) -> MemberReport:
         report = MemberReport(report_id=f"REP-{uuid.uuid4().hex[:10].upper()}", platform=message.platform, reporter_id=message.author_id, channel_id=message.channel_id, details=details[:4000], created_at=datetime.now(UTC))
@@ -766,6 +802,17 @@ class OperationsStore:
         with self._connect() as db:
             rows = db.execute("SELECT * FROM operations_member_reports ORDER BY created_at DESC").fetchall()
         return [MemberReport(report_id=row["report_id"], platform=row["platform"], reporter_id=row["reporter_id"], channel_id=row["channel_id"], details=row["details"], status=row["status"], created_at=datetime.fromisoformat(row["created_at"])) for row in rows]
+
+    def set_member_report_status(self, report_id: str, status: str, actor: str = "Admin") -> MemberReport | None:
+        """Close out a /report submission. Returns None when the id is unknown."""
+        with self._connect() as db:
+            cursor = db.execute(
+                "UPDATE operations_member_reports SET status=? WHERE report_id=?", (status, report_id)
+            )
+            if cursor.rowcount == 0:
+                return None
+        self.add_audit(None, None, "member_report_reviewed", actor, {"report_id": report_id, "status": status})
+        return next((item for item in self.list_member_reports() if item.report_id == report_id), None)
 
     def set_notification_preference(self, platform: str, member_id: str, kind: str, enabled: bool) -> None:
         column = "daily_enabled" if kind == "daily" else "weekly_enabled"
@@ -1145,4 +1192,4 @@ class OperationsStore:
 
     @staticmethod
     def _incident(row: sqlite3.Row) -> Incident:
-        return Incident(incident_id=row["incident_id"], platform=row["platform"], community_id=row["community_id"], channel_id=row["channel_id"], thread_key=row["thread_key"], status=row["status"], severity=row["severity"], risk_score=row["risk_score"], title=row["title"], summary=row["summary"], categories=json.loads(row["categories_json"]), message_ids=json.loads(row["message_ids_json"]), message_count=len(json.loads(row["message_ids_json"])), first_seen=datetime.fromisoformat(row["first_seen"]), last_seen=datetime.fromisoformat(row["last_seen"]), assigned_to=row["assigned_to"], created_at=datetime.fromisoformat(row["created_at"]), updated_at=datetime.fromisoformat(row["updated_at"]))
+        return Incident(incident_id=row["incident_id"], platform=row["platform"], community_id=row["community_id"], channel_id=row["channel_id"], thread_key=row["thread_key"], status=row["status"], severity=row["severity"], risk_score=row["risk_score"], title=row["title"], summary=row["summary"], categories=json.loads(row["categories_json"]), message_ids=json.loads(row["message_ids_json"]), message_count=len(json.loads(row["message_ids_json"])), first_seen=datetime.fromisoformat(row["first_seen"]), last_seen=datetime.fromisoformat(row["last_seen"]), assigned_to=row["assigned_to"], created_at=datetime.fromisoformat(row["created_at"]), updated_at=datetime.fromisoformat(row["updated_at"]), source_url=row["source_url"])

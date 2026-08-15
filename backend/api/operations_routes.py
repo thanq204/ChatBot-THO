@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import re
 import uuid
 from datetime import UTC, datetime
 
@@ -16,6 +17,8 @@ from backend.models.operations import (
     AnalyzeMessageResponse,
     AnnouncementRequest,
     AnnouncementResponse,
+    CORE_BOT_COMMANDS,
+    RESERVED_BOT_COMMANDS,
     CommandContent,
     CommandContentRequest,
     CommonMessage,
@@ -33,6 +36,7 @@ from backend.models.operations import (
     KnowledgeImportRequest,
     KnowledgeImportResponse,
     MemberReport,
+    MemberReportUpdateRequest,
     MessageIngestRequest,
     OperationsSummary,
     PlatformStatus,
@@ -42,6 +46,7 @@ from backend.models.operations import (
     RagResponse,
 )
 from backend.services.admin_announcements import AdminAnnouncementSender
+from backend.services.discord.bot import notify_commands_changed as notify_discord_commands_changed
 from backend.services.knowledge_importer import KnowledgeImporter, KnowledgeImportError
 from backend.services.operations_demo import seed_operations_demo
 from backend.services.operations_pipeline import OperationsPipeline
@@ -283,6 +288,15 @@ async def community_health(window_hours: int = Query(default=24, ge=1, le=24 * 9
     return get_operations_store().community_health(window_hours)
 
 
+_COMMAND_NAME_PATTERN = re.compile(r"^[a-z0-9_]{2,32}$")
+
+
+@router.get("/admin/command-content", response_model=list[CommandContent])
+async def list_command_content() -> list[CommandContent]:
+    """Every bot command with Admin-managed content: the built-ins plus any custom ones."""
+    return get_operations_store().list_command_content()
+
+
 @router.get("/admin/command-content/{command}", response_model=CommandContent)
 async def command_content(command: str) -> CommandContent:
     result = get_operations_store().get_command_content(command.strip().lower().lstrip("/"))
@@ -293,14 +307,41 @@ async def command_content(command: str) -> CommandContent:
 
 @router.put("/admin/command-content/{command}", response_model=CommandContent)
 async def upsert_command_content(command: str, payload: CommandContentRequest) -> CommandContent:
-    if command.strip().lower().lstrip("/") not in {"event", "daily", "weekly", "resources", "admin"}:
-        raise HTTPException(status_code=400, detail="Only event, daily, weekly, resources and admin content can be managed.")
-    return get_operations_store().upsert_command_content(command, payload)
+    key = command.strip().lower().lstrip("/")
+    if not _COMMAND_NAME_PATTERN.fullmatch(key):
+        raise HTTPException(status_code=400, detail="Tên lệnh chỉ gồm chữ thường, số và dấu gạch dưới, dài 2-32 ký tự.")
+    if key in RESERVED_BOT_COMMANDS - CORE_BOT_COMMANDS:
+        raise HTTPException(status_code=400, detail="Tên lệnh này đã được hệ thống dùng cho chức năng khác.")
+    result = get_operations_store().upsert_command_content(key, payload)
+    # Push a real Discord "/" slash command live (not just the mention
+    # fallback) if the currently running listener has one to update.
+    notify_discord_commands_changed()
+    return result
+
+
+@router.delete("/admin/command-content/{command}")
+async def delete_command_content(command: str) -> dict[str, object]:
+    key = command.strip().lower().lstrip("/")
+    if key in CORE_BOT_COMMANDS:
+        raise HTTPException(status_code=400, detail="Không thể xoá lệnh mặc định của hệ thống.")
+    if not get_operations_store().delete_command_content(key):
+        raise HTTPException(status_code=404, detail="Không tìm thấy lệnh để xoá.")
+    notify_discord_commands_changed()
+    return {"deleted": True, "command": key}
 
 
 @router.get("/admin/member-reports", response_model=list[MemberReport])
 async def member_reports() -> list[MemberReport]:
     return get_operations_store().list_member_reports()
+
+
+@router.patch("/admin/member-reports/{report_id}", response_model=MemberReport)
+async def update_member_report(report_id: str, payload: MemberReportUpdateRequest) -> MemberReport:
+    """Mark a /report submission handled so it leaves the Admin inbox."""
+    result = get_operations_store().set_member_report_status(report_id, payload.status, payload.actor)
+    if not result:
+        raise HTTPException(status_code=404, detail="Member report not found.")
+    return result
 
 
 @router.post("/admin/announcements", response_model=AnnouncementResponse)

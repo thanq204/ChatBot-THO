@@ -69,8 +69,77 @@ export const AUDIT_EVENT_LABELS = {
   admin_platform_action: "Admin xử lý trên nền tảng",
   automatic_moderation_dm: "Tự động nhắn nhắc nhở",
   member_report_created: "Thành viên báo cáo",
+  member_report_reviewed: "Admin xử lý báo cáo",
   admin_announcement: "Admin gửi thông báo",
+  moderation_memory_updated: "Lưu case làm mẫu tham chiếu",
+  duplicate_admin_notification_suppressed: "Bỏ qua thông báo trùng lặp",
+  recent_duplicate_notification_suppressed: "Bỏ qua thông báo trùng lặp gần đây",
 };
+
+/** Discord/Telegram action values on an admin_platform_action audit entry. */
+export const PLATFORM_ACTION_VERBS = {
+  dm: "nhắn tin cảnh báo",
+  delete_message: "xoá tin nhắn của",
+  timeout: "timeout",
+  kick: "kick",
+  ban: "ban",
+};
+
+export const PLATFORM_ACTION_COLORS = {
+  dm: "var(--accent-solid)",
+  delete_message: "var(--sev-high)",
+  timeout: "var(--sev-medium)",
+  kick: "var(--sev-high)",
+  ban: "var(--sev-critical)",
+};
+
+/**
+ * Real actions taken on real incidents (Discord/Telegram), as opposed to the
+ * system's own bookkeeping entries (incident_created, message_grouped, ...)
+ * which are noise from an Admin's point of view. Shared by the moderation
+ * log page and the Mod management page so "what counts as a mod action" is
+ * defined once.
+ */
+export const ADMIN_ACTION_EVENT_TYPES = new Set([
+  "admin_platform_action",
+  "incident_updated",
+  "member_report_reviewed",
+  "admin_announcement",
+  "moderation_memory_updated",
+]);
+
+export function describeAuditEntry(item) {
+  const payload = item.payload || {};
+  switch (item.event_type) {
+    case "admin_platform_action": {
+      const verb = PLATFORM_ACTION_VERBS[payload.action] || payload.action;
+      const target = payload.target_user_id ? ` user ${payload.target_user_id}` : "";
+      const duration = payload.duration_minutes ? ` (${payload.duration_minutes} phút)` : "";
+      const failed = payload.completed === false ? " — thất bại" : "";
+      return `đã ${verb}${target}${duration}${failed}`;
+    }
+    case "incident_updated": {
+      const status = payload.status ? ` → ${statusLabel(payload.status)}` : "";
+      const note = payload.note ? `: ${payload.note}` : "";
+      return `cập nhật case${status}${note}`;
+    }
+    case "member_report_reviewed":
+      return `đánh dấu báo cáo ${payload.report_id ?? ""} là ${payload.status === "reviewed" ? "đã xử lý" : "mở lại"}`;
+    case "admin_announcement":
+      return `gửi thông báo tới ${(payload.targets || []).join(", ") || "nền tảng"}`;
+    case "moderation_memory_updated":
+      return `lưu case làm mẫu tham chiếu (${moderationCategoryLabel(payload.category)})`;
+    default:
+      return auditEventLabel(item.event_type);
+  }
+}
+
+export function auditToneFor(item) {
+  if (item.event_type === "admin_platform_action") {
+    return PLATFORM_ACTION_COLORS[item.payload?.action] || "var(--text-muted)";
+  }
+  return "var(--accent-solid)";
+}
 
 export function auditEventLabel(value) {
   return AUDIT_EVENT_LABELS[value] ?? value;

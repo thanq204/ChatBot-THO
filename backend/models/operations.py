@@ -102,6 +102,7 @@ class Incident(BaseModel):
     assigned_to: str | None = None
     created_at: datetime
     updated_at: datetime
+    source_url: str | None = None
 
 
 class IncidentUpdateRequest(BaseModel):
@@ -262,14 +263,33 @@ class ChatOutcome(BaseModel):
     relevance_passed: bool | None = None
 
 
+# The two live bot integrations a command's reply can be scoped to.
+CommandPlatform = Literal["telegram", "discord"]
+
+
 class CommandContent(BaseModel):
     command: str
     body: str
+    description: str = ""
+    platforms: list[CommandPlatform] = Field(default_factory=lambda: ["telegram", "discord"])
     updated_at: datetime
 
 
 class CommandContentRequest(BaseModel):
     body: str = Field(..., min_length=1, max_length=5000)
+    description: str = Field(default="", max_length=300)
+    platforms: list[CommandPlatform] = Field(default_factory=lambda: ["telegram", "discord"], min_length=1, max_length=2)
+
+
+# Commands the bot already seeds Admin-editable content for out of the box.
+# These can never be deleted, only rewritten.
+CORE_BOT_COMMANDS: frozenset[str] = frozenset({"event", "daily", "weekly", "resources", "admin"})
+
+# Names the chat orchestrator handles with dedicated logic (not plain stored
+# text), so Admin cannot claim them when creating a new command.
+RESERVED_BOT_COMMANDS: frozenset[str] = CORE_BOT_COMMANDS | frozenset(
+    {"start", "help", "rule", "rules", "faq", "report", "settings"}
+)
 
 
 class MemberReport(BaseModel):
@@ -280,6 +300,11 @@ class MemberReport(BaseModel):
     details: str
     status: Literal["open", "reviewed"] = "open"
     created_at: datetime
+
+
+class MemberReportUpdateRequest(BaseModel):
+    status: Literal["open", "reviewed"]
+    actor: str = Field(default="Admin", min_length=1, max_length=100)
 
 
 class CommunityHealth(BaseModel):

@@ -5,9 +5,10 @@ import {
   ShieldCheck,
   ClipboardText,
   Flask,
-  IdentificationBadge,
+  ShieldStar,
   Megaphone,
   Books,
+  Robot,
 } from "@phosphor-icons/react";
 
 const NAV_ITEMS = [
@@ -16,9 +17,10 @@ const NAV_ITEMS = [
   { to: "/quy-tac-ai", label: "Quy tắc AI", icon: ShieldCheck },
   { to: "/nhat-ky", label: "Nhật ký kiểm duyệt", icon: ClipboardText },
   { to: "/khu-thu-nghiem-ai", label: "Khu thử nghiệm AI", icon: Flask },
-  { to: "/nguoi-dung", label: "Quản lý người dùng", icon: IdentificationBadge },
+  { to: "/quan-ly-mod", label: "Quản lý Mod", icon: ShieldStar },
   { to: "/thong-bao", label: "Thông báo", icon: Megaphone },
-  { to: "/cai-dat", label: "Quản lý nội dung", icon: Books },
+  { to: "/quan-ly-noi-dung", label: "Quản lý nội dung", icon: Books },
+  { to: "/lenh-bot", label: "Nội dung lệnh bot", icon: Robot },
 ];
 
 export default function Sidebar({ open, onNavigate }) {

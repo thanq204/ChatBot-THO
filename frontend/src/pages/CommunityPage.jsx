@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ArrowSquareOut } from "@phosphor-icons/react";
 import Card from "../components/Card.jsx";
+import MemberReportInbox from "../components/MemberReportInbox.jsx";
 import IncidentDetailModal from "../components/IncidentDetailModal.jsx";
 import { SkeletonBlock, SkeletonLine } from "../components/Skeleton.jsx";
 import { ErrorState, EmptyState } from "../components/StatePanels.jsx";
@@ -128,6 +130,14 @@ export default function CommunityPage() {
         </Card>
       </div>
 
+      <div className="page-grid__row">
+        {/* Member-submitted reports, kept beside the AI queue rather than inside
+            it: different origin, different trust level. */}
+        <Card title="Báo cáo từ thành viên (/report)" className="span-12" delay={0.05}>
+          <MemberReportInbox />
+        </Card>
+      </div>
+
       <IncidentDetailModal
         incidentId={openId}
         headline={openIncident ? caseHeadline(openIncident) : ""}
@@ -145,12 +155,21 @@ export default function CommunityPage() {
 function CaseRow({ incident, onOpen }) {
   const actor = actorFromTitle(incident.title);
 
+  // A <button> can't legally contain the <a> jump-to-Discord/Telegram link
+  // below, so the row itself is a keyboard-accessible div instead.
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       className="case-row"
       style={{ "--case-accent": SEVERITY_COLORS[incident.severity] ?? "var(--text-muted)" }}
       onClick={() => onOpen(incident.incident_id)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onOpen(incident.incident_id);
+        }
+      }}
     >
       <span className="case-row__title">{categoryLabel(primaryCategory(incident))}</span>
       <span className="case-row__status" style={{ color: STATUS_COLORS[incident.status] }}>
@@ -163,7 +182,18 @@ function CaseRow({ incident, onOpen }) {
         <span>{incident.message_count} tin</span>
         <span>risk {percent(incident.risk_score)}</span>
         <span>{relativeTime(incident.updated_at)}</span>
+        {incident.source_url && (
+          <a
+            href={incident.source_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="case-row__link"
+            onClick={(event) => event.stopPropagation()}
+          >
+            Xem tin gốc <ArrowSquareOut size={11} weight="bold" />
+          </a>
+        )}
       </span>
-    </button>
+    </div>
   );
 }

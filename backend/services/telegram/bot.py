@@ -178,6 +178,25 @@ class TelegramRagBot:
             logger.exception("Telegram RAG reply failed.")
 
     @staticmethod
+    def _message_link(chat: dict[str, Any], message_id: Any) -> str | None:
+        """Best-effort deep link so Admin can jump straight to the message.
+
+        Public chats resolve with their @username. Private supergroups/channels
+        still work via the /c/ scheme using their internal id (chat id minus
+        the -100 prefix); it only opens for members already in the chat, same
+        as any other Telegram internal link. Legacy basic groups (not yet
+        upgraded to a supergroup) have no working link format, so this
+        returns None for those.
+        """
+        username = chat.get("username")
+        if username:
+            return f"https://t.me/{username}/{message_id}"
+        chat_id = str(chat.get("id") or "")
+        if chat_id.startswith("-100"):
+            return f"https://t.me/c/{chat_id[4:]}/{message_id}"
+        return None
+
+    @staticmethod
     def _common_message(message: dict[str, Any]) -> CommonMessage:
         chat = message.get("chat") or {}
         reply = message.get("reply_to_message") or {}
@@ -192,5 +211,6 @@ class TelegramRagBot:
             author_id=str((message.get("from") or {}).get("id") or "anonymous"),
             text=str(message.get("text") or "").strip(),
             timestamp=datetime.fromtimestamp(date_value, UTC) if date_value else datetime.now(UTC),
+            source_url=TelegramRagBot._message_link(chat, message.get("message_id")),
             raw=message,
         )

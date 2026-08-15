@@ -23,6 +23,8 @@ export default function SettingsPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [formError, setFormError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   // "manual" types one document, "file" uploads a batch. Both write to the same
   // knowledge store, so they belong behind the same "Thêm tài liệu" action.
@@ -64,6 +66,47 @@ export default function SettingsPage() {
     const needle = query.trim().toLowerCase();
     return needle ? knowledge.filter((item) => matches(item, needle)) : knowledge;
   }, [knowledge, query]);
+
+  const allVisibleSelected = visible.length > 0 && visible.every((item) => selectedIds.has(item.document_id));
+
+  function toggleSelect(id) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    setSelectedIds((prev) => {
+      if (allVisibleSelected) {
+        const next = new Set(prev);
+        for (const item of visible) next.delete(item.document_id);
+        return next;
+      }
+      const next = new Set(prev);
+      for (const item of visible) next.add(item.document_id);
+      return next;
+    });
+  }
+
+  async function bulkRemove() {
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+    if (!window.confirm(`Xóa ${ids.length} tài liệu đã chọn?`)) return;
+    setBulkDeleting(true);
+    try {
+      await Promise.all(ids.map((id) => ops.deleteKnowledge(id)));
+      if (editingId && ids.includes(editingId)) cancelEdit();
+      setSelectedIds(new Set());
+      load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBulkDeleting(false);
+    }
+  }
 
   const update = (key) => (event) => setForm((prev) => ({ ...prev, [key]: event.target.value }));
 
@@ -175,9 +218,16 @@ export default function SettingsPage() {
           title="Tài liệu tri thức (RAG)"
           className="span-12"
           action={
-            <button type="button" className="btn btn--primary" onClick={startCreate}>
-              <Plus size={14} weight="bold" /> Thêm tài liệu
-            </button>
+            <div style={{ display: "flex", gap: 8 }}>
+              {selectedIds.size > 0 && (
+                <button type="button" className="btn btn--ghost" onClick={bulkRemove} disabled={bulkDeleting}>
+                  <Trash size={13} /> {bulkDeleting ? "Đang xoá..." : `Xoá đã chọn (${selectedIds.size})`}
+                </button>
+              )}
+              <button type="button" className="btn btn--primary" onClick={startCreate}>
+                <Plus size={14} weight="bold" /> Thêm tài liệu
+              </button>
+            </div>
           }
         >
           <div className="search-box">
@@ -197,26 +247,39 @@ export default function SettingsPage() {
             <EmptyState message={`Không có tài liệu nào khớp "${query}".`} />
           )}
           {!loading && visible.length > 0 && (
-            <div className="list">
-              {visible.map((item) => (
-                <div className="list-row" key={item.document_id}>
-                  <div className="list-row__head">
-                    <span className="list-row__title">{item.title}</span>
-                    <span className="list-row__meta">{item.dataset}</span>
+            <>
+              <label className="list-row__meta" style={{ display: "flex", alignItems: "center", gap: 6, margin: "2px 0 8px" }}>
+                <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAll} />
+                Chọn tất cả ({visible.length})
+              </label>
+              <div className="list">
+                {visible.map((item) => (
+                  <div className="list-row" key={item.document_id}>
+                    <div className="list-row__head">
+                      <span className="list-row__title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(item.document_id)}
+                          onChange={() => toggleSelect(item.document_id)}
+                        />
+                        {item.title}
+                      </span>
+                      <span className="list-row__meta">{item.dataset}</span>
+                    </div>
+                    <p className="list-row__body">{item.body}</p>
+                    <span className="list-row__meta">tags: {(item.tags || []).join(", ") || "không có"}</span>
+                    <div className="list-row__actions">
+                      <button type="button" className="btn btn--ghost" onClick={() => startEdit(item)}>
+                        <PencilSimple size={13} /> Sửa
+                      </button>
+                      <button type="button" className="btn btn--ghost" onClick={() => remove(item)}>
+                        <Trash size={13} /> Xoá
+                      </button>
+                    </div>
                   </div>
-                  <p className="list-row__body">{item.body}</p>
-                  <span className="list-row__meta">tags: {(item.tags || []).join(", ") || "không có"}</span>
-                  <div className="list-row__actions">
-                    <button type="button" className="btn btn--ghost" onClick={() => startEdit(item)}>
-                      <PencilSimple size={13} /> Sửa
-                    </button>
-                    <button type="button" className="btn btn--ghost" onClick={() => remove(item)}>
-                      <Trash size={13} /> Xoá
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            </>
           )}
         </Card>
       </div>

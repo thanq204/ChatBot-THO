@@ -8,9 +8,10 @@ import AiSandboxPage from "./pages/AiSandboxPage.jsx";
 import CommunityPage from "./pages/CommunityPage.jsx";
 import PolicyPage from "./pages/PolicyPage.jsx";
 import ModerationLogPage from "./pages/ModerationLogPage.jsx";
-import UserManagementPage from "./pages/UserManagementPage.jsx";
+import ModManagementPage from "./pages/ModManagementPage.jsx";
 import NotificationPage from "./pages/NotificationPage.jsx";
 import SettingsPage from "./pages/SettingsPage.jsx";
+import BotCommandsPage from "./pages/BotCommandsPage.jsx";
 
 export default function App() {
   return (
@@ -28,9 +29,10 @@ export default function App() {
           <Route path="/quy-tac-ai" element={<PolicyPage />} />
           <Route path="/nhat-ky" element={<ModerationLogPage />} />
           <Route path="/khu-thu-nghiem-ai" element={<AiSandboxPage />} />
-          <Route path="/nguoi-dung" element={<UserManagementPage />} />
+          <Route path="/quan-ly-mod" element={<ModManagementPage />} />
           <Route path="/thong-bao" element={<NotificationPage />} />
-          <Route path="/cai-dat" element={<SettingsPage />} />
+          <Route path="/quan-ly-noi-dung" element={<SettingsPage />} />
+          <Route path="/lenh-bot" element={<BotCommandsPage />} />
         </Route>
       </Route>
 
