@@ -19,7 +19,7 @@ const NAV_ITEMS = [
   { to: "/khu-thu-nghiem-ai", label: "Khu thử nghiệm AI", icon: Flask },
   { to: "/quan-ly-mod", label: "Quản lý Mod", icon: ShieldStar },
   { to: "/thong-bao", label: "Thông báo", icon: Megaphone },
-  { to: "/cai-dat", label: "Quản lý nội dung", icon: Books },
+  { to: "/quan-ly-noi-dung", label: "Quản lý nội dung", icon: Books },
   { to: "/lenh-bot", label: "Nội dung lệnh bot", icon: Robot },
 ];
 

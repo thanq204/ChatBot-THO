@@ -31,7 +31,7 @@ export default function App() {
           <Route path="/khu-thu-nghiem-ai" element={<AiSandboxPage />} />
           <Route path="/quan-ly-mod" element={<ModManagementPage />} />
           <Route path="/thong-bao" element={<NotificationPage />} />
-          <Route path="/cai-dat" element={<SettingsPage />} />
+          <Route path="/quan-ly-noi-dung" element={<SettingsPage />} />
           <Route path="/lenh-bot" element={<BotCommandsPage />} />
         </Route>
       </Route>

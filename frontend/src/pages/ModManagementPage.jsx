@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { LockSimple, ShieldStar } from "@phosphor-icons/react";
 import Card from "../components/Card.jsx";
 import StatTile from "../components/StatTile.jsx";
 import Badge from "../components/Badge.jsx";
@@ -53,7 +52,6 @@ function groupByMod(entries) {
 }
 
 export default function ModManagementPage() {
-  const [previewRole, setPreviewRole] = useState("admin");
   const [audit, setAudit] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -83,124 +81,80 @@ export default function ModManagementPage() {
 
   return (
     <div className="page-grid">
-      <div className="page-grid__row">
-        <div className="segmented" role="tablist" aria-label="Xem giao diện dưới vai trò">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={previewRole === "admin"}
-            className={`segmented__option ${previewRole === "admin" ? "is-active" : ""}`.trim()}
-            onClick={() => setPreviewRole("admin")}
-          >
-            <ShieldStar size={14} /> Xem như Admin
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={previewRole === "mod"}
-            className={`segmented__option ${previewRole === "mod" ? "is-active" : ""}`.trim()}
-            onClick={() => setPreviewRole("mod")}
-          >
-            <LockSimple size={14} /> Xem như Mod
-          </button>
-        </div>
-      </div>
-
-      <div className="page-grid__row">
-        <p className="muted small" style={{ margin: 0 }}>
-          Hệ thống chưa có phân quyền theo vai trò ở backend (chưa có đăng nhập/role thật). Nút chuyển vai trò bên trên chỉ mô
-          phỏng giao diện: khi chọn "Xem như Mod", trang này sẽ ẩn đi đúng như dự kiến sau khi phân quyền thật được xây dựng —
-          hiện tại nó không chặn truy cập thật sự.
-        </p>
-      </div>
-
-      {previewRole === "mod" ? (
+      {error && (
         <div className="page-grid__row">
-          <Card title="Quản lý Mod" className="span-12">
-            <EmptyState
-              message="Tài khoản có vai trò Mod không nhìn thấy mục này. (Bản xem trước giao diện — chưa gắn với hệ thống phân quyền thật.)"
-              action={<LockSimple size={22} weight="duotone" />}
-            />
-          </Card>
+          <ErrorState message={`Không lấy được nhật ký Mod: ${error}`} onRetry={load} />
         </div>
-      ) : (
+      )}
+
+      {!error && (
         <>
-          {error && (
-            <div className="page-grid__row">
-              <ErrorState message={`Không lấy được nhật ký Mod: ${error}`} onRetry={load} />
+          <div className="page-grid__row">
+            <div className="span-4">
+              <StatTile label="Mod có hoạt động" value={loading ? 0 : mods.length} tone="brand" />
             </div>
-          )}
+            <div className="span-4">
+              <StatTile label="Tổng hành động đã ghi" value={loading ? 0 : (audit || []).length} tone="brand" />
+            </div>
+            <div className="span-4">
+              <StatTile label="Hành động trong 24h qua" value={loading ? 0 : last24h} tone="alert" />
+            </div>
+          </div>
 
-          {!error && (
-            <>
-              <div className="page-grid__row">
-                <div className="span-4">
-                  <StatTile label="Mod có hoạt động" value={loading ? 0 : mods.length} tone="brand" />
+          <div className="page-grid__row">
+            <Card title="Danh sách Mod" className="span-5">
+              <p className="muted small">
+                Danh sách này lấy từ ai đã thực hiện hành động thật trên case (không phải danh bạ tài khoản — hệ thống chưa
+                có bảng người dùng/Mod riêng).
+              </p>
+              {loading && <SkeletonBlock height={260} />}
+              {!loading && mods.length === 0 && <EmptyState message="Chưa có Mod nào thực hiện hành động." />}
+              {!loading && mods.length > 0 && (
+                <div className="list">
+                  {mods.map((mod) => (
+                    <button
+                      key={mod.actor}
+                      type="button"
+                      className={`list-row${activeMod?.actor === mod.actor ? " is-active" : ""}`}
+                      onClick={() => setSelectedMod(mod.actor)}
+                    >
+                      <div className="list-row__head">
+                        <span className="list-row__title">{mod.actor}</span>
+                        <span className="list-row__meta">{mod.count} hành động</span>
+                      </div>
+                      <div className="chip-row">
+                        {Object.entries(mod.counts).map(([key, count]) => (
+                          <span key={key} className="chip">
+                            {breakdownLabel(key)} ×{count}
+                          </span>
+                        ))}
+                      </div>
+                      <span className="list-row__meta">Hoạt động gần nhất: {relativeTime(mod.lastActive)}</span>
+                    </button>
+                  ))}
                 </div>
-                <div className="span-4">
-                  <StatTile label="Tổng hành động đã ghi" value={loading ? 0 : (audit || []).length} tone="brand" />
-                </div>
-                <div className="span-4">
-                  <StatTile label="Hành động trong 24h qua" value={loading ? 0 : last24h} tone="alert" />
-                </div>
-              </div>
+              )}
+            </Card>
 
-              <div className="page-grid__row">
-                <Card title="Danh sách Mod" className="span-5">
-                  <p className="muted small">
-                    Danh sách này lấy từ ai đã thực hiện hành động thật trên case (không phải danh bạ tài khoản — hệ thống chưa
-                    có bảng người dùng/Mod riêng).
-                  </p>
-                  {loading && <SkeletonBlock height={260} />}
-                  {!loading && mods.length === 0 && <EmptyState message="Chưa có Mod nào thực hiện hành động." />}
-                  {!loading && mods.length > 0 && (
-                    <div className="list">
-                      {mods.map((mod) => (
-                        <button
-                          key={mod.actor}
-                          type="button"
-                          className={`list-row${activeMod?.actor === mod.actor ? " is-active" : ""}`}
-                          onClick={() => setSelectedMod(mod.actor)}
-                        >
-                          <div className="list-row__head">
-                            <span className="list-row__title">{mod.actor}</span>
-                            <span className="list-row__meta">{mod.count} hành động</span>
-                          </div>
-                          <div className="chip-row">
-                            {Object.entries(mod.counts).map(([key, count]) => (
-                              <span key={key} className="chip">
-                                {breakdownLabel(key)} ×{count}
-                              </span>
-                            ))}
-                          </div>
-                          <span className="list-row__meta">Hoạt động gần nhất: {relativeTime(mod.lastActive)}</span>
-                        </button>
-                      ))}
+            <Card title={activeMod ? `Nhật ký của ${activeMod.actor}` : "Nhật ký Mod"} className="span-7" delay={0.05}>
+              {loading && <SkeletonBlock height={260} />}
+              {!loading && !activeMod && <EmptyState message="Chọn một Mod bên trái để xem nhật ký chi tiết." />}
+              {!loading && activeMod && (
+                <div className="list">
+                  {activeMod.items.map((item) => (
+                    <div className="list-row" key={item.audit_id}>
+                      <div className="list-row__head">
+                        <Badge tone={auditToneFor(item)}>{auditEventLabel(item.event_type)}</Badge>
+                        <span className="list-row__meta">{relativeTime(item.created_at)}</span>
+                      </div>
+                      <p className="list-row__body">{describeAuditEntry(item)}</p>
+                      {item.incident_id && <span className="list-row__meta">{item.incident_id}</span>}
                     </div>
-                  )}
-                </Card>
-
-                <Card title={activeMod ? `Nhật ký của ${activeMod.actor}` : "Nhật ký Mod"} className="span-7" delay={0.05}>
-                  {loading && <SkeletonBlock height={260} />}
-                  {!loading && !activeMod && <EmptyState message="Chọn một Mod bên trái để xem nhật ký chi tiết." />}
-                  {!loading && activeMod && (
-                    <div className="list">
-                      {activeMod.items.map((item) => (
-                        <div className="list-row" key={item.audit_id}>
-                          <div className="list-row__head">
-                            <Badge tone={auditToneFor(item)}>{auditEventLabel(item.event_type)}</Badge>
-                            <span className="list-row__meta">{relativeTime(item.created_at)}</span>
-                          </div>
-                          <p className="list-row__body">{describeAuditEntry(item)}</p>
-                          {item.incident_id && <span className="list-row__meta">{item.incident_id}</span>}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </Card>
-              </div>
-            </>
-          )}
+                  ))}
+                </div>
+              )}
+            </Card>
+          </div>
         </>
       )}
     </div>
