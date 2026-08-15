@@ -218,6 +218,8 @@ scripts/                 AI logging hooks và Phoenix submission
 
 ## Trạng thái Gate 2
 
+> Người chấm có thể xem nhanh từng deliverable, vị trí code, test và chỗ gắn video tại [GATE2_SUBMISSION.md](GATE2_SUBMISSION.md).
+
 | Deliverable | Trạng thái | Bằng chứng |
 |---|---|---|
 | MVP demo video 3 phút, end-to-end với LLM thật | Chưa đạt | Có kịch bản tại `presentation/gate2_demo_script.md`, chưa có video |
@@ -239,6 +241,7 @@ scripts/                 AI logging hooks và Phoenix submission
 
 ## Tài liệu liên quan
 
+- [Bản đồ nộp bài Gate 2](GATE2_SUBMISSION.md)
 - [Architecture](docs/architecture_diagram.md)
 - [Model pipeline](src/ai_models/README.md)
 - [Data rules](data/RULES.md)

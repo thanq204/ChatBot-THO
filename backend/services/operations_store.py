@@ -13,7 +13,7 @@ import uuid
 import urllib.request
 import psycopg2
 import psycopg2.extras
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -643,28 +643,81 @@ class OperationsStore:
             cursor = db.execute("DELETE FROM operations_policies WHERE policy_id=?", (policy_id,))
         return cursor.rowcount > 0
 
+    def _list_knowledge_sqlite(self, dataset: str | None = None) -> list[KnowledgeDocument]:
+        with self._connect() as db:
+            if dataset:
+                rows = db.execute(
+                    "SELECT * FROM operations_knowledge WHERE dataset=? ORDER BY updated_at DESC",
+                    (dataset,),
+                ).fetchall()
+            else:
+                rows = db.execute("SELECT * FROM operations_knowledge ORDER BY updated_at DESC").fetchall()
+        return [
+            KnowledgeDocument(
+                document_id=row["document_id"],
+                title=row["title"],
+                body=row["body"],
+                tags=json.loads(row["tags_json"]),
+                dataset=row["dataset"] or "general",
+                active=bool(row["active"]),
+                updated_at=datetime.fromisoformat(row["updated_at"]),
+            )
+            for row in rows
+        ]
+
+    @staticmethod
+    def _postgres_knowledge(row: Any) -> KnowledgeDocument:
+        values = dict(row)
+        raw_tags = values.get("tags") or []
+        if isinstance(raw_tags, str):
+            try:
+                raw_tags = json.loads(raw_tags)
+            except json.JSONDecodeError:
+                raw_tags = [tag.strip() for tag in raw_tags.split(",") if tag.strip()]
+        return KnowledgeDocument(
+            document_id=values["document_id"],
+            title=values["title"],
+            body=values["body"],
+            tags=raw_tags if isinstance(raw_tags, list) else [],
+            dataset=values.get("dataset") or "general",
+            active=bool(values.get("active", True)),
+            updated_at=values.get("updated_at") or datetime.now(timezone.utc),
+        )
+
     def list_knowledge(self, dataset: str | None = None) -> list[KnowledgeDocument]:
+        # Local development remains usable until cloud credentials are supplied.
+        if not self.settings.faq_pg_dsn and not self.settings.faq_pg_password:
+            return self._list_knowledge_sqlite(dataset)
+
         try:
             conn = self._connect_pg()
             with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-                if dataset:
-                    cur.execute("SELECT * FROM knowledge_documents WHERE dataset=%s ORDER BY updated_at DESC", (dataset,))
-                else:
-                    cur.execute("SELECT * FROM knowledge_documents ORDER BY updated_at DESC")
+                cur.execute(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_schema='public' AND table_name='knowledge_documents'"
+                )
+                columns = {row[0] for row in cur.fetchall()}
+                if not {"document_id", "title", "body"}.issubset(columns):
+                    raise ValueError("knowledge_documents is missing required columns")
+
+                selected = ["document_id", "title", "body"]
+                selected.extend(name for name in ("tags", "dataset", "active", "updated_at") if name in columns)
+                query = f"SELECT {', '.join(selected)} FROM knowledge_documents"
+                params: tuple[object, ...] = ()
+                if dataset and "dataset" in columns:
+                    query += " WHERE dataset=%s"
+                    params = (dataset,)
+                query += " ORDER BY updated_at DESC" if "updated_at" in columns else " ORDER BY document_id"
+                cur.execute(query, params)
                 rows = cur.fetchall()
             conn.close()
-            return [KnowledgeDocument(
-                document_id=r["document_id"], 
-                title=r["title"], 
-                body=r["body"], 
-                tags=r["tags"] if isinstance(r["tags"], list) else json.loads(r["tags"]), 
-                dataset=r["dataset"] or "general", 
-                active=bool(r["active"]), 
-                updated_at=r["updated_at"]
-            ) for r in rows]
+            documents = [self._postgres_knowledge(row) for row in rows]
+            if dataset and "dataset" not in columns and dataset != "general":
+                return []
+            return documents
         except Exception:
-            logger.error("Failed to list knowledge from PostgreSQL", exc_info=True)
-            return []
+            logger.warning("PostgreSQL knowledge unavailable; using SQLite fallback.", exc_info=True)
+            return self._list_knowledge_sqlite(dataset)
 
     def upsert_knowledge(self, document_id: str, request: KnowledgeDocumentRequest) -> KnowledgeDocument:
         import psycopg2
@@ -915,13 +968,7 @@ class OperationsStore:
             query_response = client.embeddings.create(model=model, input=[question])
             query_vector = list(query_response.data[0].embedding)
             
-            conn = psycopg2.connect(
-                host=getattr(self.settings, "faq_pg_host", "localhost"),
-                port=getattr(self.settings, "faq_pg_port", 5433),
-                dbname=getattr(self.settings, "faq_pg_db", "faq_rag"),
-                user=getattr(self.settings, "faq_pg_user", "faq_user"),
-                password=getattr(self.settings, "faq_pg_password", "faq_pass_dev"),
-            )
+            conn = self._connect_pg()
             
             with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
                 vector_str = "[" + ",".join(str(f) for f in query_vector) + "]"
