@@ -7,7 +7,6 @@ import Topbar from "../components/Topbar.jsx";
 const PAGE_TITLES = {
   "/tong-quan": "Tổng quan",
   "/cong-dong": "Cộng đồng",
-  "/quy-tac-ai": "Quy tắc AI",
   "/nhat-ky": "Nhật ký kiểm duyệt",
   "/khu-thu-nghiem-ai": "Khu thử nghiệm AI",
   "/quan-ly-mod": "Quản lý Mod",

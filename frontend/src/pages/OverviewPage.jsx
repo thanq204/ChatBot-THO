@@ -173,6 +173,13 @@ export default function OverviewPage() {
                   <PlatformRing key={status.platform} status={status} delay={index * 0.1} />
                 ))}
               </div>
+              {(platforms ?? [])
+                .filter((status) => status.missing_credentials?.length > 0)
+                .map((status) => (
+                  <p key={status.platform} className="platform-sync__hint">
+                    {platformLabel(status.platform)}: thiếu {status.missing_credentials.join(", ")} — {status.note}
+                  </p>
+                ))}
 
               <div className="platform-sync">
                 <label className="platform-sync__limit">
