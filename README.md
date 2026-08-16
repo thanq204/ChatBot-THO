@@ -246,7 +246,6 @@ scripts/                 AI logging hooks và Phoenix submission
 - [Model pipeline](src/ai_models/README.md)
 - [Data rules](data/RULES.md)
 - [Evaluation report](eval/results/report.md)
-- [Demo script](presentation/gate2_demo_script.md)
 - [Video MVP Gate 2](https://youtu.be/1EdQj81X47M)
 
 ## License
