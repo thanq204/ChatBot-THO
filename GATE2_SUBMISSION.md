@@ -10,10 +10,9 @@ Trang này giúp người chấm đi thẳng từ yêu cầu Gate 2 tới code, 
 | Architecture diagram | [docs/architecture_diagram.md](docs/architecture_diagram.md) | Đạt |
 | README cài đặt và sample queries | [README.md](README.md) | Đạt |
 | Evaluation thực tế | [eval/results/report.md](eval/results/report.md) | Đạt, 5/5 case Discord |
-| Kịch bản demo | [presentation/gate2_demo_script.md](presentation/gate2_demo_script.md) | Đã chuẩn bị |
-| Video demo tối đa 3 phút | Chưa cập nhật link Google Drive | Chưa đạt |
+| Video demo tối đa 3 phút | [Xem video MVP trên YouTube](https://youtu.be/1EdQj81X47M) | Đạt |
 
-Sau khi upload video, thay nội dung `Chưa cập nhật link Google Drive` bằng link chia sẻ và kiểm tra quyền `Anyone with the link can view`.
+Video được chia sẻ ở chế độ YouTube `Không công khai` (`Unlisted`) để người chấm có đường liên kết xem được mà không công khai video trên kênh.
 
 ## Luồng end-to-end cần chấm
 
@@ -77,19 +76,3 @@ python -m pytest tests/test_ai_model_pipeline.py tests/test_realtime_notificatio
 ```
 
 Kết quả kiểm tra gần nhất ngày 14/08/2026: `40 passed, 1 warning`.
-
-## Trình tự xem video đề xuất
-
-1. `/help` chứng minh nhánh Rule.
-2. Câu hỏi đã có FAQ chứng minh không cần gọi LLM.
-3. Câu hỏi tên bot hoặc ngày hiện tại chứng minh output `[LLM]` thật.
-4. Câu hỏi học bằng dự án chứng minh `[RAG]`, reranking, relevance và citation.
-5. Tin nhắn realtime chứng minh ba gate moderation, cảnh báo Admin/Mod và DM Discord.
-6. Hiển thị architecture diagram và evaluation report ở phần kết.
-
-## Lưu ý khi nộp
-
-- Không quay hoặc commit `.env`, API key, bot token, DSN hay mật khẩu database.
-- Link Drive phải mở được trong cửa sổ ẩn danh trước khi nộp.
-- Video phải cho thấy input và output thật; automated tests chỉ là bằng chứng bổ sung.
-- Nếu PostgreSQL chưa sẵn sàng, SQLite fallback vẫn cho phép demo local nhưng cần nói rõ trong video.
