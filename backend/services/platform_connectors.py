@@ -12,7 +12,10 @@ from typing import Any
 import requests
 
 from backend.config import Settings, get_settings
-from backend.models.operations import CommonMessage, PlatformStatus
+from backend.models.operations import CommonMessage, DiscordChannelOption, PlatformStatus
+
+# Discord channel types that can hold readable text history via the REST API.
+_TEXT_CHANNEL_TYPES = {0, 5}  # GUILD_TEXT, GUILD_ANNOUNCEMENT
 
 
 class ConnectorError(ValueError):
@@ -34,10 +37,53 @@ class PlatformConnectors:
 
     def pull(self, platform: str, limit: int = 20, channel_id: str | None = None) -> list[CommonMessage]:
         if platform == "discord":
-            return self._discord(limit, channel_id or self.settings.discord_default_channel_id)
+            if channel_id:
+                return self._discord(limit, channel_id)
+            return self._discord_all_channels(limit)
         if platform == "telegram":
             return self._telegram(limit)
         raise ConnectorError(f"Connector {platform} chưa có live read; hãy dùng /messages/ingest với common schema hoặc demo seed.")
+
+    def list_discord_channels(self) -> list[DiscordChannelOption]:
+        if not self.settings.discord_bot_token:
+            raise ConnectorError("Thiếu DISCORD_BOT_TOKEN.")
+        headers = {"Authorization": f"Bot {self.settings.discord_bot_token}"}
+        guilds_response = requests.get("https://discord.com/api/v10/users/@me/guilds", headers=headers, timeout=20)
+        if guilds_response.status_code >= 400:
+            raise ConnectorError(f"Discord API trả về HTTP {guilds_response.status_code} khi lấy danh sách server.")
+        options: list[DiscordChannelOption] = []
+        for guild in guilds_response.json():
+            channels_response = requests.get(
+                f"https://discord.com/api/v10/guilds/{guild['id']}/channels", headers=headers, timeout=20
+            )
+            if channels_response.status_code >= 400:
+                continue
+            for channel in channels_response.json():
+                if channel.get("type") not in _TEXT_CHANNEL_TYPES:
+                    continue
+                options.append(
+                    DiscordChannelOption(
+                        guild_id=str(guild["id"]),
+                        guild_name=guild.get("name") or guild["id"],
+                        channel_id=str(channel["id"]),
+                        channel_name=channel.get("name") or channel["id"],
+                    )
+                )
+        return options
+
+    def _discord_all_channels(self, limit: int) -> list[CommonMessage]:
+        channels = self.list_discord_channels()
+        if not channels:
+            if self.settings.discord_default_channel_id:
+                return self._discord(limit, self.settings.discord_default_channel_id)
+            raise ConnectorError("Bot chưa tham gia server Discord nào có kênh để quét.")
+        collected: list[CommonMessage] = []
+        for channel in channels:
+            try:
+                collected.extend(self._discord(limit, channel.channel_id))
+            except ConnectorError:
+                continue
+        return collected
 
     def _discord(self, limit: int, channel_id: str) -> list[CommonMessage]:
         if not self.settings.discord_bot_token or not channel_id:
@@ -79,8 +125,26 @@ class PlatformConnectors:
             chat = item.get("chat") or {}
             sender = item.get("from") or {}
             display_name = sender.get("username") or " ".join(filter(None, [sender.get("first_name"), sender.get("last_name")])) or None
-            messages.append(CommonMessage(message_id=f"tg-{item.get('chat', {}).get('id')}-{item.get('message_id')}", platform="telegram", community_id=str(chat.get("id") or "telegram"), channel_id=str(chat.get("id") or "general"), thread_key=str(item.get("reply_to_message", {}).get("message_id") or item.get("message_id")), parent_message_id=(item.get("reply_to_message") or {}).get("message_id"), author_id=str(sender.get("id") or "anonymous"), author_name=display_name, text=item["text"], timestamp=datetime.fromtimestamp(item.get("date", 0), UTC), raw=update))
+            messages.append(CommonMessage(message_id=f"tg-{item.get('chat', {}).get('id')}-{item.get('message_id')}", platform="telegram", community_id=str(chat.get("id") or "telegram"), channel_id=str(chat.get("id") or "general"), thread_key=str(item.get("reply_to_message", {}).get("message_id") or item.get("message_id")), parent_message_id=(item.get("reply_to_message") or {}).get("message_id"), author_id=str(sender.get("id") or "anonymous"), author_name=display_name, text=item["text"], timestamp=datetime.fromtimestamp(item.get("date", 0), UTC), source_url=self._telegram_message_link(chat, item.get("message_id")), raw=update))
         return messages
+
+    @staticmethod
+    def _telegram_message_link(chat: dict[str, Any], message_id: Any) -> str | None:
+        """Best-effort deep link so Admin can jump straight to the message.
+
+        Public chats resolve with their @username. Private supergroups/channels
+        still work via the /c/ scheme using their internal id (chat id minus
+        the -100 prefix); it only opens for members already in the chat.
+        Legacy basic groups (not yet upgraded to a supergroup) have no working
+        link format, so this returns None for those.
+        """
+        username = chat.get("username")
+        if username:
+            return f"https://t.me/{username}/{message_id}"
+        chat_id = str(chat.get("id") or "")
+        if chat_id.startswith("-100"):
+            return f"https://t.me/c/{chat_id[4:]}/{message_id}"
+        return None
 
     @staticmethod
     def _date(value: Any) -> datetime:

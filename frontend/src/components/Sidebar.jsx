@@ -2,7 +2,6 @@ import { NavLink } from "react-router-dom";
 import {
   SquaresFour,
   UsersThree,
-  ShieldCheck,
   ClipboardText,
   Flask,
   ShieldStar,
@@ -14,7 +13,6 @@ import {
 const NAV_ITEMS = [
   { to: "/tong-quan", label: "Tổng quan", icon: SquaresFour, end: true },
   { to: "/cong-dong", label: "Cộng đồng", icon: UsersThree },
-  { to: "/quy-tac-ai", label: "Quy tắc AI", icon: ShieldCheck },
   { to: "/nhat-ky", label: "Nhật ký kiểm duyệt", icon: ClipboardText },
   { to: "/khu-thu-nghiem-ai", label: "Khu thử nghiệm AI", icon: Flask },
   { to: "/quan-ly-mod", label: "Quản lý Mod", icon: ShieldStar },

@@ -27,6 +27,10 @@ function breakdownLabel(key) {
   return ACTION_SHORT_LABELS[key] || auditEventLabel(key);
 }
 
+// Mods don't have permission to see Admin's own action log, so Admin is
+// excluded from this breakdown even though it shows up as an actor too.
+const EXCLUDED_ACTORS = new Set(["system", "admin"]);
+
 /** No real Mod-account system exists yet, so "who are the mods" is derived
  * from whoever shows up as the actor on a real admin action — not a mocked
  * list, just the only identity source currently available. */
@@ -34,7 +38,7 @@ function groupByMod(entries) {
   const groups = new Map();
   for (const item of entries) {
     const actor = item.actor?.trim() || "Không rõ";
-    if (actor.toLowerCase() === "system") continue;
+    if (EXCLUDED_ACTORS.has(actor.toLowerCase())) continue;
     if (!groups.has(actor)) groups.set(actor, []);
     groups.get(actor).push(item);
   }
@@ -62,7 +66,13 @@ export default function ModManagementPage() {
     setError(null);
     ops
       .audit()
-      .then((entries) => setAudit(entries.filter((item) => ADMIN_ACTION_EVENT_TYPES.has(item.event_type))))
+      .then((entries) =>
+        setAudit(
+          entries.filter(
+            (item) => ADMIN_ACTION_EVENT_TYPES.has(item.event_type) && !EXCLUDED_ACTORS.has(item.actor?.trim().toLowerCase()),
+          ),
+        ),
+      )
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   }, []);

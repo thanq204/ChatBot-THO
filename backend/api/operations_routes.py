@@ -24,6 +24,7 @@ from backend.models.operations import (
     CommonMessage,
     ActivityTimeline,
     CommunityHealth,
+    DiscordChannelOption,
     FAQSuggestion,
     FAQSuggestionApproveRequest,
     FAQUpsertRequest,
@@ -92,6 +93,14 @@ def get_importer() -> KnowledgeImporter:
 @router.get("/platforms", response_model=list[PlatformStatus])
 async def platform_statuses() -> list[PlatformStatus]:
     return get_connectors().statuses()
+
+
+@router.get("/platforms/discord/channels", response_model=list[DiscordChannelOption])
+async def discord_channels() -> list[DiscordChannelOption]:
+    try:
+        return get_connectors().list_discord_channels()
+    except ConnectorError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @router.post("/platforms/{platform}/pull")
