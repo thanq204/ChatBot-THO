@@ -364,6 +364,13 @@ class PlatformStatus(BaseModel):
     note: str
 
 
+class DiscordChannelOption(BaseModel):
+    guild_id: str
+    guild_name: str
+    channel_id: str
+    channel_name: str
+
+
 class OperationsSummary(BaseModel):
     messages_analyzed: int
     open_incidents: int

@@ -606,6 +606,12 @@ a {
   font-size: 12.5px;
 }
 
+.platform-sync__hint {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  margin: -4px 0 0;
+}
+
 .platform-sync__actions {
   display: flex;
   flex-direction: column;
@@ -1570,7 +1576,9 @@ button.list-row:hover {
 
 .case-filters {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
+  justify-content: flex-end;
 }
 
 .case-filters select {

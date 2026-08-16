@@ -24,6 +24,7 @@ export const ops = {
     get(`/analytics/timeline?window_hours=${windowHours}&bucket_hours=${bucketHours}`),
   communityHealth: (windowHours = 24) => get(`/community-health?window_hours=${windowHours}`),
   platforms: () => get("/platforms"),
+  discordChannels: () => get("/platforms/discord/channels"),
   pullPlatform: (platform, limit) => post(`/platforms/${platform}/pull?limit=${limit}`),
   incidents: (filters = {}) => {
     const params = new URLSearchParams();
