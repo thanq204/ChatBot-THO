@@ -90,7 +90,7 @@ npm run dev
 - [x] Architecture Diagram (`docs/architecture_diagram.md`)
 - [x] AI Logs (auto-collected)
 - [ ] Live URL / Deploy
-- [ ] Video Demo (đã có `presentation/gate2_demo_script.md`, chưa có video thật)
+- [x] Video Demo ([YouTube - Không công khai](https://youtu.be/1EdQj81X47M))
 - [ ] Pitch Deck (`presentation/`)
 - [x] Weekly Journal (`JOURNAL.md`)
 - [x] Worklog (`WORKLOG.md`)
@@ -100,13 +100,13 @@ npm run dev
 
 | Deliverable | Trạng thái |
 |---|---|
-| MVP demo video tối đa 3 phút | Chưa đạt |
+| MVP demo video tối đa 3 phút | Đạt - [xem video](https://youtu.be/1EdQj81X47M) |
 | Architecture diagram | Đạt |
 | Repo có ít nhất 10 PR merged | Đạt - 12 PR merge riêng biệt |
 | README có setup, env vars và sample queries | Đạt - xem `README.md` |
 | Ít nhất 5 manual eval với output thật | Đạt - 5/5 case Discord |
 
-**Tổng: 4/5.**
+**Tổng: 5/5.**
 
 ## Team
 

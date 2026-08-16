@@ -222,13 +222,13 @@ scripts/                 AI logging hooks và Phoenix submission
 
 | Deliverable | Trạng thái | Bằng chứng |
 |---|---|---|
-| MVP demo video 3 phút, end-to-end với LLM thật | Chưa đạt | Có kịch bản tại `presentation/gate2_demo_script.md`, chưa có video |
+| MVP demo video 3 phút, end-to-end với LLM thật | Đạt | [Video MVP trên YouTube](https://youtu.be/1EdQj81X47M) |
 | Architecture diagram | Đạt | `docs/architecture_diagram.md` |
 | Repo có ít nhất 10 PR merged | Đạt | 12 PR merge riêng biệt trong lịch sử Git |
 | README có setup, env vars, sample queries | Đạt | README này |
 | Ít nhất 5 manual eval với output thật | Đạt | 5/5 case Discord trong `eval/results/report.md` |
 
-**Tổng hiện tại: 4/5 deliverable Gate 2.**
+**Tổng hiện tại: 5/5 deliverable Gate 2.**
 
 ## Thành viên
 
@@ -247,6 +247,7 @@ scripts/                 AI logging hooks và Phoenix submission
 - [Data rules](data/RULES.md)
 - [Evaluation report](eval/results/report.md)
 - [Demo script](presentation/gate2_demo_script.md)
+- [Video MVP Gate 2](https://youtu.be/1EdQj81X47M)
 
 ## License
 

@@ -3,8 +3,8 @@
 ## Files
 
 - `pitch_deck.pptx` — Slide thuyết trình Demo Day
-- `video_demo.mp4` — Video demo sản phẩm (tối đa 5 phút)
-- `gate2_demo_script.md` — Kịch bản quay Gate 2 tối đa 3 phút; chưa thay thế file video thật
+- [Video MVP Gate 2 trên YouTube](https://youtu.be/1EdQj81X47M) — Bản demo tối đa 3 phút ở chế độ không công khai
+- `gate2_demo_script.md` — Kịch bản quay video Gate 2 tối đa 3 phút
 
 ## Pitch Deck Structure (10 slides)
 
@@ -21,7 +21,9 @@
 
 ## Video Demo Checklist
 
-- [ ] Giới thiệu problem (< 30 giây)
-- [ ] Demo live feature chính (2-3 phút)
-- [ ] Hiển thị kết quả AI (1 phút)
-- [ ] Tóm tắt impact (< 30 giây)
+- [x] Giới thiệu problem
+- [x] Demo feature chính theo user flow end-to-end
+- [x] Hiển thị output AI thật
+- [x] Tóm tắt giải pháp và bằng chứng
+- [x] Video không quá 3 phút
+- [x] [Link YouTube không công khai](https://youtu.be/1EdQj81X47M)

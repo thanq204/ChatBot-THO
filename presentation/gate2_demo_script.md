@@ -2,6 +2,8 @@
 
 Kịch bản này giúp quay video đúng tiêu chí. Chỉ đánh dấu deliverable hoàn thành sau khi có bản ghi thực tế và link xem được.
 
+**Video đã hoàn thành:** [Xem bản demo Gate 2 trên YouTube](https://youtu.be/1EdQj81X47M)
+
 ## 0:00-0:20 - Vấn đề và user flow
 
 Lời nói gợi ý:
@@ -44,9 +46,9 @@ Hiển thị Discord và trang Admin dashboard.
 
 ## Checklist trước khi nộp
 
-- [ ] Video dài không quá 3 phút.
-- [ ] Có ít nhất một lời gọi LLM thật và nhìn thấy output.
-- [ ] Có một user flow end-to-end từ input tới output có ý nghĩa.
-- [ ] Không lộ `.env`, API key, bot token hoặc dữ liệu cá nhân.
-- [ ] Link YouTube/Google Drive mở được với quyền xem phù hợp.
-- [ ] Gắn link video vào `README.md` sau khi upload.
+- [x] Video dài không quá 3 phút.
+- [x] Có ít nhất một lời gọi LLM thật và nhìn thấy output.
+- [x] Có một user flow end-to-end từ input tới output có ý nghĩa.
+- [x] Không lộ `.env`, API key, bot token hoặc dữ liệu cá nhân.
+- [x] Link YouTube mở được với chế độ không công khai.
+- [x] Đã gắn link video vào `README.md` và `GATE2_SUBMISSION.md`.
