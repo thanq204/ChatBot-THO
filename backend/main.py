@@ -1,22 +1,25 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.api.operations_routes import get_operations_pipeline
 from backend.api.operations_routes import router as operations_router
+from backend.api.auth_routes import router as auth_router
 from backend.api.routes import get_review_store, router
 from backend.config import get_settings
 from backend.services.discord.bot import DiscordRagBot
 from backend.services.telegram.bot import TelegramRagBot
+from backend.services.auth_service import current_user, get_auth_store
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
+    get_auth_store()
     get_review_store()
     operations_pipeline = get_operations_pipeline()
     operations_pipeline.store.purge_demo_data()
@@ -50,8 +53,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(router, prefix="/api/v1")
-app.include_router(operations_router, prefix="/api/v1")
+app.include_router(auth_router, prefix="/api/v1")
+app.include_router(router, prefix="/api/v1", dependencies=[Depends(current_user)])
+app.include_router(operations_router, prefix="/api/v1", dependencies=[Depends(current_user)])
 
 @app.get("/health")
 async def health():

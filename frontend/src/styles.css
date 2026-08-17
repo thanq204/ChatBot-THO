@@ -2466,3 +2466,9 @@ button.list-row:hover {
   margin-right: 4px;
   color: var(--text-muted);
 }
+
+.stack-form { display: grid; gap: 12px; }
+.stack-form label { display: grid; gap: 6px; font-size: 13px; font-weight: 600; color: var(--text-secondary); }
+.stack-form input, .stack-form select { width: 100%; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text-primary); padding: 9px 10px; font: inherit; }
+.button--secondary { background: var(--surface); color: var(--text-primary); border: 1px solid var(--border); }
+.button--danger { background: #fff1f2; border: 1px solid #fecdd3; color: #be123c; }

@@ -7,7 +7,7 @@ import re
 import uuid
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from backend.models.operations import (
     FAQ,
@@ -54,6 +54,8 @@ from backend.services.operations_pipeline import OperationsPipeline
 from backend.services.operations_store import OperationsStore
 from backend.services.platform_connectors import ConnectorError, PlatformConnectors
 from backend.services.platform_moderation import PlatformModerationError, PlatformModerationService
+from backend.models.auth import UserPublic
+from backend.services.auth_service import require_roles
 
 router = APIRouter(tags=["community-operations"])
 _store: OperationsStore | None = None
@@ -153,7 +155,7 @@ async def update_incident(incident_id: str, payload: IncidentUpdateRequest) -> I
 
 
 @router.get("/audit")
-async def operations_audit(incident_id: str | None = None) -> list[dict[str, object]]:
+async def operations_audit(incident_id: str | None = None, _: UserPublic = Depends(require_roles("admin"))) -> list[dict[str, object]]:
     return get_operations_store().audit(incident_id)
 
 

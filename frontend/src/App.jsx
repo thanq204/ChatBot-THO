@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import AppLayout from "./layouts/AppLayout.jsx";
 import RequireAuth from "./auth/RequireAuth.jsx";
+import RequireRole from "./auth/RequireRole.jsx";
 import LandingPage from "./pages/LandingPage.jsx";
 import LoginPage from "./pages/LoginPage.jsx";
 import OverviewPage from "./pages/OverviewPage.jsx";
@@ -25,9 +26,11 @@ export default function App() {
         <Route element={<AppLayout />}>
           <Route path="/tong-quan" element={<OverviewPage />} />
           <Route path="/cong-dong" element={<CommunityPage />} />
-          <Route path="/nhat-ky" element={<ModerationLogPage />} />
+          <Route element={<RequireRole role="admin" />}>
+            <Route path="/nhat-ky" element={<ModerationLogPage />} />
+            <Route path="/quan-ly-mod" element={<ModManagementPage />} />
+          </Route>
           <Route path="/khu-thu-nghiem-ai" element={<AiSandboxPage />} />
-          <Route path="/quan-ly-mod" element={<ModManagementPage />} />
           <Route path="/thong-bao" element={<NotificationPage />} />
           <Route path="/quan-ly-noi-dung" element={<SettingsPage />} />
           <Route path="/lenh-bot" element={<BotCommandsPage />} />
