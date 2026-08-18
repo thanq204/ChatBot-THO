@@ -47,3 +47,14 @@ class UserRoleUpdateRequest(BaseModel):
 
 class UserStatusUpdateRequest(BaseModel):
     is_active: bool
+
+
+class ModInviteRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=254)
+
+
+class ModInvitePublic(BaseModel):
+    email: str
+    role: Literal["mod"] = "mod"
+    invited_by: UUID
+    created_at: datetime
