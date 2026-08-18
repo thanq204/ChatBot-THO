@@ -6,6 +6,7 @@ import { ErrorState, EmptyState } from "../components/StatePanels.jsx";
 import { ops } from "../api/client.js";
 import { platformLabel } from "../lib/taxonomy.js";
 import { relativeTime } from "../lib/format.js";
+import { useAuth } from "../auth/AuthProvider.jsx";
 
 const NOTIFY_PLATFORM_OPTIONS = [
   { value: "telegram", label: "Telegram" },
@@ -13,6 +14,8 @@ const NOTIFY_PLATFORM_OPTIONS = [
 ];
 
 export default function NotificationPage() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
   const [platformStatuses, setPlatformStatuses] = useState(null);
   const [selectedPlatforms, setSelectedPlatforms] = useState([]);
   const [actor, setActor] = useState("");
@@ -41,8 +44,8 @@ export default function NotificationPage() {
   }, []);
 
   useEffect(() => {
-    loadHistory();
-  }, [loadHistory]);
+    if (isAdmin) loadHistory();
+  }, [isAdmin, loadHistory]);
 
   const togglePlatform = (value) => {
     setSelectedPlatforms((prev) => (prev.includes(value) ? prev.filter((item) => item !== value) : [...prev, value]));
@@ -133,7 +136,7 @@ export default function NotificationPage() {
           </form>
         </Card>
 
-        <Card title="Lịch sử thông báo" className="span-6" delay={0.05}>
+        {isAdmin ? <Card title="Lịch sử thông báo" className="span-6" delay={0.05}>
           {historyLoading && <SkeletonBlock height={240} />}
           {!historyLoading && historyError && <ErrorState message={historyError} onRetry={loadHistory} />}
           {!historyLoading && !historyError && (!history || history.length === 0) && (
@@ -159,7 +162,13 @@ export default function NotificationPage() {
               ))}
             </div>
           )}
-        </Card>
+        </Card> : <Card title="Thông báo dành cho Mod" className="span-6" delay={0.05}>
+          <div className="list">
+            <div className="list-row"><strong>Quyền riêng tư</strong><p className="muted small">Lịch sử thông báo chỉ dành cho Admin để bảo vệ dữ liệu vận hành.</p></div>
+            <div className="list-row"><strong>Khi cần hỗ trợ</strong><p className="muted small">Hãy liên hệ Admin nếu cần kiểm tra thông báo đã gửi hoặc thay đổi kênh nhận.</p></div>
+            <div className="list-row"><strong>Vai trò của bạn</strong><p className="muted small">Bạn vẫn có thể theo dõi và xử lý các case kiểm duyệt được phân công.</p></div>
+          </div>
+        </Card>}
       </div>
     </div>
   );

@@ -4,6 +4,8 @@ import react from "@vitejs/plugin-react";
 // The dev server owns the UI on :5173 and forwards API traffic to FastAPI on :8000,
 // so the browser stays same-origin and no CORS preflight is needed while developing.
 export default defineConfig({
+  // Keep public VITE_* settings alongside backend settings at the repository root.
+  envDir: "..",
   plugins: [react()],
   server: {
     port: 5173,

@@ -9,6 +9,7 @@ import {
   Books,
   Robot,
 } from "@phosphor-icons/react";
+import { useAuth } from "../auth/AuthProvider.jsx";
 
 const NAV_ITEMS = [
   { to: "/tong-quan", label: "Tổng quan", icon: SquaresFour, end: true },
@@ -22,6 +23,7 @@ const NAV_ITEMS = [
 ];
 
 export default function Sidebar({ open, onNavigate }) {
+  const { user } = useAuth();
   return (
     <aside className={`sidebar ${open ? "sidebar--open" : ""}`}>
       <div className="sidebar__brand">
@@ -30,7 +32,7 @@ export default function Sidebar({ open, onNavigate }) {
       </div>
 
       <nav className="sidebar__nav" aria-label="Điều hướng chính">
-        {NAV_ITEMS.map(({ to, label, icon: Icon, end }) => (
+        {NAV_ITEMS.filter((item) => !["/nhat-ky", "/quan-ly-mod"].includes(item.to) || user?.role === "admin").map(({ to, label, icon: Icon, end }) => (
           <NavLink
             key={to}
             to={to}

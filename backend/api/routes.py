@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from backend.agents.graph import agent
 from backend.models.moderation import (
@@ -12,6 +12,8 @@ from backend.models.schemas import ChatRequest, ChatResponse
 from backend.services.demo_cases import DEMO_CASES
 from backend.services.moderation import ModerationConfigurationError, ModerationEngine
 from backend.services.review_store import ReviewStore
+from backend.models.auth import UserPublic
+from backend.services.auth_service import require_roles
 
 router = APIRouter()
 _moderation_engine: ModerationEngine | None = None
@@ -81,7 +83,7 @@ async def decide_review(review_id: str, decision: AdminDecisionRequest) -> Revie
 
 
 @router.get("/moderation/audit-logs", response_model=list[AuditLogEntry])
-async def audit_logs() -> list[AuditLogEntry]:
+async def audit_logs(_: UserPublic = Depends(require_roles("admin"))) -> list[AuditLogEntry]:
     return get_review_store().list_audit_logs()
 
 
