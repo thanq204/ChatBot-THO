@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from backend.models.auth import AuthResponse, GoogleLoginRequest, LoginRequest, UserCreateRequest, UserPublic, UserRoleUpdateRequest, UserStatusUpdateRequest
+from backend.models.auth import AuthResponse, GoogleLoginRequest, LoginRequest, ModInvitePublic, ModInviteRequest, UserCreateRequest, UserPublic, UserRoleUpdateRequest, UserStatusUpdateRequest
 from backend.services.auth_service import current_user, get_auth_store, issue_token, require_roles, verify_google
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
@@ -29,6 +29,8 @@ async def google_login(payload: GoogleLoginRequest) -> AuthResponse:
         if str(exc) == "CREATE_PASSWORD_REQUIRED":
             raise HTTPException(status_code=428, detail="Hãy tạo mật khẩu có ít nhất 8 ký tự để hoàn tất tài khoản.") from exc
         raise
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Email Google này chưa nhận được lời mời từ Admin.") from exc
     if not user:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tài khoản Google này chưa được Admin cấp quyền hoặc đã bị vô hiệu hoá.")
     return _response(user)
@@ -43,6 +45,22 @@ async def users(_: UserPublic = Depends(require_roles("admin"))) -> list[UserPub
 async def create_user(payload: UserCreateRequest, admin: UserPublic = Depends(require_roles("admin"))) -> UserPublic:
     try: return get_auth_store().create_user(email=str(payload.email), display_name=payload.display_name, role=payload.role, password=payload.password, created_by=admin.user_id)
     except ValueError as exc: raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+@router.get("/mod-invites", response_model=list[ModInvitePublic])
+async def mod_invites(_: UserPublic = Depends(require_roles("admin"))) -> list[ModInvitePublic]:
+    return get_auth_store().list_mod_invites()
+
+@router.post("/mod-invites", response_model=ModInvitePublic, status_code=status.HTTP_201_CREATED)
+async def invite_mod(payload: ModInviteRequest, admin: UserPublic = Depends(require_roles("admin"))) -> ModInvitePublic:
+    try:
+        return get_auth_store().invite_mod(payload.email, admin.user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+@router.delete("/mod-invites/{email}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_mod_invite(email: str, _: UserPublic = Depends(require_roles("admin"))) -> None:
+    if not get_auth_store().delete_mod_invite(email):
+        raise HTTPException(status_code=404, detail="Không tìm thấy lời mời đang chờ.")
 
 @router.patch("/users/{user_id}/role", response_model=UserPublic)
 async def update_role(user_id: str, payload: UserRoleUpdateRequest, _: UserPublic = Depends(require_roles("admin"))) -> UserPublic:

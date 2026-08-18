@@ -18,7 +18,7 @@ from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
 
 from backend.config import Settings, get_settings
-from backend.models.auth import Role, UserPublic
+from backend.models.auth import ModInvitePublic, Role, UserPublic
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -77,6 +77,11 @@ class AuthStore:
             """)
             cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS app_users_one_root_admin ON public.app_users (is_root_admin) WHERE is_root_admin")
             cur.execute("CREATE TABLE IF NOT EXISTS public.app_auth_revocations (jti TEXT PRIMARY KEY, expires_at TIMESTAMPTZ NOT NULL)")
+            cur.execute("""CREATE TABLE IF NOT EXISTS public.app_mod_invites (
+                email TEXT PRIMARY KEY, role TEXT NOT NULL DEFAULT 'mod' CHECK (role = 'mod'),
+                invited_by UUID NOT NULL REFERENCES public.app_users(user_id),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )""")
 
     @staticmethod
     def _public(row: dict[str, Any]) -> UserPublic:
@@ -115,6 +120,27 @@ class AuthStore:
             except psycopg2.IntegrityError as exc:
                 raise ValueError("Email này đã có tài khoản.") from exc
             return self._public(dict(cur.fetchone()))
+
+    def invite_mod(self, email: str, invited_by: UUID) -> ModInvitePublic:
+        normalized = email.strip().lower()
+        with self._connect() as conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT 1 FROM public.app_users WHERE lower(email)=lower(%s)", (normalized,))
+            if cur.fetchone():
+                raise ValueError("Email này đã có tài khoản.")
+            cur.execute("""INSERT INTO public.app_mod_invites (email, invited_by) VALUES (%s, %s)
+                ON CONFLICT (email) DO UPDATE SET invited_by=EXCLUDED.invited_by, created_at=NOW()
+                RETURNING email, role, invited_by, created_at""", (normalized, str(invited_by)))
+            return ModInvitePublic.model_validate(dict(cur.fetchone()))
+
+    def list_mod_invites(self) -> list[ModInvitePublic]:
+        with self._connect() as conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT email, role, invited_by, created_at FROM public.app_mod_invites ORDER BY created_at DESC")
+            return [ModInvitePublic.model_validate(dict(row)) for row in cur.fetchall()]
+
+    def delete_mod_invite(self, email: str) -> bool:
+        with self._connect() as conn, conn.cursor() as cur:
+            cur.execute("DELETE FROM public.app_mod_invites WHERE lower(email)=lower(%s)", (email.strip(),))
+            return cur.rowcount > 0
 
     def update_role(self, user_id: UUID, role: Role) -> UserPublic:
         with self._connect() as conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -163,13 +189,20 @@ class AuthStore:
             cur.execute("SELECT user_id,email,display_name,role,is_root_admin,is_active,created_at,last_login_at FROM public.app_users WHERE google_subject=%s OR lower(email)=lower(%s) FOR UPDATE", (subject, email))
             row = cur.fetchone()
             if not row:
+                is_root = self.settings.auth_root_admin_email.strip().lower() == email.lower()
+                if not is_root:
+                    cur.execute("SELECT role FROM public.app_mod_invites WHERE lower(email)=lower(%s) FOR UPDATE", (email,))
+                    invite = cur.fetchone()
+                    if not invite:
+                        raise PermissionError("EMAIL_NOT_INVITED")
                 if not password or len(password) < 8:
                     raise ValueError("CREATE_PASSWORD_REQUIRED")
-                is_root = self.settings.auth_root_admin_email.strip().lower() == email.lower()
                 cur.execute("""INSERT INTO public.app_users (user_id,email,display_name,google_subject,password_hash,role,is_root_admin)
                     VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING user_id,email,display_name,role,is_root_admin,is_active,created_at,last_login_at""",
                     (str(uuid4()), email, display_name, subject, _hash_password(password), "admin" if is_root else "mod", is_root))
                 row = cur.fetchone()
+                if not is_root:
+                    cur.execute("DELETE FROM public.app_mod_invites WHERE lower(email)=lower(%s)", (email,))
             elif row:
                 cur.execute("UPDATE public.app_users SET google_subject=COALESCE(google_subject,%s), last_login_at=NOW(), updated_at=NOW() WHERE user_id=%s", (subject, str(row["user_id"])))
             if not row or not row["is_active"]:
