@@ -214,6 +214,11 @@ export default function SettingsPage() {
   return (
     <div className="page-grid">
       <div className="page-grid__row">
+        <ImportHistoryCard imports={imports} loading={loadingImports} />
+        <RagAskCard />
+      </div>
+
+      <div className="page-grid__row">
         <Card
           title="Tài liệu tri thức (RAG)"
           className="span-12"
@@ -282,11 +287,6 @@ export default function SettingsPage() {
             </>
           )}
         </Card>
-      </div>
-
-      <div className="page-grid__row">
-        <ImportHistoryCard imports={imports} loading={loadingImports} />
-        <RagAskCard />
       </div>
 
       <Modal open={formOpen} title={editingId ? "Sửa tài liệu" : "Thêm tài liệu"} onClose={cancelEdit}>
