@@ -1,8 +1,13 @@
 const API_ROOT = "/api/v1";
+const TOKEN_KEY = "acm-access-token";
+
+export function getAccessToken() { return window.localStorage.getItem(TOKEN_KEY); }
+export function setAccessToken(token) { window.localStorage.setItem(TOKEN_KEY, token); }
+export function clearAccessToken() { window.localStorage.removeItem(TOKEN_KEY); }
 
 async function request(path, options = {}) {
   const response = await fetch(`${API_ROOT}${path}`, {
-    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+    headers: { "Content-Type": "application/json", ...(getAccessToken() ? { Authorization: `Bearer ${getAccessToken()}` } : {}), ...(options.headers || {}) },
     ...options,
   });
   const body = await response.json().catch(() => ({}));
@@ -76,6 +81,18 @@ export const moderation = {
   reviewQueue: () => get("/moderation/review-queue"),
   decide: (reviewId, payload) => post(`/moderation/review-queue/${encodeURIComponent(reviewId)}/decision`, payload),
   auditLogs: () => get("/moderation/audit-logs"),
+};
+
+export const auth = {
+  login: (payload) => post("/auth/login", payload),
+  google: (credential, password) => post("/auth/google", { credential, ...(password ? { password } : {}) }),
+  googleConfig: () => get("/auth/google/config"),
+  me: () => get("/auth/me"),
+  users: () => get("/auth/users"),
+  createUser: (payload) => post("/auth/users", payload),
+  updateRole: (id, role) => patch(`/auth/users/${encodeURIComponent(id)}/role`, { role }),
+  updateStatus: (id, is_active) => patch(`/auth/users/${encodeURIComponent(id)}/status`, { is_active }),
+  deleteUser: (id) => del(`/auth/users/${encodeURIComponent(id)}`),
 };
 
 /** Agent surface exposed by the LangGraph routes. */

@@ -63,6 +63,13 @@ class Settings(BaseSettings):
 
     # Database
     database_url: str = "sqlite:///./data/app.db"
+
+    # Dashboard authentication / authorization
+    auth_jwt_secret: str = ""  # Required outside development.
+    auth_access_token_minutes: int = Field(default=60, ge=5, le=24 * 60)
+    auth_root_admin_email: str = ""
+    auth_root_admin_password: str = ""
+    google_oauth_client_id: str = ""
     
     # PostgreSQL Database for FAQ RAG
     faq_pg_dsn: str = ""  # If set, overrides individual parameters (useful for Supabase/Neon)

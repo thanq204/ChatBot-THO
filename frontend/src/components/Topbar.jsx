@@ -58,8 +58,8 @@ export default function Topbar({ breadcrumb, onMenuClick }) {
         <div className="account">
           <UserCircle size={26} weight="fill" />
           <span className="account__meta">
-            <span className="account__name">{user?.name ?? "Khách"}</span>
-            <span className="account__role">{user?.role ?? "Chưa đăng nhập"}</span>
+            <span className="account__name">{user?.display_name ?? "Khách"}</span>
+            <span className="account__role">{user?.role === "admin" ? "Quản trị viên" : user?.role === "mod" ? "Kiểm duyệt viên" : "Chưa đăng nhập"}</span>
           </span>
           <button type="button" className="icon-btn" onClick={handleSignOut} aria-label="Đăng xuất" title="Đăng xuất">
             <SignOut size={18} />
