@@ -1,4 +1,7 @@
-"""SQLite persistence for the multi-platform Community Operations Copilot."""
+"""Supabase persistence for the multi-platform Community Operations Copilot.
+
+SQLite remains available only when a test explicitly supplies a sqlite URL.
+"""
 
 from __future__ import annotations
 
@@ -18,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from backend.config import Settings, get_settings
+from backend.services.database import json_value, postgres_connection, timestamp_value
 from backend.models.operations import (
     FAQ,
     CommandContent,
@@ -26,6 +30,7 @@ from backend.models.operations import (
     ActivityTimeline,
     CommunityHealth,
     FAQSuggestion,
+    FAQTopic,
     FAQUpsertRequest,
     Incident,
     KnowledgeDocument,
@@ -47,6 +52,10 @@ def _now() -> str:
 
 def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False)
+
+
+def _vector_literal(vector: list[float]) -> str:
+    return "[" + ",".join(str(value) for value in vector) + "]"
 
 
 logger = logging.getLogger(__name__)
@@ -83,15 +92,23 @@ class OperationsStore:
         settings = settings or get_settings()
         self.settings = settings
         url = settings.database_url
-        if not url.startswith("sqlite:///"):
-            raise ValueError("Operations MVP currently supports SQLite only.")
-        self.path = Path(url.removeprefix("sqlite:///"))
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        # Runtime uses Supabase. An explicitly isolated SQLite path remains
+        # available to unit tests without ever becoming a production fallback.
+        runtime_sqlite_urls = {"sqlite:///./data/app.db", "sqlite:///./data/community_channel.db"}
+        self.is_postgres = bool(settings.faq_pg_dsn) and url in runtime_sqlite_urls
+        self.path: Path | None = None
+        if not self.is_postgres:
+            if not url.startswith("sqlite:///"):
+                raise RuntimeError("FAQ_PG_DSN is required outside explicit SQLite tests.")
+            self.path = Path(url.removeprefix("sqlite:///"))
+            self.path.parent.mkdir(parents=True, exist_ok=True)
         self._create_tables()
         self.seed_defaults()
 
-    def _connect(self) -> sqlite3.Connection:
-        db = sqlite3.connect(self.path)
+    def _connect(self):
+        if self.is_postgres:
+            return postgres_connection(self.settings.faq_pg_dsn)
+        db = sqlite3.connect(self.path)  # type: ignore[arg-type]
         db.row_factory = sqlite3.Row
         return db
 
@@ -112,6 +129,11 @@ class OperationsStore:
         return conn
 
     def _create_tables(self) -> None:
+        if self.is_postgres:
+            migration = Path(__file__).parents[2] / "supabase" / "migrations" / "20260819_runtime_data_model.sql"
+            with self._connect() as db:
+                db.executescript(migration.read_text(encoding="utf-8"))
+            return
         with self._connect() as db:
             db.executescript(
                 """
@@ -221,10 +243,12 @@ class OperationsStore:
                     ("POL-THREAT-001", "Threat or doxxing", "Direct or indirect threat of physical harm or exposure.", "violence", "hold_for_review", ["giết", "đánh", "tìm ra mày", "dox"]),
                 ]
                 db.executemany(
-                    "INSERT INTO operations_policies VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    [(pid, name, desc, cat, action, _json(terms), 1, 1, _now()) for pid, name, desc, cat, action, terms in defaults],
+                    """INSERT INTO operations_policies
+                    (policy_id, name, description, category, action, trigger_terms_json, active, version, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    [(pid, name, desc, cat, action, _json(terms), True, 1, _now()) for pid, name, desc, cat, action, terms in defaults],
                 )
-            if not db.execute("SELECT 1 FROM operations_knowledge LIMIT 1").fetchone():
+            if not self.is_postgres and not db.execute("SELECT 1 FROM operations_knowledge LIMIT 1").fetchone():
                 docs = [
                     ("KN-001", "Community rules", "Tập trung vào ý kiến, không công kích con người. Khi tranh luận, dẫn nguồn và giữ ngôn ngữ tôn trọng.", ["rules", "tone"]),
                     ("KN-002", "Escalation playbook", "Spam rõ ràng có thể hide. Công kích nhẹ có thể warn. Đe doạ hoặc chưa rõ ngữ cảnh phải hold for review.", ["moderation", "escalation"]),
@@ -240,7 +264,12 @@ class OperationsStore:
                     ("FAQ-ACADEMIC-INTEGRITY", "Có được xin đáp án hoặc nhờ làm hộ bài kiểm tra không?", "Không. Nhóm hỗ trợ giải thích kiến thức và phương pháp làm bài, không cung cấp đáp án thi hoặc làm hộ bài kiểm tra.", ["academic-integrity", "assessment"]),
                     ("FAQ-ASK-HELP", "Làm sao để hỏi bài hiệu quả?", "Hãy nêu môn học, phần đang vướng, điều bạn đã thử và câu hỏi cụ thể. Đừng đăng thông tin cá nhân hoặc toàn bộ đề thi đang diễn ra.", ["study", "help"]),
                 ]
-                db.executemany("INSERT INTO operations_faqs VALUES (?, ?, ?, ?, ?, ?)", [(faq_id, question, answer, _json(tags), 1, _now()) for faq_id, question, answer, tags in faqs])
+                db.executemany(
+                    """INSERT INTO operations_faqs
+                    (faq_id, question, answer, tags_json, active, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?)""",
+                    [(faq_id, question, answer, _json(tags), True, _now()) for faq_id, question, answer, tags in faqs],
+                )
             if not db.execute("SELECT 1 FROM operations_command_content LIMIT 1").fetchone():
                 command_defaults = {
                     "event": ("Chưa có thông báo mới về sự kiện hoặc lịch học.", "Sự kiện và lịch học sắp tới"),
@@ -294,11 +323,11 @@ class OperationsStore:
                 if len(duplicates) < 2:
                     continue
                 winner = duplicates[0]
-                message_ids = list(json.loads(winner["message_ids_json"]))
-                categories = list(json.loads(winner["categories_json"]))
+                message_ids = list(json_value(winner["message_ids_json"], []))
+                categories = list(json_value(winner["categories_json"], []))
                 for duplicate in duplicates[1:]:
-                    message_ids.extend(json.loads(duplicate["message_ids_json"]))
-                    categories.extend(json.loads(duplicate["categories_json"]))
+                    message_ids.extend(json_value(duplicate["message_ids_json"], []))
+                    categories.extend(json_value(duplicate["categories_json"], []))
                     db.execute("UPDATE operations_messages SET incident_id=? WHERE incident_id=?", (winner["incident_id"], duplicate["incident_id"]))
                     db.execute("UPDATE operations_audit SET incident_id=? WHERE incident_id=?", (winner["incident_id"], duplicate["incident_id"]))
                     db.execute("DELETE FROM operations_incidents WHERE incident_id=?", (duplicate["incident_id"],))
@@ -306,10 +335,61 @@ class OperationsStore:
                 db.execute("UPDATE operations_incidents SET message_ids_json=?, categories_json=?, risk_score=?, updated_at=? WHERE incident_id=?", (_json(list(dict.fromkeys(message_ids))), _json(list(dict.fromkeys(categories))), max(row["risk_score"] for row in duplicates), _now(), winner["incident_id"]))
         return merged
 
-    def save_message(self, message: CommonMessage, result: MessageDecision, incident_id: str | None) -> None:
-        now = _now()
+    def _upsert_member(self, message: CommonMessage) -> str | None:
+        if not self.is_postgres:
+            return None
+        member_id = str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"p232:{message.platform}:{message.community_id}:{message.author_id}",
+            )
+        )
         with self._connect() as db:
             db.execute(
+                """INSERT INTO community_members
+                (member_id, platform, community_id, platform_user_id, display_name, first_seen_at, last_seen_at, metadata)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(platform, community_id, platform_user_id) DO UPDATE SET
+                display_name=COALESCE(excluded.display_name, community_members.display_name),
+                last_seen_at=excluded.last_seen_at""",
+                (
+                    member_id,
+                    message.platform,
+                    message.community_id,
+                    message.author_id,
+                    message.author_name,
+                    message.timestamp.isoformat(),
+                    message.timestamp.isoformat(),
+                    _json({"source": message.platform}),
+                ),
+            )
+        return member_id
+
+    def save_message(self, message: CommonMessage, result: MessageDecision, incident_id: str | None) -> None:
+        now = _now()
+        author_member_id = self._upsert_member(message)
+        with self._connect() as db:
+            if self.is_postgres:
+                db.execute(
+                    """INSERT INTO operations_messages
+                    (message_id, platform, community_id, channel_id, thread_key, parent_message_id, author_id,
+                     author_member_id, text, timestamp, source_url, raw_json, decision, category, severity,
+                     risk_score, confidence, explanation, model_used, incident_id, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(message_id) DO UPDATE SET decision=excluded.decision, category=excluded.category,
+                    severity=excluded.severity, risk_score=excluded.risk_score, confidence=excluded.confidence,
+                    explanation=excluded.explanation, model_used=excluded.model_used, incident_id=excluded.incident_id,
+                    author_member_id=excluded.author_member_id, updated_at=excluded.updated_at""",
+                    (
+                        message.message_id, message.platform, message.community_id, message.channel_id,
+                        message.thread_key, message.parent_message_id, message.author_id, author_member_id,
+                        message.text, message.timestamp.isoformat(), message.source_url, _json(message.raw),
+                        result.decision, result.category, result.severity, result.risk_score, result.confidence,
+                        result.explanation, result.model_used, incident_id, now, now,
+                    ),
+                )
+            else:
+                db.execute(
                 """INSERT INTO operations_messages
                 (message_id, platform, community_id, channel_id, thread_key, parent_message_id, author_id, text,
                  timestamp, source_url, raw_json, decision, category, severity, risk_score, confidence, explanation,
@@ -319,16 +399,16 @@ class OperationsStore:
                 severity=excluded.severity, risk_score=excluded.risk_score, confidence=excluded.confidence,
                 explanation=excluded.explanation, model_used=excluded.model_used, incident_id=excluded.incident_id,
                 updated_at=excluded.updated_at""",
-                (message.message_id, message.platform, message.community_id, message.channel_id, message.thread_key,
-                 message.parent_message_id, message.author_id, message.text, message.timestamp.isoformat(), message.source_url,
-                 _json(message.raw), result.decision, result.category, result.severity, result.risk_score, result.confidence,
-                 result.explanation, result.model_used, incident_id, now, now),
-            )
+                    (message.message_id, message.platform, message.community_id, message.channel_id, message.thread_key,
+                     message.parent_message_id, message.author_id, message.text, message.timestamp.isoformat(), message.source_url,
+                     _json(message.raw), result.decision, result.category, result.severity, result.risk_score, result.confidence,
+                     result.explanation, result.model_used, incident_id, now, now),
+                )
             db.executemany(
                 """INSERT INTO operations_gate_runs
                 (run_id, message_id, gate, passed, label, category, risk_score, evidence_json, explanation, model_used, duration_ms, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                [(f"GATE-{uuid.uuid4().hex[:10].upper()}", message.message_id, gate.gate, int(gate.passed), gate.label,
+                [(f"GATE-{uuid.uuid4().hex[:10].upper()}", message.message_id, gate.gate, bool(gate.passed), gate.label,
                   gate.category, gate.risk_score, _json(gate.evidence), gate.explanation, gate.model_used, gate.duration_ms, now)
                  for gate in result.gates],
             )
@@ -366,13 +446,20 @@ class OperationsStore:
                 parent_message_id=row["parent_message_id"],
                 author_id=row["author_id"],
                 text=row["text"],
-                timestamp=datetime.fromisoformat(row["timestamp"]),
+                timestamp=timestamp_value(row["timestamp"]),
                 source_url=row["source_url"],
-                raw=json.loads(row["raw_json"] or "{}"),
+                raw=json_value(row["raw_json"], {}),
             )
             for row in reversed(rows)
         ]
         return context
+
+    def link_message_incident(self, message_id: str, incident_id: str) -> None:
+        with self._connect() as db:
+            db.execute(
+                "UPDATE operations_messages SET incident_id=?, updated_at=? WHERE message_id=?",
+                (incident_id, _now(), message_id),
+            )
 
     def find_recent_equivalent_incident_id(self, message: CommonMessage, category: str) -> str | None:
         """Find an identical recent alert so connectors do not notify twice."""
@@ -397,7 +484,7 @@ class OperationsStore:
         return str(match["incident_id"]) if match else None
 
     @staticmethod
-    def _local_moderation_embedding(text: str, dimensions: int = 256) -> list[float]:
+    def _local_moderation_embedding(text: str, dimensions: int = 1536) -> list[float]:
         """Deterministic fallback embedding used when no provider is available."""
         tokens = _fold_search_text(text).split()
         features = [*tokens, *(f"{left}_{right}" for left, right in zip(tokens, tokens[1:]))]
@@ -427,6 +514,21 @@ class OperationsStore:
                 logger.warning("Moderation embedding provider unavailable; using local fallback.", exc_info=True)
         return local_model, self._local_moderation_embedding(text)
 
+    def _semantic_embedding(self, text: str) -> tuple[str, list[float]]:
+        model = self.settings.openai_embedding_model
+        if self.settings.openai_api_key:
+            try:
+                from openai import OpenAI
+
+                response = OpenAI(api_key=self.settings.openai_api_key).embeddings.create(
+                    model=model,
+                    input=[text],
+                )
+                return model, list(response.data[0].embedding)
+            except Exception:
+                logger.warning("Semantic embedding provider unavailable; using deterministic fallback.", exc_info=True)
+        return "local-hash-embedding-v1", self._local_moderation_embedding(text)
+
     def remember_incident(self, incident_id: str, marked_by: str, reason: str = "") -> str | None:
         """Persist one human-reviewed case and its separate embedding chunk."""
         incident = self.get_incident(incident_id)
@@ -443,7 +545,7 @@ class OperationsStore:
                 (mark_id,),
             ).fetchone()
             version = int(old["version"]) + 1 if old else 1
-            created_at = str(old["created_at"]) if old else now
+            created_at = timestamp_value(old["created_at"]).isoformat() if old else now
             db.execute(
                 """INSERT INTO operations_moderation_marks
                 (mark_id, incident_id, message_id, text, normalized_text, category, decision, reason,
@@ -476,7 +578,7 @@ class OperationsStore:
                 (mark_id, text_hash, model, vector_json, updated_at) VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT(mark_id) DO UPDATE SET text_hash=excluded.text_hash, model=excluded.model,
                 vector_json=excluded.vector_json, updated_at=excluded.updated_at""",
-                (mark_id, self._embedding_hash(text), model, _json(vector), now),
+                (mark_id, self._embedding_hash(text), model, _vector_literal(vector) if self.is_postgres else _json(vector), now),
             )
         self.add_audit(
             incident_id,
@@ -505,7 +607,7 @@ class OperationsStore:
         if not rows:
             return ModerationMemoryMatch(False, 0.0, True, False)
         query_vectors: dict[str, list[float]] = {}
-        matches = []
+        matches: list[tuple[Any, Any]] = []
         config = ModerationMemoryConfig(minimum_score=self.settings.moderation_memory_similarity_threshold)
         for row in rows:
             model = str(row["embedding_model"])
@@ -520,20 +622,81 @@ class OperationsStore:
                 decision=row["decision"],
                 reason=row["reason"],
                 marked_by=row["marked_by"],
-                marked_at=datetime.fromisoformat(row["marked_at"]),
-                embedding=tuple(json.loads(row["vector_json"])),
+                marked_at=timestamp_value(row["marked_at"]),
+                embedding=tuple(self._parse_vector(row["vector_json"])),
                 source_url=row["source_url"],
                 active=bool(row["active"]),
                 version=int(row["version"]),
             )
             matches.append(
-                ModerationMemoryIndex([mark], config).match(
+                (
+                    ModerationMemoryIndex([mark], config).match(
                     text,
                     tuple(query_vectors[model]),
                     category=category,
+                    ),
+                    mark,
                 )
             )
-        return max(matches, key=lambda item: item.similarity)
+        best, best_mark = max(matches, key=lambda item: item[0].similarity)
+        if best.matched:
+            return best
+        if (
+            self.settings.moderation_memory_llm_verify_enabled
+            and best.similarity >= self.settings.moderation_memory_llm_candidate_threshold
+            and self._moderation_llm_equivalent(text, best_mark)
+        ):
+            timestamp = best_mark.marked_at.isoformat().replace("+00:00", "Z")
+            return ModerationMemoryMatch(
+                matched=True,
+                similarity=best.similarity,
+                send_to_admin=False,
+                can_expand=True,
+                banner=f"(Đã được đánh dấu: {best_mark.reason} bởi: {best_mark.marked_by} vào lúc: {timestamp})",
+                mark=best_mark,
+            )
+        return best
+
+    def _moderation_llm_equivalent(self, text: str, mark: Any) -> bool:
+        if not self.settings.openai_api_key:
+            return False
+        prompt = (
+            "So sánh hai tin nhắn moderation. Chỉ trả JSON {\"equivalent_case\": boolean}. "
+            "True khi chúng có cùng ý định gây hại, cùng mục tiêu hành vi và có thể áp dụng chính xác "
+            "quyết định Admin/Mod trước đó; false nếu chỉ chung từ khóa, là trích dẫn, đùa vô hại, "
+            "hoặc khác mức độ/mục tiêu.\n"
+            + json.dumps(
+                {
+                    "new_message": text,
+                    "reviewed_message": mark.text,
+                    "category": mark.category,
+                    "reviewed_decision": mark.decision,
+                    "reviewed_reason": mark.reason,
+                },
+                ensure_ascii=False,
+            )
+        )
+        try:
+            from openai import OpenAI
+
+            response = OpenAI(api_key=self.settings.openai_api_key).chat.completions.create(
+                model=self.settings.moderation_memory_llm_model,
+                temperature=0,
+                response_format={"type": "json_object"},
+                messages=[{"role": "user", "content": prompt}],
+            )
+            payload = json.loads(response.choices[0].message.content or "{}")
+            return bool(payload.get("equivalent_case"))
+        except Exception:
+            logger.warning("Moderation memory LLM verification unavailable.", exc_info=True)
+            return False
+
+    @staticmethod
+    def _parse_vector(value: Any) -> list[float]:
+        if isinstance(value, list):
+            return [float(item) for item in value]
+        text = str(value or "").strip().strip("[]")
+        return [float(item) for item in text.split(",") if item.strip()]
 
     def find_open_incident(self, message: CommonMessage) -> Incident | None:
         with self._connect() as db:
@@ -635,19 +798,19 @@ class OperationsStore:
     def audit(self, incident_id: str | None = None) -> list[dict[str, Any]]:
         with self._connect() as db:
             rows = db.execute("SELECT * FROM operations_audit WHERE (? IS NULL OR incident_id=?) ORDER BY created_at DESC", (incident_id, incident_id)).fetchall()
-        return [{**dict(row), "payload": json.loads(row["payload_json"])} for row in rows]
+        return [{**dict(row), "payload": json_value(row["payload_json"], {})} for row in rows]
 
     def list_policies(self) -> list[Policy]:
         with self._connect() as db:
             rows = db.execute("SELECT * FROM operations_policies ORDER BY policy_id").fetchall()
-        return [Policy(policy_id=r["policy_id"], name=r["name"], description=r["description"], category=r["category"], action=r["action"], trigger_terms=json.loads(r["trigger_terms_json"]), active=bool(r["active"]), version=r["version"], updated_at=datetime.fromisoformat(r["updated_at"])) for r in rows]
+        return [Policy(policy_id=r["policy_id"], name=r["name"], description=r["description"], category=r["category"], action=r["action"], trigger_terms=json_value(r["trigger_terms_json"], []), active=bool(r["active"]), version=r["version"], updated_at=timestamp_value(r["updated_at"])) for r in rows]
 
     def upsert_policy(self, policy_id: str, request: PolicyUpsertRequest) -> Policy:
         now = _now()
         with self._connect() as db:
             old = db.execute("SELECT version FROM operations_policies WHERE policy_id=?", (policy_id,)).fetchone()
             version = int(old["version"]) + 1 if old else 1
-            db.execute("""INSERT INTO operations_policies VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(policy_id) DO UPDATE SET name=excluded.name, description=excluded.description, category=excluded.category, action=excluded.action, trigger_terms_json=excluded.trigger_terms_json, active=excluded.active, version=excluded.version, updated_at=excluded.updated_at""", (policy_id, request.name, request.description, request.category, request.action, _json(request.trigger_terms), int(request.active), version, now))
+            db.execute("""INSERT INTO operations_policies VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(policy_id) DO UPDATE SET name=excluded.name, description=excluded.description, category=excluded.category, action=excluded.action, trigger_terms_json=excluded.trigger_terms_json, active=excluded.active, version=excluded.version, updated_at=excluded.updated_at""", (policy_id, request.name, request.description, request.category, request.action, _json(request.trigger_terms), bool(request.active), version, now))
         return next(item for item in self.list_policies() if item.policy_id == policy_id)
 
     def delete_policy(self, policy_id: str) -> bool:
@@ -669,10 +832,10 @@ class OperationsStore:
                 document_id=row["document_id"],
                 title=row["title"],
                 body=row["body"],
-                tags=json.loads(row["tags_json"]),
+                tags=json_value(row["tags_json"], []),
                 dataset=row["dataset"] or "general",
                 active=bool(row["active"]),
-                updated_at=datetime.fromisoformat(row["updated_at"]),
+                updated_at=timestamp_value(row["updated_at"]),
             )
             for row in rows
         ]
@@ -697,8 +860,7 @@ class OperationsStore:
         )
 
     def list_knowledge(self, dataset: str | None = None) -> list[KnowledgeDocument]:
-        # Local development remains usable until cloud credentials are supplied.
-        if not self.settings.faq_pg_dsn and not self.settings.faq_pg_password:
+        if not self.is_postgres:
             return self._list_knowledge_sqlite(dataset)
 
         try:
@@ -728,10 +890,16 @@ class OperationsStore:
                 return []
             return documents
         except Exception:
-            logger.warning("PostgreSQL knowledge unavailable; using SQLite fallback.", exc_info=True)
-            return self._list_knowledge_sqlite(dataset)
+            logger.error("Supabase knowledge is unavailable; refusing stale local fallback.", exc_info=True)
+            raise
 
-    def upsert_knowledge(self, document_id: str, request: KnowledgeDocumentRequest) -> KnowledgeDocument:
+    def upsert_knowledge(
+        self,
+        document_id: str,
+        request: KnowledgeDocumentRequest,
+        import_id: str | None = None,
+        source_file: str | None = None,
+    ) -> KnowledgeDocument:
         import psycopg2
         from openai import OpenAI
         
@@ -740,7 +908,9 @@ class OperationsStore:
         # 1. Chunking
         chunks = []
         text = request.title + "\n\n" + request.body
-        paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+        paragraphs = []
+        for paragraph in (part.strip() for part in text.split("\n\n") if part.strip()):
+            paragraphs.extend(paragraph[index:index + 1400] for index in range(0, len(paragraph), 1400))
         current_chunk = ""
         for p in paragraphs:
             if len(current_chunk) + len(p) < 1500:
@@ -764,12 +934,19 @@ class OperationsStore:
             conn = self._connect_pg()
             with conn.cursor() as cur:
                 cur.execute("""
-                    INSERT INTO knowledge_documents (document_id, title, body, tags, dataset, active, updated_at, created_at) 
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    INSERT INTO knowledge_documents
+                    (document_id, title, body, tags, dataset, active, import_id, source_file,
+                     content_hash, normalization_version, pipeline_version, updated_at, created_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 1, 'supabase-v1', %s, %s)
                     ON CONFLICT(document_id) DO UPDATE SET 
                         title=EXCLUDED.title, body=EXCLUDED.body, tags=EXCLUDED.tags, 
-                        dataset=EXCLUDED.dataset, active=EXCLUDED.active, updated_at=EXCLUDED.updated_at
-                """, (document_id, request.title, request.body, json.dumps(request.tags), request.dataset, bool(request.active), now, now))
+                        dataset=EXCLUDED.dataset, active=EXCLUDED.active,
+                        import_id=COALESCE(EXCLUDED.import_id, knowledge_documents.import_id),
+                        source_file=COALESCE(EXCLUDED.source_file, knowledge_documents.source_file),
+                        content_hash=EXCLUDED.content_hash, pipeline_version=EXCLUDED.pipeline_version,
+                        updated_at=EXCLUDED.updated_at
+                """, (document_id, request.title, request.body, json.dumps(request.tags), request.dataset,
+                        bool(request.active), import_id, source_file, self._embedding_hash(request.body), now, now))
                 
                 cur.execute("DELETE FROM knowledge_sections WHERE document_id=%s", (document_id,))
                 
@@ -812,8 +989,8 @@ class OperationsStore:
             command=row["command"],
             body=row["body"],
             description=row["description"] or "",
-            platforms=json.loads(row["platforms_json"] or "null") or ["telegram", "discord"],
-            updated_at=datetime.fromisoformat(row["updated_at"]),
+            platforms=json_value(row["platforms_json"], ["telegram", "discord"]),
+            updated_at=timestamp_value(row["updated_at"]),
         )
 
     def get_command_content(self, command: str) -> CommandContent | None:
@@ -854,7 +1031,7 @@ class OperationsStore:
     def list_member_reports(self) -> list[MemberReport]:
         with self._connect() as db:
             rows = db.execute("SELECT * FROM operations_member_reports ORDER BY created_at DESC").fetchall()
-        return [MemberReport(report_id=row["report_id"], platform=row["platform"], reporter_id=row["reporter_id"], channel_id=row["channel_id"], details=row["details"], status=row["status"], created_at=datetime.fromisoformat(row["created_at"])) for row in rows]
+        return [MemberReport(report_id=row["report_id"], platform=row["platform"], reporter_id=row["reporter_id"], channel_id=row["channel_id"], details=row["details"], status=row["status"], created_at=timestamp_value(row["created_at"])) for row in rows]
 
     def set_member_report_status(self, report_id: str, status: str, actor: str = "Admin") -> MemberReport | None:
         """Close out a /report submission. Returns None when the id is unknown."""
@@ -871,12 +1048,12 @@ class OperationsStore:
         column = "daily_enabled" if kind == "daily" else "weekly_enabled"
         now = _now()
         with self._connect() as db:
-            db.execute("INSERT INTO operations_notification_preferences (platform, member_id, daily_enabled, weekly_enabled, updated_at) VALUES (?, ?, 1, 1, ?) ON CONFLICT(platform, member_id) DO NOTHING", (platform, member_id, now))
-            db.execute(f"UPDATE operations_notification_preferences SET {column}=?, updated_at=? WHERE platform=? AND member_id=?", (int(enabled), now, platform, member_id))
+            db.execute("INSERT INTO operations_notification_preferences (platform, member_id, daily_enabled, weekly_enabled, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(platform, member_id) DO NOTHING", (platform, member_id, True, True, now))
+            db.execute(f"UPDATE operations_notification_preferences SET {column}=?, updated_at=? WHERE platform=? AND member_id=?", (bool(enabled), now, platform, member_id))
 
     @staticmethod
     def _faq(row: sqlite3.Row) -> FAQ:
-        return FAQ(faq_id=row["faq_id"], question=row["question"], answer=row["answer"], tags=json.loads(row["tags_json"]), active=bool(row["active"]), updated_at=datetime.fromisoformat(row["updated_at"]))
+        return FAQ(faq_id=row["faq_id"], question=row["question"], answer=row["answer"], tags=json_value(row["tags_json"], []), active=bool(row["active"]), updated_at=timestamp_value(row["updated_at"]))
 
     @staticmethod
     def _similarity(left: str, right: str) -> float:
@@ -885,10 +1062,26 @@ class OperationsStore:
 
     def list_faqs(self, active_only: bool = False) -> list[FAQ]:
         with self._connect() as db:
-            rows = db.execute("SELECT * FROM operations_faqs WHERE (?=0 OR active=1) ORDER BY updated_at DESC", (int(active_only),)).fetchall()
+            rows = db.execute("SELECT * FROM operations_faqs WHERE (?=FALSE OR active=TRUE) ORDER BY updated_at DESC", (bool(active_only),)).fetchall()
         return [self._faq(row) for row in rows]
 
     def find_faq(self, question: str, threshold: float = 0.72) -> FAQ | None:
+        if self.is_postgres and self.settings.faq_semantic_clustering_enabled:
+            try:
+                _model, vector = self._semantic_embedding(question)
+                with self._connect() as db:
+                    row = db.execute(
+                        """SELECT f.*, 1 - (e.embedding <=> ?::vector) AS similarity
+                        FROM operations_faq_embeddings e
+                        JOIN operations_faqs f ON f.faq_id=e.faq_id
+                        WHERE f.active=TRUE
+                        ORDER BY e.embedding <=> ?::vector LIMIT 1""",
+                        (_vector_literal(vector), _vector_literal(vector)),
+                    ).fetchone()
+                if row and float(row["similarity"]) >= self.settings.faq_semantic_match_threshold:
+                    return self._faq(row)
+            except Exception:
+                logger.warning("Semantic FAQ lookup failed; using lexical fallback.", exc_info=True)
         candidates = [(self._similarity(question, faq.question), faq) for faq in self.list_faqs(active_only=True)]
         best = max(candidates, default=(0.0, None), key=lambda item: item[0])
         return best[1] if best[0] >= threshold else None
@@ -897,7 +1090,22 @@ class OperationsStore:
         similar = [faq for faq in self.list_faqs(active_only=True) if faq.faq_id != faq_id and self._similarity(request.question, faq.question) >= duplicate_threshold]
         now = _now()
         with self._connect() as db:
-            db.execute("""INSERT INTO operations_faqs VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(faq_id) DO UPDATE SET question=excluded.question, answer=excluded.answer, tags_json=excluded.tags_json, active=excluded.active, updated_at=excluded.updated_at""", (faq_id, request.question, request.answer, _json(request.tags), int(request.active), now))
+            db.execute("""INSERT INTO operations_faqs
+            (faq_id, question, answer, tags_json, active, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(faq_id) DO UPDATE SET question=excluded.question, answer=excluded.answer,
+            tags_json=excluded.tags_json, active=excluded.active, updated_at=excluded.updated_at""",
+            (faq_id, request.question, request.answer, _json(request.tags), bool(request.active), now))
+        if self.is_postgres:
+            model, vector = self._semantic_embedding(request.question)
+            with self._connect() as db:
+                db.execute(
+                    """INSERT INTO operations_faq_embeddings
+                    (faq_id, text_hash, model, embedding, updated_at) VALUES (?, ?, ?, ?::vector, ?)
+                    ON CONFLICT(faq_id) DO UPDATE SET text_hash=excluded.text_hash, model=excluded.model,
+                    embedding=excluded.embedding, updated_at=excluded.updated_at""",
+                    (faq_id, self._embedding_hash(request.question), model, _vector_literal(vector), now),
+                )
         return next(faq for faq in self.list_faqs() if faq.faq_id == faq_id), similar
 
     def delete_faq(self, faq_id: str) -> bool:
@@ -906,6 +1114,8 @@ class OperationsStore:
         return cursor.rowcount > 0
 
     def record_unanswered_question(self, message: CommonMessage, minimum_questions: int = 3) -> FAQSuggestion | None:
+        if self.is_postgres:
+            return self.record_member_question(message, minimum_questions)
         normalized = _fold_search_text(message.text)
         if not normalized:
             return None
@@ -918,7 +1128,7 @@ class OperationsStore:
             rows = db.execute("SELECT * FROM operations_faq_suggestions WHERE status='open'").fetchall()
             match = next((row for row in rows if self._similarity(normalized, row["normalized_question"]) >= 0.72), None)
             if match:
-                samples = list(dict.fromkeys([*json.loads(match["samples_json"]), message.text]))[-5:]
+                samples = list(dict.fromkeys([*json_value(match["samples_json"], []), message.text]))[-5:]
                 count = int(match["question_count"]) + 1
                 db.execute("UPDATE operations_faq_suggestions SET question_count=?, samples_json=?, updated_at=? WHERE suggestion_id=?", (count, _json(samples), now, match["suggestion_id"]))
                 row = db.execute("SELECT * FROM operations_faq_suggestions WHERE suggestion_id=?", (match["suggestion_id"],)).fetchone()
@@ -929,22 +1139,312 @@ class OperationsStore:
         suggestion = self._suggestion(row)
         return suggestion if suggestion.question_count >= minimum_questions else None
 
+    def record_member_question(self, message: CommonMessage, minimum_questions: int = 3) -> FAQSuggestion | None:
+        """Persist and semantically cluster every safe question sent to the bot."""
+        if not self.is_postgres:
+            return self.record_unanswered_question(message, minimum_questions)
+        normalized = _fold_search_text(message.text)
+        if not normalized:
+            return None
+        question_id = f"FQQ-{uuid.uuid4().hex[:12].upper()}"
+        now = _now()
+        with self._connect() as db:
+            row = db.execute(
+                """INSERT INTO operations_faq_questions
+                (question_id, message_id, question, normalized_question, platform, community_id,
+                 channel_id, author_id, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(message_id) DO NOTHING RETURNING question_id""",
+                (
+                    question_id,
+                    message.message_id,
+                    message.text[:2000],
+                    normalized,
+                    message.platform,
+                    message.community_id,
+                    message.channel_id,
+                    message.author_id,
+                    now,
+                ),
+            ).fetchone()
+            if row is None:
+                existing = db.execute(
+                    "SELECT question_id FROM operations_faq_questions WHERE message_id=?",
+                    (message.message_id,),
+                ).fetchone()
+                return self._suggestion_for_question(existing["question_id"]) if existing else None
+            question_id = str(row["question_id"])
+
+        model, vector = self._semantic_embedding(message.text)
+        with self._connect() as db:
+            db.execute(
+                """INSERT INTO faq_question_embeddings
+                (question_id, text_hash, model, embedding, created_at)
+                VALUES (?, ?, ?, ?::vector, ?)
+                ON CONFLICT(question_id) DO UPDATE SET text_hash=excluded.text_hash,
+                model=excluded.model, embedding=excluded.embedding""",
+                (question_id, self._embedding_hash(message.text), model, _vector_literal(vector), now),
+            )
+        cluster_id = self._cluster_member_question(question_id, message.text, normalized, model, vector)
+        suggestion = self._suggestion_for_cluster(cluster_id)
+        return suggestion if suggestion and suggestion.question_count >= minimum_questions else None
+
+    def _faq_llm_decision(
+        self,
+        question: str,
+        candidate_label: str | None = None,
+        candidate_samples: list[str] | None = None,
+    ) -> tuple[bool, str]:
+        """Verify intent equivalence and produce one concise Vietnamese topic label."""
+        fallback_label = question.strip()[:500]
+        if not self.settings.openai_api_key:
+            return False, fallback_label
+        payload = {
+            "question": question,
+            "candidate_topic": candidate_label,
+            "candidate_examples": candidate_samples or [],
+        }
+        prompt = (
+            "Phân tích ý định câu hỏi của thành viên. Trả JSON có đúng hai trường: "
+            "same_intent (boolean) và topic_label (một câu tiếng Việt ngắn mô tả nội dung chung, "
+            "không trả lời câu hỏi). same_intent chỉ true khi câu mới và candidate thực sự cần cùng một câu trả lời FAQ.\n"
+            + json.dumps(payload, ensure_ascii=False)
+        )
+        try:
+            from openai import OpenAI
+
+            response = OpenAI(api_key=self.settings.openai_api_key).chat.completions.create(
+                model=self.settings.faq_clustering_model,
+                temperature=0,
+                response_format={"type": "json_object"},
+                messages=[{"role": "user", "content": prompt}],
+            )
+            data = json.loads(response.choices[0].message.content or "{}")
+            label = str(data.get("topic_label") or fallback_label).strip()[:500]
+            return bool(data.get("same_intent")) if candidate_label else False, label
+        except Exception:
+            logger.warning("FAQ intent LLM unavailable; using embedding-only clustering.", exc_info=True)
+            return False, fallback_label
+
+    def _cluster_member_question(
+        self,
+        question_id: str,
+        question: str,
+        normalized: str,
+        model: str,
+        vector: list[float],
+    ) -> str:
+        vector_literal = _vector_literal(vector)
+        with self._connect() as db:
+            candidates = db.execute(
+                """SELECT *, 1 - (centroid_embedding <=> ?::vector) AS similarity
+                FROM faq_topic_clusters WHERE status='open'
+                ORDER BY centroid_embedding <=> ?::vector LIMIT 5""",
+                (vector_literal, vector_literal),
+            ).fetchall()
+
+        selected = None
+        llm_verified = False
+        topic_label = question.strip()[:500]
+        for candidate in candidates:
+            score = float(candidate["similarity"])
+            if score >= self.settings.faq_cluster_auto_merge_threshold:
+                selected = candidate
+                topic_label = str(candidate["topic_label"])
+                break
+            if score >= self.settings.faq_cluster_candidate_threshold:
+                same_intent, label = self._faq_llm_decision(
+                    question,
+                    str(candidate["topic_label"]),
+                    json_value(candidate["sample_questions"], []),
+                )
+                if same_intent:
+                    selected = candidate
+                    llm_verified = True
+                    topic_label = label
+                    break
+
+        now = _now()
+        if selected is None:
+            _same, topic_label = self._faq_llm_decision(question)
+            cluster_id = f"FAQC-{uuid.uuid4().hex[:10].upper()}"
+            with self._connect() as db:
+                db.execute(
+                    """INSERT INTO faq_topic_clusters
+                    (cluster_id, topic_label, normalized_label, representative_question, question_count,
+                     sample_questions, centroid_embedding, embedding_model, status, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, 1, ?, ?::vector, ?, 'open', ?, ?)""",
+                    (
+                        cluster_id,
+                        topic_label,
+                        _fold_search_text(topic_label),
+                        question[:500],
+                        _json([question]),
+                        vector_literal,
+                        model,
+                        now,
+                        now,
+                    ),
+                )
+        else:
+            cluster_id = str(selected["cluster_id"])
+            old_count = int(selected["question_count"])
+            old_vector = self._parse_vector(selected["centroid_embedding"])
+            centroid = [
+                ((old_vector[index] * old_count) + vector[index]) / (old_count + 1)
+                for index in range(min(len(old_vector), len(vector)))
+            ]
+            samples = list(dict.fromkeys([*json_value(selected["sample_questions"], []), question]))[-10:]
+            with self._connect() as db:
+                db.execute(
+                    """UPDATE faq_topic_clusters SET topic_label=?, normalized_label=?,
+                    question_count=question_count+1, sample_questions=?, centroid_embedding=?::vector,
+                    updated_at=? WHERE cluster_id=?""",
+                    (topic_label, _fold_search_text(topic_label), _json(samples), _vector_literal(centroid), now, cluster_id),
+                )
+
+        similarity = 1.0 if selected is None else float(selected["similarity"])
+        with self._connect() as db:
+            db.execute(
+                """INSERT INTO faq_topic_members
+                (cluster_id, question_id, similarity_score, llm_verified, created_at)
+                VALUES (?, ?, ?, ?, ?) ON CONFLICT(cluster_id, question_id) DO NOTHING""",
+                (cluster_id, question_id, similarity, llm_verified, now),
+            )
+            cluster = db.execute("SELECT * FROM faq_topic_clusters WHERE cluster_id=?", (cluster_id,)).fetchone()
+            db.execute(
+                """INSERT INTO operations_faq_suggestions
+                (suggestion_id, representative_question, normalized_question, question_count,
+                 samples_json, status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(suggestion_id) DO UPDATE SET representative_question=excluded.representative_question,
+                normalized_question=excluded.normalized_question, question_count=excluded.question_count,
+                samples_json=excluded.samples_json, status=excluded.status, updated_at=excluded.updated_at""",
+                (
+                    cluster_id,
+                    cluster["representative_question"],
+                    cluster["normalized_label"],
+                    cluster["question_count"],
+                    _json(json_value(cluster["sample_questions"], [])),
+                    cluster["status"],
+                    cluster["created_at"],
+                    cluster["updated_at"],
+                ),
+            )
+        return cluster_id
+
+    def _suggestion_for_question(self, question_id: str) -> FAQSuggestion | None:
+        with self._connect() as db:
+            row = db.execute(
+                """SELECT c.* FROM faq_topic_clusters c
+                JOIN faq_topic_members m ON m.cluster_id=c.cluster_id
+                WHERE m.question_id=? ORDER BY m.created_at DESC LIMIT 1""",
+                (question_id,),
+            ).fetchone()
+        return self._cluster_suggestion(row) if row else None
+
+    def _suggestion_for_cluster(self, cluster_id: str) -> FAQSuggestion | None:
+        with self._connect() as db:
+            row = db.execute("SELECT * FROM faq_topic_clusters WHERE cluster_id=?", (cluster_id,)).fetchone()
+        return self._cluster_suggestion(row) if row else None
+
+    @staticmethod
+    def _cluster_suggestion(row: Any) -> FAQSuggestion:
+        return FAQSuggestion(
+            suggestion_id=row["cluster_id"],
+            representative_question=row["representative_question"],
+            question_count=int(row["question_count"]),
+            status=row["status"],
+            sample_questions=json_value(row["sample_questions"], []),
+            created_at=timestamp_value(row["created_at"]),
+            updated_at=timestamp_value(row["updated_at"]),
+        )
+
     @staticmethod
     def _suggestion(row: sqlite3.Row) -> FAQSuggestion:
-        return FAQSuggestion(suggestion_id=row["suggestion_id"], representative_question=row["representative_question"], question_count=row["question_count"], status=row["status"], sample_questions=json.loads(row["samples_json"]), created_at=datetime.fromisoformat(row["created_at"]), updated_at=datetime.fromisoformat(row["updated_at"]))
+        return FAQSuggestion(suggestion_id=row["suggestion_id"], representative_question=row["representative_question"], question_count=row["question_count"], status=row["status"], sample_questions=json_value(row["samples_json"], []), created_at=timestamp_value(row["created_at"]), updated_at=timestamp_value(row["updated_at"]))
 
     def list_faq_suggestions(self, status: str = "open") -> list[FAQSuggestion]:
+        if self.is_postgres:
+            clauses = "WHERE status=?" if status else ""
+            parameters: tuple[object, ...] = (status,) if status else ()
+            with self._connect() as db:
+                rows = db.execute(
+                    f"SELECT * FROM faq_topic_clusters {clauses} ORDER BY question_count DESC, updated_at DESC",
+                    parameters,
+                ).fetchall()
+            return [self._cluster_suggestion(row) for row in rows]
         with self._connect() as db:
             rows = db.execute("SELECT * FROM operations_faq_suggestions WHERE (?='' OR status=?) ORDER BY question_count DESC, updated_at DESC", (status, status)).fetchall()
         return [self._suggestion(row) for row in rows]
 
     def set_faq_suggestion_status(self, suggestion_id: str, status: str) -> FAQSuggestion | None:
+        if self.is_postgres:
+            with self._connect() as db:
+                cursor = db.execute(
+                    "UPDATE faq_topic_clusters SET status=?, updated_at=? WHERE cluster_id=?",
+                    (status, _now(), suggestion_id),
+                )
+                if not cursor.rowcount:
+                    return None
+                db.execute(
+                    "UPDATE operations_faq_suggestions SET status=?, updated_at=? WHERE suggestion_id=?",
+                    (status, _now(), suggestion_id),
+                )
+                row = db.execute("SELECT * FROM faq_topic_clusters WHERE cluster_id=?", (suggestion_id,)).fetchone()
+            return self._cluster_suggestion(row)
         with self._connect() as db:
             cursor = db.execute("UPDATE operations_faq_suggestions SET status=?, updated_at=? WHERE suggestion_id=?", (status, _now(), suggestion_id))
             if not cursor.rowcount:
                 return None
             row = db.execute("SELECT * FROM operations_faq_suggestions WHERE suggestion_id=?", (suggestion_id,)).fetchone()
         return self._suggestion(row)
+
+    def link_faq_topic(self, cluster_id: str, faq_id: str) -> None:
+        if not self.is_postgres:
+            return
+        with self._connect() as db:
+            db.execute(
+                "UPDATE faq_topic_clusters SET approved_faq_id=?, status='approved', updated_at=? WHERE cluster_id=?",
+                (faq_id, _now(), cluster_id),
+            )
+            db.execute(
+                "UPDATE operations_faqs SET source_cluster_id=?, updated_at=? WHERE faq_id=?",
+                (cluster_id, _now(), faq_id),
+            )
+
+    def list_faq_top_topics(self, limit: int = 10) -> list[FAQTopic]:
+        if not self.is_postgres:
+            return [
+                FAQTopic(
+                    cluster_id=item.suggestion_id,
+                    topic_label=item.representative_question,
+                    representative_question=item.representative_question,
+                    question_count=item.question_count,
+                    sample_questions=item.sample_questions,
+                    status=item.status,
+                    updated_at=item.updated_at,
+                )
+                for item in self.list_faq_suggestions("open")[:limit]
+            ]
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT * FROM faq_top_10_topics LIMIT ?",
+                (min(limit, self.settings.faq_top_limit),),
+            ).fetchall()
+        return [
+            FAQTopic(
+                cluster_id=row["cluster_id"],
+                topic_label=row["topic_label"],
+                representative_question=row["representative_question"],
+                question_count=int(row["question_count"]),
+                sample_questions=json_value(row["sample_questions"], []),
+                status=row["status"],
+                approved_faq_id=row["approved_faq_id"],
+                updated_at=timestamp_value(row["updated_at"]),
+            )
+            for row in rows
+        ]
 
     def community_health(self, window_hours: int = 24) -> CommunityHealth:
         since = (datetime.now(UTC) - timedelta(hours=window_hours)).isoformat()
@@ -1018,19 +1518,71 @@ class OperationsStore:
             generated_at=datetime.now(UTC),
         )
 
-    def record_import(self, response: KnowledgeImportResponse) -> KnowledgeImportResponse:
+    def record_import(self, response: KnowledgeImportResponse, source_hash: str | None = None, status: str = "completed") -> KnowledgeImportResponse:
         with self._connect() as db:
+            if not self.is_postgres:
+                db.execute(
+                    "INSERT INTO operations_knowledge_imports VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (response.import_id, response.filename, response.format, response.target, response.normalized_count,
+                     response.skipped_count, _json(response.warnings), response.normalized_by, response.created_at.isoformat()),
+                )
+                return response
             db.execute(
-                "INSERT INTO operations_knowledge_imports VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                """INSERT INTO operations_knowledge_imports
+                (import_id, filename, format, target, normalized_count, skipped_count,
+                 warnings_json, normalized_by, source_hash, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(import_id) DO UPDATE SET normalized_count=excluded.normalized_count,
+                skipped_count=excluded.skipped_count, warnings_json=excluded.warnings_json,
+                normalized_by=excluded.normalized_by,
+                source_hash=COALESCE(excluded.source_hash, operations_knowledge_imports.source_hash),
+                status=excluded.status, created_at=excluded.created_at""",
                 (response.import_id, response.filename, response.format, response.target, response.normalized_count,
-                 response.skipped_count, _json(response.warnings), response.normalized_by, response.created_at.isoformat()),
+                 response.skipped_count, _json(response.warnings), response.normalized_by,
+                 source_hash, status, response.created_at.isoformat()),
             )
         return response
+
+    def archive_import(self, import_id: str, filename: str, content: bytes, content_type: str | None = None) -> None:
+        if not self.is_postgres:
+            return
+        digest = hashlib.sha256(content).hexdigest()
+        with self._connect() as db:
+            db.execute(
+                """INSERT INTO knowledge_import_raw
+                (import_id, filename, content_type, source_hash, content, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(import_id) DO UPDATE SET filename=excluded.filename,
+                content_type=excluded.content_type, source_hash=excluded.source_hash, content=excluded.content""",
+                (import_id, filename, content_type, digest, psycopg2.Binary(content), _now()),
+            )
+
+    def record_normalized_item(
+        self,
+        import_id: str,
+        record_index: int,
+        record_type: str,
+        item: dict[str, object],
+        document_id: str | None = None,
+        policy_id: str | None = None,
+    ) -> None:
+        if not self.is_postgres:
+            return
+        with self._connect() as db:
+            db.execute(
+                """INSERT INTO knowledge_normalized_records
+                (import_id, record_index, record_type, document_id, policy_id, canonical_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(import_id, record_index) DO UPDATE SET record_type=excluded.record_type,
+                document_id=excluded.document_id, policy_id=excluded.policy_id,
+                canonical_json=excluded.canonical_json""",
+                (import_id, record_index, record_type, document_id, policy_id, _json(item), _now()),
+            )
 
     def list_imports(self) -> list[KnowledgeImportRecord]:
         with self._connect() as db:
             rows = db.execute("SELECT * FROM operations_knowledge_imports ORDER BY created_at DESC LIMIT 50").fetchall()
-        return [KnowledgeImportRecord(import_id=row["import_id"], filename=row["filename"], format=row["format"], target=row["target"], normalized_count=row["normalized_count"], skipped_count=row["skipped_count"], warnings=json.loads(row["warnings_json"] or "[]"), normalized_by=row["normalized_by"], created_at=datetime.fromisoformat(row["created_at"])) for row in rows]
+        return [KnowledgeImportRecord(import_id=row["import_id"], filename=row["filename"], format=row["format"], target=row["target"], normalized_count=row["normalized_count"], skipped_count=row["skipped_count"], warnings=json_value(row["warnings_json"], []), normalized_by=row["normalized_by"], created_at=timestamp_value(row["created_at"])) for row in rows]
 
     @staticmethod
     def _knowledge_embedding_text(document: KnowledgeDocument) -> str:
@@ -1103,6 +1655,7 @@ class OperationsStore:
                         b.max_score AS similarity_score
                     FROM best_per_doc b
                     JOIN knowledge_documents d ON b.document_id = d.document_id
+                    WHERE d.active=TRUE
                     ORDER BY b.max_score DESC;
                 """
                 cur.execute(query, (vector_str, vector_str, limit))
@@ -1119,7 +1672,7 @@ class OperationsStore:
                     document_id=row["document_id"],
                     title=row["title"],
                     body=row["body"],
-                    tags=row["tags"] if isinstance(row["tags"], list) else json.loads(row["tags"]),
+                    tags=row["tags"] if isinstance(row["tags"], list) else json_value(row["tags"], []),
                     dataset=row["dataset"],
                     active=row["active"],
                     updated_at=row["updated_at"]
@@ -1239,4 +1792,5 @@ class OperationsStore:
 
     @staticmethod
     def _incident(row: sqlite3.Row) -> Incident:
-        return Incident(incident_id=row["incident_id"], platform=row["platform"], community_id=row["community_id"], channel_id=row["channel_id"], thread_key=row["thread_key"], status=row["status"], severity=row["severity"], risk_score=row["risk_score"], title=row["title"], summary=row["summary"], categories=json.loads(row["categories_json"]), message_ids=json.loads(row["message_ids_json"]), message_count=len(json.loads(row["message_ids_json"])), first_seen=datetime.fromisoformat(row["first_seen"]), last_seen=datetime.fromisoformat(row["last_seen"]), assigned_to=row["assigned_to"], created_at=datetime.fromisoformat(row["created_at"]), updated_at=datetime.fromisoformat(row["updated_at"]), source_url=row["source_url"])
+        message_ids = json_value(row["message_ids_json"], [])
+        return Incident(incident_id=row["incident_id"], platform=row["platform"], community_id=row["community_id"], channel_id=row["channel_id"], thread_key=row["thread_key"], status=row["status"], severity=row["severity"], risk_score=row["risk_score"], title=row["title"], summary=row["summary"], categories=json_value(row["categories_json"], []), message_ids=message_ids, message_count=len(message_ids), first_seen=timestamp_value(row["first_seen"]), last_seen=timestamp_value(row["last_seen"]), assigned_to=row["assigned_to"], created_at=timestamp_value(row["created_at"]), updated_at=timestamp_value(row["updated_at"]), source_url=row["source_url"])

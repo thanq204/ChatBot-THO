@@ -52,6 +52,11 @@ export const ops = {
   deleteKnowledge: (id) => del(`/knowledge/${encodeURIComponent(id)}`),
   importKnowledge: (payload) => post("/knowledge/import", payload),
   knowledgeImports: () => get("/knowledge/imports"),
+  faqs: (activeOnly = false) => get(`/faqs?active_only=${activeOnly}`),
+  faqTopTopics: (limit = 10) => get(`/faq-top-topics?limit=${limit}`),
+  saveFaq: (faqId, payload) => put(`/faqs/${encodeURIComponent(faqId)}`, payload),
+  approveFaqTopic: (topicId, payload) =>
+    post(`/faq-suggestions/${encodeURIComponent(topicId)}/approve`, payload),
   seedDemo: () => post("/demo/seed"),
   sendAnnouncement: (payload) => post("/admin/announcements", payload),
 

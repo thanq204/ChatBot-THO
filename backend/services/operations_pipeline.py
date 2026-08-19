@@ -71,12 +71,15 @@ class OperationsPipeline:
             banner=memory_match.banner,
         )
 
+        # Persist the message before incident/audit rows so PostgreSQL foreign
+        # keys can enforce every downstream relationship.
+        self.store.save_message(message, result, None)
         incident_id = None
         if needs_incident:
             incident = self.store.upsert_incident(message, result)
             incident_id = incident.incident_id
             result = result.model_copy(update={"incident_id": incident_id})
-        self.store.save_message(message, result, incident_id)
+            self.store.link_message_incident(message.message_id, incident_id)
         if incident_id and send_to_admin:
             self.store.add_audit(
                 incident_id,

@@ -31,7 +31,7 @@ CHAT-10 hỗ trợ Admin/Moderator quản lý cộng đồng học tập trên D
 | Hỏi đáp | FAQ match, LLM hội thoại chung, RAG có citation, ghi nhận câu chưa có đáp án |
 | Moderation | Ba gate, incident grouping, review queue, audit log, manual action |
 | Nền tảng | Discord listener, Telegram listener/alert, FastAPI, React/Vite admin dashboard |
-| Dữ liệu | SQLite, import knowledge CSV/JSON/TXT, embedding OpenAI tùy chọn, lexical fallback |
+| Dữ liệu | Supabase PostgreSQL + pgvector; `data/` chỉ giữ contract/example, import knowledge CSV/JSON/TXT, embedding OpenAI tùy chọn |
 
 ## Kiến trúc
 
@@ -49,7 +49,8 @@ FastAPI + platform listeners
                          \--> Retrieval --> Reranker --> Relevance --> RAG + citation
         |
         v
-SQLite + Knowledge/FAQ/Policy data
+Supabase PostgreSQL + pgvector
+  (messages, moderation, FAQ, knowledge, embeddings, audit)
 ```
 
 ## Tech Stack
@@ -60,7 +61,7 @@ SQLite + Knowledge/FAQ/Policy data
 | Agent | LangGraph, LangChain |
 | Backend | Python 3.11+, FastAPI, Uvicorn, Pydantic |
 | Frontend | React 18, Vite |
-| Database | SQLite |
+| Database | Supabase PostgreSQL + pgvector |
 | Platform | Discord.py, Telegram Bot API |
 | DevOps | Docker, Docker Compose, GitHub Actions |
 | Test | pytest, Ruff |
@@ -87,12 +88,16 @@ Biến tối thiểu để chạy backend và LLM:
 
 ```dotenv
 OPENAI_API_KEY=your-openai-key
+FAQ_PG_DSN=postgresql://postgres:[PASSWORD]@db.[PROJECT-REF].supabase.co:5432/postgres
 MODERATION_MODE=openai
 MODERATION_PROVIDER=openai
 DISCORD_RAG_LLM_ENABLED=true
 DISCORD_RAG_MODEL=gpt-4o-mini
+# Chỉ dùng khi chạy test cô lập, không dùng làm runtime production.
 DATABASE_URL=sqlite:///./data/community_channel.db
 ```
+
+Khi `FAQ_PG_DSN` được cấu hình, Supabase là source of truth của runtime. `DATABASE_URL` chỉ còn phục vụ unit test SQLite được chỉ định rõ; ứng dụng không tự chuyển sang SQLite khi Supabase lỗi.
 
 Để bật Discord:
 
@@ -208,7 +213,7 @@ Bằng chứng Discord manual sẽ được bổ sung tại [eval/results/report
 backend/                 FastAPI, LangGraph, services và platform bots
 frontend/                React/Vite admin dashboard
 src/ai_models/           Routing, FAQ, reranking, relevance, citation và memory
-data/                    Data contracts, examples và SQLite runtime
+data/                    Data contracts, examples và hướng dẫn chuẩn hóa (không phải runtime DB)
 tests/                   Unit/integration tests
 eval/                    Báo cáo và ảnh evaluation thực tế
 docs/                    Architecture và technical guide
@@ -244,6 +249,7 @@ scripts/                 AI logging hooks và Phoenix submission
 - [Bản đồ nộp bài Gate 2](GATE2_SUBMISSION.md)
 - [Architecture](docs/architecture_diagram.md)
 - [Model pipeline](src/ai_models/README.md)
+- [Supabase data flow](docs/SUPABASE_DATA_FLOW.md)
 - [Data rules](data/RULES.md)
 - [Evaluation report](eval/results/report.md)
 - [Video MVP Gate 2](https://youtu.be/1EdQj81X47M)

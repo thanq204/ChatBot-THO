@@ -10,6 +10,7 @@ const PAGE_TITLES = {
   "/nhat-ky": "Nhật ký kiểm duyệt",
   "/khu-thu-nghiem-ai": "Khu thử nghiệm AI",
   "/quan-ly-mod": "Quản lý Mod",
+  "/quan-ly-faq": "Quản lý FAQ",
   "/thong-bao": "Thông báo",
   "/quan-ly-noi-dung": "Quản lý nội dung",
   "/lenh-bot": "Nội dung lệnh bot",

@@ -26,7 +26,7 @@
 | AI Agent | LangGraph + OpenAI/Gemini |
 | Backend | FastAPI + Python 3.11+ |
 | Frontend | React 18 + Vite + JavaScript |
-| Database | SQLite |
+| Database | Supabase PostgreSQL + pgvector |
 | DevOps | Docker + GitHub Actions |
 
 ## Quick Start
@@ -39,6 +39,7 @@ cd P-232
 # 2. Setup environment
 cp .env.example .env
 # Edit .env with your API keys
+# Add FAQ_PG_DSN for the team's Supabase project
 
 # 3. Install dependencies
 pip install -r requirements.txt
@@ -64,7 +65,7 @@ npm run dev
 │   └── main.py          # FastAPI entry point
 ├── frontend/            # React 18 + Vite admin dashboard
 ├── src/ai_models/       # Model-only routing, reranking, relevance và memory
-├── data/                # Data contracts và SQLite runtime data
+├── data/                # Data contracts, examples và schema hướng dẫn; runtime ở Supabase
 ├── tests/               # pytest test suite
 ├── docs/                # Architecture và technical guide
 ├── eval/                # Evaluation results
@@ -82,6 +83,7 @@ npm run dev
 | POST | /api/v1/chat | Chat với agent mẫu |
 | POST | /api/v1/messages/analyze | Phân tích một message qua moderation pipeline |
 | POST | /api/v1/rag/ask | Hỏi đáp trên Knowledge Hub bằng RAG |
+| GET | /api/v1/faq-top-topics | Top 10 topic FAQ đang được hỏi nhiều (Admin) |
 
 ## Deliverables Checklist
 
@@ -107,6 +109,10 @@ npm run dev
 | Ít nhất 5 manual eval với output thật | Đạt - 5/5 case Discord |
 
 **Tổng: 5/5.**
+
+## Runtime data
+
+Supabase PostgreSQL + pgvector là nguồn dữ liệu duy nhất khi chạy thật. Các bảng chính gồm `operations_messages`, `operations_gate_runs`, `operations_incidents`, `operations_audit`, `operations_moderation_marks`, `operations_faq_questions`, `faq_topic_clusters`, `operations_faqs`, `knowledge_documents`, `knowledge_sections` và các bảng embedding liên quan. Thư mục `data/` chỉ mô tả contract, ví dụ và quy tắc chuẩn hóa; không phải nơi chatbot đọc dữ liệu production.
 
 ## Team
 

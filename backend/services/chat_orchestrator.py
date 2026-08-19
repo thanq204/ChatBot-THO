@@ -116,6 +116,10 @@ class ChatOrchestrator:
             answer = moderation.banner or "Tin nhắn này cần được kiểm tra theo quy định cộng đồng trước khi mình có thể trả lời thêm."
             return ChatOutcome(answer=answer, stage="moderation", model_used=moderation.model_used, moderation=moderation)
 
+        # Every safe member question reaching the bot is captured for semantic
+        # FAQ analytics, regardless of whether FAQ, RAG, or LLM answers it.
+        self.store.record_member_question(message)
+
         faq = self.store.find_faq(message.text)
         if faq:
             return ChatOutcome(answer=faq.answer, stage="faq", model_used="admin-faq", moderation=moderation, faq_id=faq.faq_id)

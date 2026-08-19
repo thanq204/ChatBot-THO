@@ -7,8 +7,8 @@ Package này chỉ chứa logic model, không chứa API route, bot transport, d
 ```text
 Lệnh /help, /rule, ... -> Rule -> dừng
 Tin nhắn nhóm bình thường -> Moderation realtime -> dừng
-Tin nhắn tag @chatbot -> Moderation -> FAQ embedding -> RAG -> rerank -> relevance -> LLM/extractive
-Tin nhắn riêng với bot -> Moderation -> FAQ embedding -> RAG -> rerank -> relevance -> LLM/extractive
+Tin nhắn tag @chatbot -> Moderation -> Supabase FAQ match -> RAG -> rerank -> relevance -> LLM/extractive
+Tin nhắn riêng với bot -> Moderation -> Supabase FAQ match -> RAG -> rerank -> relevance -> LLM/extractive
 ```
 
 FAQ và RAG chỉ tham gia luồng hỏi đáp. Tin nhắn nhóm không tag bot không được gọi FAQ, retrieval hoặc LLM.
@@ -38,7 +38,7 @@ Runtime chatbot hiện dùng `[RAG]` cho knowledge đã chuẩn hóa và không 
 
 ## Moderation memory
 
-Sau khi Admin/Mod quyết định một review, adapter backend tạo `ModerationMark`, embedding nội dung và lưu theo contract tại `data/20_normalized/moderation_memory/README.md`.
+Sau khi Admin/Mod quyết định một review, adapter backend tạo `ModerationMark`, embedding nội dung và lưu runtime vào `operations_moderation_marks` và `operations_moderation_embeddings` trên Supabase. Contract mẫu nằm tại `data/20_normalized/moderation_memory/README.md`.
 
 Với message mới đã bị model moderation đánh dấu, gọi `check_moderation_memory()` trước khi tạo review mới:
 
