@@ -1,6 +1,6 @@
 # 30 Chunks
 
-Chunk là đơn vị truy xuất được tạo chỉ từ knowledge đã chuẩn hóa, FAQ đã publish, policy đang active hoặc moderation mark đã được Admin/Mod xác nhận.
+Chunk là đơn vị truy xuất được tạo chỉ từ knowledge đã chuẩn hóa, FAQ đã publish, policy đang active hoặc moderation mark đã được Admin/Mod xác nhận. Đây là contract; runtime chunk được lưu trong `knowledge_sections` hoặc bảng Supabase tương ứng.
 
 Mỗi chunk phải có `chunk_id`, source ID, chunk index, text, dataset, version và thời gian tạo. Với cùng input và cấu hình, việc chia chunk phải cho kết quả có thể tái lập. Không sửa bản ghi normalized tại đây.
 

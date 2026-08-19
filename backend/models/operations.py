@@ -246,8 +246,20 @@ class FAQSuggestion(BaseModel):
     updated_at: datetime
 
 
+class FAQTopic(BaseModel):
+    cluster_id: str
+    topic_label: str
+    representative_question: str
+    question_count: int
+    sample_questions: list[str] = Field(default_factory=list)
+    status: Literal["open", "approved", "dismissed"] = "open"
+    approved_faq_id: str | None = None
+    updated_at: datetime
+
+
 class FAQSuggestionApproveRequest(BaseModel):
     faq_id: str | None = Field(default=None, max_length=200)
+    question: str | None = Field(default=None, min_length=3, max_length=500)
     answer: str = Field(..., min_length=1, max_length=5000)
     tags: list[str] = Field(default_factory=list, max_length=20)
 

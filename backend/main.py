@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import logging
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException
@@ -15,6 +16,8 @@ from backend.services.discord.bot import DiscordRagBot
 from backend.services.telegram.bot import TelegramRagBot
 from backend.services.auth_service import current_user, get_auth_store
 
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -22,8 +25,14 @@ async def lifespan(app: FastAPI):
     get_auth_store()
     get_review_store()
     operations_pipeline = get_operations_pipeline()
-    operations_pipeline.store.purge_demo_data()
-    operations_pipeline.store.deduplicate_open_incidents()
+    try:
+        operations_pipeline.store.purge_demo_data()
+    except Exception:
+        logger.exception("Demo-data cleanup failed; continuing application startup.")
+    try:
+        operations_pipeline.store.deduplicate_open_incidents()
+    except Exception:
+        logger.exception("Incident deduplication failed; continuing application startup.")
     discord_rag_bot = DiscordRagBot(operations_pipeline.store, settings, pipeline=operations_pipeline)
     telegram_rag_bot = TelegramRagBot(operations_pipeline.store, settings, pipeline=operations_pipeline)
     discord_rag_bot.start()
@@ -54,7 +63,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_router, prefix="/api/v1")
-app.include_router(router, prefix="/api/v1", dependencies=[Depends(current_user)])
+app.include_router(router, prefix="/api/v1")
 app.include_router(operations_router, prefix="/api/v1", dependencies=[Depends(current_user)])
 
 @app.get("/health")

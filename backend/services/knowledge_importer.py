@@ -53,10 +53,25 @@ class KnowledgeImporter:
             raise KnowledgeImportError("Không đọc được file. Hãy kiểm tra encoding hoặc cấu trúc JSON/CSV.") from exc
         if not rows:
             raise KnowledgeImportError("Không tìm thấy bản ghi hoặc nội dung có thể chuẩn hóa.")
+        import_id = f"IMP-{uuid.uuid4().hex[:10].upper()}"
+        created_at = datetime.now(UTC)
+        source_hash = hashlib.sha256(content).hexdigest()
         warnings: list[str] = []
-        archive_error = self._archive_upload(filename, content)
-        if archive_error:
-            warnings.append(archive_error)
+        started = KnowledgeImportResponse(
+            import_id=import_id,
+            filename=filename,
+            format=extension,
+            target=target if target in {"knowledge", "policy"} else "auto",
+            normalized_count=0,
+            created_at=created_at,
+        )
+        self.store.record_import(started, source_hash=source_hash, status="processing")
+        if self.store.is_postgres:
+            self.store.archive_import(import_id, filename, content)
+        else:
+            archive_error = self._archive_upload(filename, content)
+            if archive_error:
+                warnings.append(archive_error)
         normalized_by = "canonical-normalizer"
         if self.semantic_extractor.available and len(rows) <= 50:
             try:
@@ -81,15 +96,17 @@ class KnowledgeImporter:
             kind = target if target in {"knowledge", "policy"} else ("policy" if item["kind"] == "policy" else "knowledge")
             if kind == "policy":
                 policy_id = self._scoped_policy_id(str(item["policy_id"] or ""), filename, index)
+                self.store.record_normalized_item(import_id, index, kind, item, policy_id=policy_id)
                 self.store.upsert_policy(policy_id, PolicyUpsertRequest(name=item["title"], description=item["body"][:1000], category=item["category"], action=item["action"], trigger_terms=item["trigger_terms"], active=item["active"]))
                 policy_ids.append(policy_id)
             else:
                 document_id = self._scoped_document_id(str(item["document_id"] or ""), filename, index)
-                self.store.upsert_knowledge(document_id, KnowledgeDocumentRequest(title=item["title"], body=item["body"], tags=item["tags"], dataset=item["dataset"], active=item["active"]))
+                self.store.record_normalized_item(import_id, index, kind, item, document_id=document_id)
+                self.store.upsert_knowledge(document_id, KnowledgeDocumentRequest(title=item["title"], body=item["body"], tags=item["tags"], dataset=item["dataset"], active=item["active"]), import_id=import_id, source_file=filename)
                 knowledge_ids.append(document_id)
             normalized += 1
-        response = KnowledgeImportResponse(import_id=f"IMP-{uuid.uuid4().hex[:10].upper()}", filename=filename, format=extension, target=target if target in {"knowledge", "policy"} else "auto", normalized_count=normalized, skipped_count=skipped, warnings=warnings[:20], normalized_by=normalized_by, knowledge_ids=knowledge_ids, policy_ids=policy_ids, created_at=datetime.now(UTC))
-        return self.store.record_import(response)
+        response = KnowledgeImportResponse(import_id=import_id, filename=filename, format=extension, target=target if target in {"knowledge", "policy"} else "auto", normalized_count=normalized, skipped_count=skipped, warnings=warnings[:20], normalized_by=normalized_by, knowledge_ids=knowledge_ids, policy_ids=policy_ids, created_at=created_at)
+        return self.store.record_import(response, source_hash=source_hash, status="completed")
 
     @staticmethod
     def _scoped_document_id(raw_id: str, filename: str, index: int) -> str:

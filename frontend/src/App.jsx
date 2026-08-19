@@ -12,6 +12,7 @@ import ModManagementPage from "./pages/ModManagementPage.jsx";
 import NotificationPage from "./pages/NotificationPage.jsx";
 import SettingsPage from "./pages/SettingsPage.jsx";
 import BotCommandsPage from "./pages/BotCommandsPage.jsx";
+import FaqManagementPage from "./pages/FaqManagementPage.jsx";
 
 export default function App() {
   return (
@@ -29,6 +30,7 @@ export default function App() {
           <Route element={<RequireRole role="admin" />}>
             <Route path="/nhat-ky" element={<ModerationLogPage />} />
             <Route path="/quan-ly-mod" element={<ModManagementPage />} />
+            <Route path="/quan-ly-faq" element={<FaqManagementPage />} />
           </Route>
           <Route path="/khu-thu-nghiem-ai" element={<AiSandboxPage />} />
           <Route path="/thong-bao" element={<NotificationPage />} />

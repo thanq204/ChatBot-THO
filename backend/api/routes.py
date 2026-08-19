@@ -68,12 +68,16 @@ async def submit_for_moderation(submission: MemberSubmission) -> ModerationSubmi
 
 
 @router.get("/moderation/review-queue", response_model=list[ReviewCase])
-async def review_queue() -> list[ReviewCase]:
+async def review_queue(_: UserPublic = Depends(require_roles("admin", "mod"))) -> list[ReviewCase]:
     return get_review_store().list_pending()
 
 
 @router.post("/moderation/review-queue/{review_id}/decision", response_model=ReviewCase)
-async def decide_review(review_id: str, decision: AdminDecisionRequest) -> ReviewCase:
+async def decide_review(
+    review_id: str,
+    decision: AdminDecisionRequest,
+    _: UserPublic = Depends(require_roles("admin", "mod")),
+) -> ReviewCase:
     try:
         return get_review_store().decide(review_id, decision)
     except KeyError as exc:

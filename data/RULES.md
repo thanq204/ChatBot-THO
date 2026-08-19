@@ -15,7 +15,7 @@ File này là quy ước bắt buộc cho mọi thành viên và mọi Chat AI l
 9. Liên kết bản ghi bằng ID, không liên kết bằng tên file hoặc tên thư mục.
 10. Không lưu API key, password, token hoặc secret trong thư mục này.
 11. Không commit database, raw upload, embedding, index, lock hoặc log sinh tự động nếu team chưa thống nhất.
-12. `data/app.db` vẫn là database nghiệp vụ chính. PostgreSQL + pgvector (Docker) được dùng riêng cho vector search và embedding index theo spec FAQ/RAG module. Dữ liệu normalized và chunks vẫn phải tồn tại dưới dạng JSONL trong pipeline chuẩn.
+12. Supabase PostgreSQL + pgvector là database nghiệp vụ và vector runtime chính. `data/` chỉ là contract/example; SQLite chỉ được dùng trong test cô lập khi truyền URL rõ ràng. Importer phải giữ raw, normalized, chunk và embedding metadata trong các bảng Supabase tương ứng.
 13. File lỗi phải giữ trong `quarantine/`, không được âm thầm xóa.
 14. Trước khi đổi schema, phải cập nhật README mini tương ứng và nêu rõ ảnh hưởng migration.
 
@@ -23,13 +23,13 @@ File này là quy ước bắt buộc cho mọi thành viên và mọi Chat AI l
 
 ```text
 File upload hoặc sự kiện từ nền tảng
-  -> 00_inbox
-  -> 10_raw
-  -> 20_normalized
-  -> 30_chunks
-  -> 40_embeddings
-  -> 50_indexes
+  -> operations_knowledge_imports + knowledge_import_raw
+  -> knowledge_normalized_records
+  -> knowledge_documents / operations_policies / operations_faqs
+  -> knowledge_sections + các bảng pgvector
   -> Tìm kiếm FAQ hoặc truy xuất RAG
+
+Các thư mục `00_inbox` đến `50_indexes` chỉ mô phỏng cùng contract để Data team kiểm tra format. Không link runtime bằng đường dẫn file local.
 ```
 
 ## Các loại ID ổn định
@@ -133,7 +133,7 @@ Nếu embedding thất bại, ghi lỗi vào `data/quarantine/failed_embeddings`
 ```text
 Chỉ tạo moderation mark sau khi Admin/Mod đã xác nhận quyết định.
 Lưu record chuẩn tại `data/20_normalized/moderation_memory` và chunk tại `data/30_chunks/moderation_memory`.
-Embedding moderation memory phải nằm trong collection riêng, không trộn với FAQ, knowledge hoặc policy.
+Embedding moderation memory phải nằm trong namespace/bảng `operations_moderation_embeddings` riêng, không trộn với FAQ, knowledge hoặc policy.
 Chỉ dùng match semantic để chống gửi review trùng; không tự động áp hình phạt mới từ match cũ.
 Match phải cùng category mặc định và phải giữ `marked_by`, `marked_at`, `reason`, `message_id` để Admin/Mod mở lại.
 Khi match đạt ngưỡng, trả `send_to_admin=false`, `can_expand=true` và banner đã đánh dấu.
@@ -143,7 +143,7 @@ Khi match đạt ngưỡng, trả `send_to_admin=false`, `can_expand=true` và b
 
 ```text
 Bạn được đọc data contract nhưng không được tự tạo format mới.
-Dùng ID ổn định để query `data/app.db` hoặc index đã được duyệt.
+Dùng ID ổn định để query bảng Supabase hoặc index pgvector đã được duyệt.
 Không ghi trực tiếp vào thư mục của feature khác.
 Nếu cần field mới, cập nhật README mini của owner và giải thích migration.
 ```

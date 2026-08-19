@@ -60,6 +60,17 @@ class Settings(BaseSettings):
     moderation_context_message_limit: int = Field(default=12, ge=1, le=30)
     moderation_memory_embedding_enabled: bool = True
     moderation_memory_similarity_threshold: float = Field(default=0.90, ge=0.0, le=1.0)
+    moderation_memory_llm_verify_enabled: bool = True
+    moderation_memory_llm_candidate_threshold: float = Field(default=0.55, ge=0.0, le=1.0)
+    moderation_memory_llm_model: str = "gpt-4o-mini"
+
+    # FAQ analytics: every safe tagged question is embedded and clustered.
+    faq_semantic_clustering_enabled: bool = True
+    faq_cluster_candidate_threshold: float = Field(default=0.55, ge=0.0, le=1.0)
+    faq_cluster_auto_merge_threshold: float = Field(default=0.95, ge=0.0, le=1.0)
+    faq_semantic_match_threshold: float = Field(default=0.82, ge=0.0, le=1.0)
+    faq_clustering_model: str = "gpt-4o-mini"
+    faq_top_limit: int = Field(default=10, ge=1, le=50)
 
     # Database
     database_url: str = "sqlite:///./data/app.db"

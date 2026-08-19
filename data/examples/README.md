@@ -1,6 +1,6 @@
 # Ví dụ định dạng dữ liệu
 
-Thư mục này chứa ví dụ hoàn chỉnh cho luồng `raw -> normalized -> chunks -> embeddings -> index`.
+Thư mục này chứa ví dụ contract cho luồng `raw -> normalized -> chunks -> embeddings -> index`. Khi chạy thật, các lớp này được ghi vào Supabase; file mẫu không phải runtime data.
 
 ## Quy tắc đọc ví dụ
 
@@ -44,13 +44,13 @@ Mỗi file từ `15` đến `21` chỉ chứa đúng một record để minh h�
 
 | Loại dữ liệu | File mẫu | Nơi tiếp nhận | Nơi chuẩn hóa | Bảng runtime |
 |---|---|---|---|---|
-| Tài liệu RAG | `15_manual_knowledge_example.jsonl` | `data/00_inbox/web_uploads/` | `data/20_normalized/knowledge/knowledge.jsonl` | `operations_knowledge` |
-| FAQ đã duyệt | `16_manual_faq_example.jsonl` | `data/00_inbox/member_questions/` hoặc trang Admin | `data/20_normalized/faq/published_faq.jsonl` | `operations_faqs` |
+| Tài liệu RAG | `15_manual_knowledge_example.jsonl` | Upload web/Admin | Importer chuẩn hóa | `operations_knowledge_imports` → `knowledge_documents` |
+| FAQ đã duyệt | `16_manual_faq_example.jsonl` | `operations_faq_questions`/Top 10 hoặc trang Admin | Admin duyệt và ghi FAQ | `operations_faqs` + `operations_faq_embeddings` |
 | Policy moderation | `17_manual_policy_example.jsonl` | Trang Quy tắc AI | `data/20_normalized/policies/policies.jsonl` | `operations_policies` |
-| Case Admin/Mod đã duyệt | `18_manual_moderation_mark_example.jsonl` | Incident đã review | `data/20_normalized/moderation_memory/moderation_marks.jsonl` | `operations_moderation_marks` |
-| Context moderation có nhãn | `19_manual_context_case_example.jsonl` | Phiên review thủ công | `data/20_normalized/messages/moderation_context_cases.jsonl` | Chưa có bảng riêng |
+| Case Admin/Mod đã duyệt | `18_manual_moderation_mark_example.jsonl` | Incident đã review | Admin/Mod xác nhận | `operations_moderation_marks` + `operations_moderation_embeddings` |
+| Context moderation có nhãn | `19_manual_context_case_example.jsonl` | Phiên review thủ công | Gắn vào message/gate contract | `operations_messages` + `operations_gate_runs` |
 | Case eval thủ công | `20_manual_eval_example.jsonl` | Tổng hợp từ QA | `data/90_exports/eval/moderation_eval.jsonl` | Không dùng runtime |
-| Nội dung command | `21_manual_command_content_example.jsonl` | Trang Admin/API | `data/90_exports/command_content.jsonl` | `operations_command_content` |
+| Nội dung command | `21_manual_command_content_example.jsonl` | Trang Admin/API | API chuẩn hóa trực tiếp | `operations_command_content` |
 
 `moderation mark` chỉ được đưa vào runtime sau khi Admin/Mod xác nhận. Case mẫu không phải dữ liệu production và không được dùng để tự động ban, kick hoặc xóa message.
 

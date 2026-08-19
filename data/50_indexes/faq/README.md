@@ -1,5 +1,5 @@
 # Index FAQ
 
-Chứa vector index cho question và answer FAQ đã duyệt. Không thêm suggestion đang mở hoặc câu hỏi raw của member, trừ khi feature đang chạy duplicate detection trên một index riêng.
+Mô tả namespace/vector index cho question và answer FAQ đã duyệt trong pgvector Supabase. Không thêm suggestion đang mở hoặc câu hỏi raw của member vào index trả lời chính thức.
 
-Nếu cần duplicate detection, dùng collection riêng như `p232_faq_suggestions`; collection trả lời chính thức chỉ chứa FAQ có `active=true` và đã được Admin/Mod duyệt.
+Nếu cần gom topic, dùng `faq_question_embeddings` và `faq_topic_clusters` riêng; bảng trả lời chính thức `operations_faqs` chỉ chứa FAQ có `active=true` và đã được Admin/Mod duyệt.

@@ -2,7 +2,7 @@
 
 ## Tổng quan CHAT-10
 
-CHAT-10 nhận dữ liệu từ Discord, Telegram hoặc web/API. FastAPI khởi tạo bot listener và các service dùng chung; SQLite lưu message, incident, FAQ, knowledge, audit và metadata embedding. LLM chỉ được gọi ở các nhánh đã định nghĩa, còn RAG phải qua reranking và relevance gate trước khi trả nguồn.
+CHAT-10 nhận dữ liệu từ Discord, Telegram hoặc web/API. FastAPI khởi tạo bot listener và các service dùng chung; Supabase PostgreSQL + pgvector lưu message, incident, FAQ, knowledge, audit và embedding runtime. LLM chỉ được gọi ở các nhánh đã định nghĩa, còn RAG phải qua reranking và relevance gate trước khi trả nguồn.
 
 ```mermaid
 flowchart LR
@@ -16,8 +16,8 @@ flowchart LR
     API --> ModerationGraph["LangGraph Moderation"]
     Chat --> Ops
     Chat --> Models["src/ai_models"]
-    Ops --> SQLite[("SQLite")]
-    Models --> SQLite
+    Ops --> Supabase[("Supabase PostgreSQL + pgvector")]
+    Models --> Supabase
     Models --> OpenAI["OpenAI LLM / Embeddings"]
     ModerationGraph --> OpenAI
     ModerationGraph --> Gemini["Gemini optional"]
@@ -56,8 +56,8 @@ FAQ và RAG chỉ chạy khi bot được tag trong group hoặc nhận tin nh�
 ```mermaid
 flowchart TD
     Message["Message + recent context"] --> Gate1["Gate 1: regex / spam / threat fast filter"]
-    Gate1 --> Gate2["Gate 2: Vietnamese policy classifier"]
-    Gate2 --> Gate3["Gate 3: conversation context review"]
+    Gate1 --> Gate2["Gate 2: context review"]
+    Gate2 --> Gate3["Gate 3: reviewed-case retrieval"]
     Gate3 --> Decision{"allow / warn / hide / hold"}
     Decision -->|"allow"| Persist["Lưu message + decision"]
     Decision -->|"risk"| Incident["Tạo hoặc cập nhật incident"]
@@ -76,7 +76,7 @@ Endpoint `/api/v1/moderation/submit` có thêm workflow LangGraph chuyên biệt
 | Chat orchestrator | `backend/services/chat_orchestrator.py` | Rule, moderation, FAQ, LLM/RAG routing và response labels |
 | Operations pipeline | `backend/services/operations_pipeline.py` | Ba gate moderation và incident orchestration |
 | Model pipeline | `src/ai_models/` | Routing contracts, FAQ, reranking, relevance, citation, moderation memory |
-| Operations store | `backend/services/operations_store.py` | SQLite persistence, retrieval, FAQ suggestions, analytics và audit |
+| Operations store | `backend/services/operations_store.py` | Supabase persistence, retrieval, FAQ suggestions, analytics và audit |
 | Platform adapters | `backend/services/discord/`, `backend/services/telegram/` | Nhận/gửi message, mention/private-chat detection và alerts |
 | Admin dashboard | `frontend/` | Review, incident, knowledge, FAQ và analytics UI |
 | Eval | `eval/`, `tests/` | Manual reproducible cases, unit và integration tests |
@@ -85,16 +85,18 @@ Endpoint `/api/v1/moderation/submit` có thêm workflow LangGraph chuyên biệt
 
 | Dữ liệu | Nơi lưu | Ghi chú |
 |---|---|---|
-| Runtime records | SQLite theo `DATABASE_URL` | Message, incident, policy, FAQ, knowledge, audit |
-| File upload gốc | `data/knowledge_uploads/` | Archive của tài liệu import |
-| Data contracts | `data/00_inbox` đến `data/50_indexes` | Quy định raw, normalized, chunks, embeddings và indexes |
+| Runtime records | Supabase PostgreSQL | Message, incident, policy, FAQ, knowledge, audit và gate runs |
+| Raw upload | `knowledge_import_raw` trong Supabase | Lưu bytes, checksum và metadata của file import |
+| Normalized records | `knowledge_normalized_records` trong Supabase | Bản chuẩn hóa liên kết với `import_id` |
+| Chunks và embeddings | `knowledge_sections`, `knowledge_section_embeddings` và các bảng embedding Supabase | pgvector dùng cho retrieval; không đọc file raw trực tiếp |
+| Data contracts/examples | `data/00_inbox` đến `data/50_indexes` | Hợp đồng, ví dụ và hướng dẫn cho Data team; không phải runtime store |
 | AI usage logs | `.ai-log/session.jsonl` | Hook ghi local và submit Phoenix |
 | Secret | `.env` | Không commit; `.env.example` chỉ chứa placeholder |
 
 ## Retrieval và model
 
-- `KNOWLEDGE_EMBEDDING_ENABLED=true`: dùng OpenAI embedding và cache vector trong SQLite.
-- Embedding không bật hoặc provider lỗi: dùng deterministic lexical/concept retrieval.
+- `KNOWLEDGE_EMBEDDING_ENABLED=true`: dùng OpenAI embedding và lưu vector trong các bảng pgvector của Supabase.
+- Embedding không bật hoặc provider lỗi: dùng deterministic lexical/concept retrieval trên dữ liệu Supabase; không tự chuyển runtime sang SQLite.
 - Candidate được rerank và qua relevance gate trong `src/ai_models`.
 - Runtime knowledge trả nội dung canonical trực tiếp, không dùng LLM viết dài thêm.
 - General conversation dùng `gpt-4o-mini`; nếu API lỗi, response được ghi nhãn `[Hệ thống]`, không giả là LLM.

@@ -1,4 +1,4 @@
-"""SQLite repository for the local Admin Review Queue and audit trail."""
+"""Supabase repository for the Admin Review Queue and audit trail."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from backend.config import Settings, get_settings
+from backend.services.database import json_value, postgres_connection
 from backend.models.moderation import (
     AdminDecisionRequest,
     AuditLogEntry,
@@ -26,18 +27,29 @@ class ReviewStore:
     def __init__(self, database_url: str | None = None, settings: Settings | None = None) -> None:
         settings = settings or get_settings()
         url = database_url or settings.database_url
-        if not url.startswith("sqlite:///"):
-            raise ValueError("The local MVP supports SQLite only.")
-        self.path = Path(url.removeprefix("sqlite:///"))
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.is_postgres = database_url is None and bool(settings.faq_pg_dsn)
+        self.settings = settings
+        self.path: Path | None = None
+        if not self.is_postgres:
+            if not url.startswith("sqlite:///"):
+                raise RuntimeError("FAQ_PG_DSN is required outside explicit SQLite tests.")
+            self.path = Path(url.removeprefix("sqlite:///"))
+            self.path.parent.mkdir(parents=True, exist_ok=True)
         self._create_tables()
 
-    def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path)
+    def _connect(self):
+        if self.is_postgres:
+            return postgres_connection(self.settings.faq_pg_dsn)
+        connection = sqlite3.connect(self.path)  # type: ignore[arg-type]
         connection.row_factory = sqlite3.Row
         return connection
 
     def _create_tables(self) -> None:
+        if self.is_postgres:
+            migration = Path(__file__).parents[2] / "supabase" / "migrations" / "20260819_runtime_data_model.sql"
+            with self._connect() as db:
+                db.executescript(migration.read_text(encoding="utf-8"))
+            return
         with self._connect() as db:
             db.executescript(
                 """
@@ -85,7 +97,7 @@ class ReviewStore:
                     review_id, submission.user_id, submission.text, submission.channel,
                     json.dumps(submission.recent_context, ensure_ascii=False), result.action, result.category,
                     result.risk_level, result.reason, result.confidence, json.dumps(result.evidence, ensure_ascii=False),
-                    result.model_used, int(result.fallback_used), created_at,
+                    result.model_used, bool(result.fallback_used), created_at,
                 ),
             )
         return self.get_review(review_id)
@@ -108,7 +120,7 @@ class ReviewStore:
         entries = []
         for row in rows:
             data = dict(row)
-            data["evidence"] = json.loads(data.get("evidence") or "[]")
+            data["evidence"] = json_value(data.get("evidence"), [])
             data["fallback_used"] = bool(data.get("fallback_used", 0))
             entries.append(AuditLogEntry.model_validate(data))
         return entries
@@ -145,7 +157,7 @@ class ReviewStore:
     @staticmethod
     def _review_from_row(row: sqlite3.Row) -> ReviewCase:
         data = dict(row)
-        data["recent_context"] = json.loads(data["recent_context"])
-        data["evidence"] = json.loads(data.get("evidence") or "[]")
+        data["recent_context"] = json_value(data["recent_context"], [])
+        data["evidence"] = json_value(data.get("evidence"), [])
         data["fallback_used"] = bool(data.get("fallback_used", 0))
         return ReviewCase.model_validate(data)

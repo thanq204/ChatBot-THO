@@ -26,6 +26,7 @@ from backend.models.operations import (
     CommunityHealth,
     DiscordChannelOption,
     FAQSuggestion,
+    FAQTopic,
     FAQSuggestionApproveRequest,
     FAQUpsertRequest,
     FAQWriteResponse,
@@ -210,43 +211,79 @@ async def delete_knowledge(document_id: str) -> dict[str, object]:
 
 
 @router.get("/faqs", response_model=list[FAQ])
-async def faqs(active_only: bool = False) -> list[FAQ]:
+async def faqs(
+    active_only: bool = False,
+    _: UserPublic = Depends(require_roles("admin")),
+) -> list[FAQ]:
     return get_operations_store().list_faqs(active_only)
 
 
 @router.put("/faqs/{faq_id}", response_model=FAQWriteResponse)
-async def upsert_faq(faq_id: str, payload: FAQUpsertRequest) -> FAQWriteResponse:
+async def upsert_faq(
+    faq_id: str,
+    payload: FAQUpsertRequest,
+    _: UserPublic = Depends(require_roles("admin")),
+) -> FAQWriteResponse:
     faq, similar = get_operations_store().upsert_faq(faq_id, payload)
     warning = "Câu hỏi này có độ tương tự cao với FAQ hiện có; hãy kiểm tra trước khi xuất bản." if similar else None
     return FAQWriteResponse(faq=faq, duplicate_warning=warning, similar_faqs=similar)
 
 
 @router.delete("/faqs/{faq_id}")
-async def delete_faq(faq_id: str) -> dict[str, object]:
+async def delete_faq(
+    faq_id: str,
+    _: UserPublic = Depends(require_roles("admin")),
+) -> dict[str, object]:
     if not get_operations_store().delete_faq(faq_id):
         raise HTTPException(status_code=404, detail="FAQ not found.")
     return {"deleted": True, "faq_id": faq_id}
 
 
 @router.get("/faq-suggestions", response_model=list[FAQSuggestion])
-async def faq_suggestions(status_filter: str = Query(default="open", alias="status")) -> list[FAQSuggestion]:
+async def faq_suggestions(
+    status_filter: str = Query(default="open", alias="status"),
+    _: UserPublic = Depends(require_roles("admin")),
+) -> list[FAQSuggestion]:
     return get_operations_store().list_faq_suggestions(status_filter)
 
 
+@router.get("/faq-top-topics", response_model=list[FAQTopic])
+async def faq_top_topics(
+    limit: int = Query(default=10, ge=1, le=50),
+    _: UserPublic = Depends(require_roles("admin")),
+) -> list[FAQTopic]:
+    return get_operations_store().list_faq_top_topics(limit)
+
+
 @router.post("/faq-suggestions/{suggestion_id}/approve", response_model=FAQWriteResponse)
-async def approve_faq_suggestion(suggestion_id: str, payload: FAQSuggestionApproveRequest) -> FAQWriteResponse:
+async def approve_faq_suggestion(
+    suggestion_id: str,
+    payload: FAQSuggestionApproveRequest,
+    _: UserPublic = Depends(require_roles("admin")),
+) -> FAQWriteResponse:
     suggestion = next((item for item in get_operations_store().list_faq_suggestions("") if item.suggestion_id == suggestion_id), None)
     if not suggestion:
         raise HTTPException(status_code=404, detail="FAQ suggestion not found.")
     faq_id = payload.faq_id or f"FAQ-{suggestion_id.removeprefix('FAQS-')}"
-    faq, similar = get_operations_store().upsert_faq(faq_id, FAQUpsertRequest(question=suggestion.representative_question, answer=payload.answer, tags=payload.tags))
+    faq, similar = get_operations_store().upsert_faq(
+        faq_id,
+        FAQUpsertRequest(
+            question=payload.question or suggestion.representative_question,
+            answer=payload.answer,
+            tags=payload.tags,
+        ),
+    )
     get_operations_store().set_faq_suggestion_status(suggestion_id, "approved")
+    get_operations_store().link_faq_topic(suggestion_id, faq_id)
     warning = "FAQ được tạo nhưng có nội dung tương tự FAQ khác; hãy rà soát." if similar else None
     return FAQWriteResponse(faq=faq, duplicate_warning=warning, similar_faqs=similar)
 
 
 @router.post("/faq-suggestions/{suggestion_id}/dismiss", response_model=FAQSuggestion)
-async def dismiss_faq_suggestion(suggestion_id: str) -> FAQSuggestion:
+async def dismiss_faq_suggestion(
+    suggestion_id: str,
+    _: UserPublic = Depends(require_roles("admin")),
+) -> FAQSuggestion:
     result = get_operations_store().set_faq_suggestion_status(suggestion_id, "dismissed")
     if not result:
         raise HTTPException(status_code=404, detail="FAQ suggestion not found.")

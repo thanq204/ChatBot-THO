@@ -15,13 +15,13 @@ graph TB
     API --> Agent[LangGraph Agent]
     Agent --> LLM[LLM Service<br/>GPT-4o / Gemini]
     Agent --> Tools[Agent Tools]
-    Tools --> DB[(Database)]
-    Agent --> VS[Vector Store<br/>ChromaDB]
+    Tools --> DB[(Supabase PostgreSQL)]
+    Agent --> VS[pgvector trên Supabase]
 ```
 
 ## Components
 
-### 1. Frontend (React/Next.js)
+### 1. Frontend (React/Vite)
 
 - **Purpose:** User interface cho sản phẩm
 - **Key Features:** Responsive, dark mode, realtime
@@ -42,24 +42,23 @@ graph TB
 
 ### 4. Database
 
-- **Type:** PostgreSQL (production) / SQLite (dev)
-- **ORM:** SQLAlchemy (nếu cần)
-- **Migrations:** Alembic (nếu cần)
+- **Type:** Supabase PostgreSQL
+- **Access:** DB-API adapter trong `backend/services/database.py`
+- **Migrations:** SQL trong `supabase/migrations/`
 
 ### 5. Vector Store
 
-- **Type:** ChromaDB (local) / Pinecone (cloud)
+- **Type:** pgvector trong Supabase
 - **Embeddings:** OpenAI embeddings
 - **Purpose:** RAG / similarity search
 
 ## Data Flow
 
-1. User gửi request từ Frontend
-2. API route nhận và validate input (Pydantic)
-3. Agent xử lý qua LangGraph pipeline
-4. LLM generate response
-5. Tools thực thi actions (nếu cần)
-6. Response trả về Frontend qua API
+1. Discord/Telegram hoặc Frontend gửi input tới FastAPI.
+2. Input được chuẩn hóa và ghi vào Supabase nếu là message/runtime event.
+3. Tin nhắn realtime không tag bot đi qua Gate 1 fast filter, Gate 2 context review và Gate 3 reviewed-case retrieval.
+4. Tin nhắn tag bot/chat riêng đi Rule → Moderation → FAQ → LLM hoặc RAG; RAG đi retrieval → reranking → relevance gate → citation.
+5. Admin/Mod quyết định mọi hành động moderation; decision, feedback và embedding được lưu vào Supabase.
 
 ## Design Decisions
 
@@ -67,5 +66,5 @@ graph TB
 |----------|--------|--------|
 | Framework | FastAPI | Async, auto-docs, type-safe |
 | Agent | LangGraph | Flexible state machine |
-| Database | SQLite→PostgreSQL | Dev dễ, prod mạnh |
+| Database | Supabase PostgreSQL + pgvector | Một source of truth cho runtime và vector search |
 | Frontend | Next.js | Full-stack ready |
