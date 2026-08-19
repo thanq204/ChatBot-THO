@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Outlet, useLocation } from "react-router-dom";
+import { Link, Outlet, useLocation } from "react-router-dom";
 import Sidebar from "../components/Sidebar.jsx";
 import Topbar from "../components/Topbar.jsx";
 
@@ -37,8 +37,8 @@ export default function AppLayout() {
         <Topbar
           breadcrumb={
             <span>
-              Trang chủ <span className="breadcrumb__sep">/</span>{" "}
-              <strong>{pageTitle}</strong>
+              <Link to="/" className="breadcrumb__home">Trang chủ</Link>{" "}
+              <span className="breadcrumb__sep">/</span> <strong>{pageTitle}</strong>
             </span>
           }
           onMenuClick={() => setSidebarOpen((open) => !open)}
