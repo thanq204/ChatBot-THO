@@ -1,6 +1,7 @@
 /* ==========================================================================
    Sakura design tokens for the public surfaces (landing, login, portal).
-   The dashboard keeps its own coral system in styles.css.
+   The dashboard mirrors this rose/magenta accent via its own --accent-*
+   tokens in styles.css (separate variable system, same brand color).
 
    Contrast discipline, because pink fails white text easily:
      - #F472B6 is 2.65:1 on white, so it is decorative ONLY. Never behind text.

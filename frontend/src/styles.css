@@ -1,16 +1,17 @@
 /* ==========================================================================
    ModAI dashboard - design tokens
-   Native CSS (no Tailwind/Bootstrap in this project). One accent (coral to
-   rose), one radius scale, one font stack, light/dark locked per Section 8.
+   Native CSS (no Tailwind/Bootstrap in this project). One accent (rose to
+   magenta, matching the sakura brand used on landing/login), one radius
+   scale, one font stack, light/dark locked per Section 8.
    ========================================================================== */
 
 :root {
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, "SF Mono", "Cascadia Code", "Roboto Mono", monospace;
 
-  --accent-start: #ff7a45;
-  --accent-end: #ec4d92;
-  --accent-solid: #f2554c;
+  --accent-start: #db2777;
+  --accent-end: #a21caf;
+  --accent-solid: #db2777;
   --accent-gradient: linear-gradient(135deg, var(--accent-start), var(--accent-end));
 
   --sev-low: #16a34a;
@@ -321,6 +322,15 @@ a {
 .breadcrumb strong {
   color: var(--text-primary);
   font-weight: 600;
+}
+
+.breadcrumb__home {
+  text-decoration: none;
+}
+
+.breadcrumb__home:hover {
+  color: var(--accent-solid);
+  text-decoration: underline;
 }
 
 .breadcrumb__sep {
