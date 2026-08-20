@@ -10,7 +10,15 @@ from backend.config import Settings, get_settings
 from backend.models.operations import ChatOutcome, CommonMessage
 from backend.services.operations_pipeline import OperationsPipeline
 from backend.services.operations_store import OperationsStore
-from src.ai_models import CommunityAIPipeline, RetrievalCandidate
+from backend.services.question_intent import classify_question_intent, normalize_intent_text
+from src.ai_models import (
+    CommunityAIPipeline,
+    RelevanceConfig,
+    RelevanceGate,
+    RerankConfig,
+    RetrievalCandidate,
+    SemanticReranker,
+)
 
 logger = logging.getLogger(__name__)
 VIETNAM_TIMEZONE = timezone(timedelta(hours=7))
@@ -25,6 +33,13 @@ class ChatOrchestrator:
         r"\b(hôm nay|hom nay)\s+(là|la)\s+(thứ|thu)\s+(mấy|may)\b",
         r"\b(bây giờ|bay gio|hiện tại|hien tai)\s+(là|la)?\s*(mấy giờ|may gio)\b",
         r"\b(bạn|ban)\s+(có thể|co the|làm được|lam duoc)\s+(gì|gi)\b",
+        r"\b(llm|model|mô hình|mo hinh|chatbot|chat-10)\b",
+        r"\b(bạn|ban)\s+(khỏe|khoe|thích|thich|cảm thấy|cam thay)\b",
+    )
+    _GROUNDED_SOURCE_PATTERNS = (
+        r"\b(su kien|lich hoc|lich thi|deadline|han nop|phong hoc|kenh|server|"
+        r"nhom|cong dong|noi quy|quy dinh|admin|mod)\b",
+        r"\b(du an nay|du an cua nhom|tai lieu noi bo|tai lieu cua nhom)\b",
     )
     STUDY_GROUP_RULES = """Nội quy nhóm học tập:
 1. Trao đổi đúng chủ đề học tập và nêu rõ môn/chương khi cần.
@@ -38,7 +53,31 @@ class ChatOrchestrator:
         self.settings = settings or get_settings()
         self.store = store
         self.pipeline = pipeline or OperationsPipeline(store=store, settings=self.settings)
-        self.ai_pipeline = CommunityAIPipeline()
+        relevance_baseline = RelevanceConfig()
+        self.ai_pipeline = CommunityAIPipeline(
+            reranker=SemanticReranker(
+                RerankConfig(
+                    vector_weight=self.settings.rag_rerank_vector_weight,
+                    lexical_weight=self.settings.rag_rerank_lexical_weight,
+                    phrase_weight=self.settings.rag_rerank_phrase_weight,
+                    top_k=min(4, self.settings.rag_candidate_limit),
+                )
+            ),
+            relevance_gate=RelevanceGate(
+                RelevanceConfig(
+                    # Older .env files used 0.30. Never let stale local config
+                    # weaken the reviewed relevance floor.
+                    minimum_rerank_score=max(
+                        relevance_baseline.minimum_rerank_score,
+                        self.settings.rag_relevance_threshold,
+                    ),
+                    minimum_vector_score=self.settings.rag_vector_min_score,
+                    minimum_semantic_only_score=self.settings.rag_semantic_only_min_score,
+                    minimum_query_coverage=self.settings.rag_query_coverage_min_score,
+                    minimum_margin=self.settings.rag_minimum_margin,
+                )
+            ),
+        )
 
     def _help_text(self, platform: str) -> str:
         """Built fresh every time so a command Admin just added/removed from
@@ -106,19 +145,37 @@ class ChatOrchestrator:
             return "Tin nhắn quá dài. Hãy rút gọn câu hỏi dưới 8.000 ký tự để mình hỗ trợ chính xác hơn."
         return None
 
-    def reply(self, message: CommonMessage, context: list[CommonMessage] | None = None) -> ChatOutcome:
+    def reply(
+        self,
+        message: CommonMessage,
+        context: list[CommonMessage] | None = None,
+        *,
+        track_question: bool = True,
+    ) -> ChatOutcome:
         rule_answer = self._rule_answer(message)
         if rule_answer:
             return ChatOutcome(answer=rule_answer, stage="rule", model_used="deterministic-rules")
 
-        moderation = self.pipeline.analyze(message, context or [])
+        moderation = self.pipeline.analyze(message, context)
         if moderation.decision != "allow":
-            answer = moderation.banner or "Tin nhắn này cần được kiểm tra theo quy định cộng đồng trước khi mình có thể trả lời thêm."
+            if moderation.banner:
+                answer = f"[Moderation]\n{moderation.banner}"
+            else:
+                answer = (
+                    "[Moderation]\n"
+                    "Mình không thể trả lời nội dung này vì có dấu hiệu vi phạm quy định cộng đồng. "
+                    f"Lý do: {moderation.explanation}"
+                )
             return ChatOutcome(answer=answer, stage="moderation", model_used=moderation.model_used, moderation=moderation)
 
-        # Every safe member question reaching the bot is captured for semantic
-        # FAQ analytics, regardless of whether FAQ, RAG, or LLM answers it.
-        self.store.record_member_question(message)
+        intent = classify_question_intent(message.text)
+        if not intent.is_question:
+            return self._llm_outcome(message.text, moderation)
+
+        # Volatile questions, bot metadata and social questions stay in the
+        # LLM lane and never pollute reusable FAQ analytics.
+        if not intent.faq_eligible:
+            return self._llm_outcome(message.text, moderation)
 
         faq = self.store.find_faq(message.text)
         if faq:
@@ -135,8 +192,10 @@ class ChatOrchestrator:
             limit=self.settings.rag_candidate_limit,
         )
         if not candidates:
-            self.store.record_unanswered_question(message)
-            return ChatOutcome(answer="Mình chưa tìm thấy tài liệu phù hợp. Câu hỏi của bạn đã được ghi nhận để Admin cân nhắc bổ sung FAQ hoặc tài liệu.", stage="rag", model_used="vector-search", moderation=moderation, relevance_passed=False)
+            outcome = self._fallback_after_rag(message.text, moderation)
+            if track_question:
+                self.store.record_member_question(message, outcome_stage=outcome.stage)
+            return outcome
 
         source_by_id = {str(document.document_id): document for _score, document in candidates}
         model_candidates = [
@@ -160,24 +219,61 @@ class ChatOrchestrator:
             llm_enabled=False,
         )
         if not rag_decision.relevance or not rag_decision.relevance.passed:
-            self.store.record_unanswered_question(message)
             sources = []
             if rag_decision.ranked_candidates:
                 best_id = rag_decision.ranked_candidates[0].candidate.source_id
                 if best_id in source_by_id:
                     sources.append(source_by_id[best_id])
+            if not self._requires_grounded_source(message.text) and self.settings.discord_rag_llm_enabled:
+                if track_question:
+                    self.store.record_member_question(message, outcome_stage="llm")
+                return self._llm_outcome(message.text, moderation)
+            if track_question:
+                self.store.record_member_question(message, outcome_stage="rag")
             return ChatOutcome(answer="[Không đủ nguồn]\nMình chưa tìm thấy nguồn tài liệu đủ liên quan để trả lời chính xác. Câu hỏi của bạn đã được ghi nhận để Admin cân nhắc bổ sung FAQ hoặc tài liệu.", stage="rag", model_used="relevance-gate", moderation=moderation, sources=sources, retrieval_score=rag_decision.relevance.score, relevance_passed=False)
 
         best = rag_decision.ranked_candidates[0]
         source = source_by_id[best.candidate.source_id]
         answer, model = source.body.strip(), "rag-retrieval"
         rendered = self.ai_pipeline.compose_answer(answer, rag_decision, model_used=model)
+        if track_question:
+            self.store.record_member_question(message, outcome_stage="rag")
         return ChatOutcome(answer=rendered.display_text, stage="rag", model_used=model, moderation=moderation, sources=[source], retrieval_score=rag_decision.relevance.score, relevance_passed=True)
 
     @classmethod
     def _is_general_llm_question(cls, question: str) -> bool:
         normalized = question.strip().casefold()
         return any(re.search(pattern, normalized) for pattern in cls._GENERAL_LLM_PATTERNS)
+
+    @classmethod
+    def _requires_grounded_source(cls, question: str) -> bool:
+        normalized = normalize_intent_text(question)
+        return any(re.search(pattern, normalized) for pattern in cls._GROUNDED_SOURCE_PATTERNS)
+
+    def _llm_outcome(self, text: str, moderation) -> ChatOutcome:
+        answer, model = self._general_llm_answer(text)
+        label = "LLM" if model != "system-fallback" else "Hệ thống"
+        return ChatOutcome(
+            answer=f"[{label}]\n{answer}",
+            stage="llm",
+            model_used=model,
+            moderation=moderation,
+        )
+
+    def _fallback_after_rag(self, question: str, moderation) -> ChatOutcome:
+        if not self._requires_grounded_source(question) and self.settings.discord_rag_llm_enabled:
+            return self._llm_outcome(question, moderation)
+        return ChatOutcome(
+            answer=(
+                "[Không đủ nguồn]\n"
+                "Mình chưa tìm thấy tài liệu phù hợp. Câu hỏi của bạn đã được ghi nhận "
+                "để Admin cân nhắc bổ sung FAQ hoặc tài liệu."
+            ),
+            stage="rag",
+            model_used="relevance-gate",
+            moderation=moderation,
+            relevance_passed=False,
+        )
 
     def _general_llm_answer(self, question: str) -> tuple[str, str]:
         now = datetime.now(VIETNAM_TIMEZONE)
@@ -197,8 +293,10 @@ class ChatOrchestrator:
                             "system",
                             "Bạn là CHAT-10, trợ lý cộng đồng học tập. "
                             f"Thời gian hệ thống tại Việt Nam là {now:%H:%M, ngày %d/%m/%Y}. "
-                            "Chỉ trả lời ngắn gọn câu hỏi hội thoại về danh tính, khả năng của bot hoặc ngày giờ. "
-                            "Không được bịa thông tin cá nhân, dữ liệu dự án hoặc sự kiện hiện tại khác.",
+                            "Trả lời tự nhiên, ngắn gọn bằng tiếng Việt. Với trò chuyện thông thường, hãy phản hồi thân thiện. "
+                            "Với kiến thức chung, trả lời trực tiếp nếu chắc chắn. Không được bịa thông tin cá nhân, "
+                            "dữ liệu nội bộ, dữ liệu dự án, lịch học hoặc sự kiện hiện tại; nếu câu hỏi cần các dữ liệu đó, "
+                            "hãy nói rõ cần nguồn đã được Admin cung cấp.",
                         ),
                         ("human", question),
                     ]
@@ -220,7 +318,12 @@ class ChatOrchestrator:
             return f"Hiện tại là {now:%H:%M} ngày {now:%d/%m/%Y} theo giờ Việt Nam."
         if "ngày" in normalized or "ngay" in normalized or "hôm nay" in normalized or "hom nay" in normalized:
             return f"Hôm nay là ngày {now:%d/%m/%Y} theo giờ Việt Nam."
-        return "Mình có thể hỗ trợ nội quy, FAQ và tra cứu tài liệu học tập khi bạn tag CHAT-10."
+        folded = normalize_intent_text(question)
+        if re.search(r"\b(gioi|hay|tuyet|cam on|thanks?)\b", folded):
+            return "Cảm ơn bạn nha! Mình sẽ cố gắng hỗ trợ mọi người thật tốt."
+        if re.search(r"\b(llm|model|mo hinh)\b", folded):
+            return "Mình dùng LLM cho hội thoại và câu hỏi kiến thức chung khi FAQ hoặc nguồn RAG không có câu trả lời phù hợp."
+        return "Mình đã nhận được tin nhắn, nhưng LLM hiện chưa khả dụng để tạo câu trả lời đầy đủ."
 
     @staticmethod
     def _rerank_candidates(question: str, candidates: list[tuple[float, object]]) -> list[tuple[float, object, float]]:

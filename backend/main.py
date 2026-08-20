@@ -15,6 +15,7 @@ from backend.config import get_settings
 from backend.services.discord.bot import DiscordRagBot
 from backend.services.telegram.bot import TelegramRagBot
 from backend.services.auth_service import current_user, get_auth_store
+from backend.services.database import close_postgres_pools
 
 logger = logging.getLogger(__name__)
 
@@ -25,14 +26,16 @@ async def lifespan(app: FastAPI):
     get_auth_store()
     get_review_store()
     operations_pipeline = get_operations_pipeline()
-    try:
-        operations_pipeline.store.purge_demo_data()
-    except Exception:
-        logger.exception("Demo-data cleanup failed; continuing application startup.")
-    try:
-        operations_pipeline.store.deduplicate_open_incidents()
-    except Exception:
-        logger.exception("Incident deduplication failed; continuing application startup.")
+    if settings.operations_startup_maintenance_enabled:
+        if settings.operations_demo_mode:
+            try:
+                operations_pipeline.store.purge_demo_data()
+            except Exception:
+                logger.exception("Demo-data cleanup failed; continuing application startup.")
+        try:
+            operations_pipeline.store.deduplicate_open_incidents()
+        except Exception:
+            logger.exception("Incident deduplication failed; continuing application startup.")
     discord_rag_bot = DiscordRagBot(operations_pipeline.store, settings, pipeline=operations_pipeline)
     telegram_rag_bot = TelegramRagBot(operations_pipeline.store, settings, pipeline=operations_pipeline)
     discord_rag_bot.start()
@@ -43,6 +46,7 @@ async def lifespan(app: FastAPI):
     finally:
         discord_rag_bot.stop()
         telegram_rag_bot.stop()
+        close_postgres_pools()
         print("Shutting down...")
 
 

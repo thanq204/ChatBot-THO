@@ -39,7 +39,11 @@ class ReviewStore:
 
     def _connect(self):
         if self.is_postgres:
-            return postgres_connection(self.settings.faq_pg_dsn)
+            return postgres_connection(
+                self.settings.faq_pg_dsn,
+                self.settings.postgres_pool_min_size,
+                self.settings.postgres_pool_max_size,
+            )
         connection = sqlite3.connect(self.path)  # type: ignore[arg-type]
         connection.row_factory = sqlite3.Row
         return connection

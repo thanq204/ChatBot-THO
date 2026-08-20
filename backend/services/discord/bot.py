@@ -9,6 +9,7 @@ import os
 import re
 import tempfile
 import threading
+import time
 import unicodedata
 from datetime import UTC, datetime
 from pathlib import Path
@@ -19,6 +20,7 @@ from backend.models.operations import RESERVED_BOT_COMMANDS, CommonMessage
 from backend.services.chat_orchestrator import ChatOrchestrator
 from backend.services.operations_pipeline import OperationsPipeline
 from backend.services.operations_store import OperationsStore
+from backend.services.question_intent import is_reusable_faq_question
 from backend.services.telegram.alerts import TelegramAlertSender
 from backend.services.platform_moderation import PlatformModerationService
 
@@ -47,8 +49,8 @@ class DiscordRagBot:
     permission. It only writes a visible RAG reply when a user mentions the
     bot; mention is not required for realtime moderation or Telegram alerts.
     The configured default channel remains the target for historical sync only.
-    It uses the same SQLite knowledge hub as the web RAG endpoint, so document
-    imports and policy edits are immediately available to Discord replies.
+    It uses the same Supabase knowledge hub as the web RAG endpoint, so
+    document imports and policy edits are available to Discord replies.
     """
 
     def __init__(
@@ -71,6 +73,7 @@ class DiscordRagBot:
         self._dynamic_command_names: set[str] = set()
         self._lock_handle: Any = None
         self._seen_message_ids: set[str] = set()
+        self._background_tasks: set[Any] = set()
 
     def _acquire_process_lock(self) -> bool:
         token_hash = hashlib.sha256(self.settings.discord_bot_token.encode("utf-8")).hexdigest()[:16]
@@ -318,6 +321,10 @@ class DiscordRagBot:
 
             common_message = self._common_message(message)
             mentioned = client.user in message.mentions or bool(re.search(fr"<@!?{client.user.id}>", message.content or ""))
+            started = time.perf_counter()
+            outcome = None
+            result = None
+            tracking_message = None
             try:
                 if mentioned:
                     question = re.sub(r"<@!?\d+>", "", message.content or "").strip()
@@ -325,38 +332,73 @@ class DiscordRagBot:
                     # only the actual command/question through every chat
                     # level so e.g. "@bot /help" reaches the Rule router.
                     chat_message = common_message.model_copy(update={"text": question or " "})
-                    outcome = await asyncio.to_thread(self.chat.reply, chat_message, [])
+                    outcome = await asyncio.to_thread(
+                        self.chat.reply,
+                        chat_message,
+                        None,
+                        track_question=False,
+                    )
                     result = outcome.moderation
+                    if outcome.stage in {"rag", "llm"} and is_reusable_faq_question(chat_message.text):
+                        tracking_message = chat_message
                 else:
-                    result = await asyncio.to_thread(self.pipeline.analyze, common_message, [])
-                    outcome = None
-                if result and await asyncio.to_thread(self.telegram_alerts.send_alert, common_message, result):
-                    logger.info("Telegram alert sent for Discord message %s", message_id)
-                    print(f"[Telegram] Alert sent for Discord message {message_id}", flush=True)
-                if result:
-                    warning = await asyncio.to_thread(self.platform_moderation.send_automatic_warning, common_message, result, self.store)
-                    if warning:
-                        logger.info("Automatic Discord warning DM for %s completed=%s", message_id, warning.completed)
+                    result = await asyncio.to_thread(self.pipeline.analyze, common_message)
             except Exception:
                 logger.exception("Realtime moderation failed for Discord message %s", message_id)
                 print(f"[Discord] Moderation failed for message {message_id}; listener continues.", flush=True)
-
-            if not mentioned:
                 return
-            logger.info("Discord mention received in channel %s", message.channel.id)
-            print(f"[Discord] Mention received in channel {message.channel.id}", flush=True)
-            answer = outcome.answer if outcome else self._answer(question)
-            try:
-                await message.reply(
-                    answer[: self.settings.discord_reply_max_chars],
-                    mention_author=False,
-                    allowed_mentions=discord.AllowedMentions.none(),
-                )
-                logger.info("Discord RAG reply sent in channel %s", message.channel.id)
-                print(f"[Discord] RAG reply sent in channel {message.channel.id}", flush=True)
-            except Exception:
-                logger.exception("Discord RAG reply failed.")
-                print("[Discord] RAG reply failed; check channel permissions.", flush=True)
+
+            if mentioned:
+                logger.info("Discord mention received in channel %s", message.channel.id)
+                print(f"[Discord] Mention received in channel {message.channel.id}", flush=True)
+                try:
+                    await message.reply(
+                        outcome.answer[: self.settings.discord_reply_max_chars],
+                        mention_author=False,
+                        allowed_mentions=discord.AllowedMentions.none(),
+                    )
+                    latency_ms = int((time.perf_counter() - started) * 1000)
+                    logger.info(
+                        "Discord reply sent in channel %s with stage=%s latency_ms=%s",
+                        message.channel.id,
+                        outcome.stage,
+                        latency_ms,
+                    )
+                    print(
+                        f"[Discord] Reply sent in channel {message.channel.id} "
+                        f"stage={outcome.stage} latency_ms={latency_ms}",
+                        flush=True,
+                    )
+                except Exception:
+                    logger.exception("Discord reply failed.")
+                    print("[Discord] Reply failed; check channel permissions.", flush=True)
+
+            async def post_process() -> None:
+                try:
+                    if result and await asyncio.to_thread(self.telegram_alerts.send_alert, common_message, result):
+                        logger.info("Telegram alert sent for Discord message %s", message_id)
+                        print(f"[Telegram] Alert sent for Discord message {message_id}", flush=True)
+                    if result:
+                        warning = await asyncio.to_thread(
+                            self.platform_moderation.send_automatic_warning,
+                            common_message,
+                            result,
+                            self.store,
+                        )
+                        if warning:
+                            logger.info("Automatic Discord warning DM for %s completed=%s", message_id, warning.completed)
+                    if tracking_message is not None:
+                        await asyncio.to_thread(
+                            self.store.record_member_question,
+                            tracking_message,
+                            outcome_stage=outcome.stage,
+                        )
+                except Exception:
+                    logger.exception("Discord post-processing failed for message %s", message_id)
+
+            task = asyncio.create_task(post_process())
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
 
         try:
             self._loop.run_until_complete(client.start(self.settings.discord_bot_token))

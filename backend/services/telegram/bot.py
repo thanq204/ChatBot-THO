@@ -15,6 +15,7 @@ from backend.models.operations import CommonMessage
 from backend.services.chat_orchestrator import ChatOrchestrator
 from backend.services.operations_pipeline import OperationsPipeline
 from backend.services.operations_store import OperationsStore
+from backend.services.question_intent import is_reusable_faq_question
 from backend.services.platform_moderation import PlatformModerationService
 from backend.services.telegram.alerts import TelegramAlertSender
 
@@ -139,19 +140,27 @@ class TelegramRagBot:
             return
         common = self._common_message(message)
         question = self._question_to_answer(message, text)
+        tracking_message = None
         if question is not None:
             common = common.model_copy(update={"text": question})
-            outcome = self.chat.reply(common, [])
+            outcome = self.chat.reply(common, track_question=False)
             self._send_message(str(message["chat"]["id"]), outcome.answer)
             result = outcome.moderation
+            if outcome.stage in {"rag", "llm"} and is_reusable_faq_question(common.text):
+                tracking_message = common
         else:
-            result = self.pipeline.analyze(common, [])
+            result = self.pipeline.analyze(common)
         if result:
             if self.telegram_alerts.send_alert(common, result):
                 logger.info("Admin Telegram alert sent for Telegram message %s", common.message_id)
             warning = self.platform_moderation.send_automatic_warning(common, result, self.store)
             if warning:
                 logger.info("Automatic Telegram warning DM for %s completed=%s", common.message_id, warning.completed)
+        if tracking_message is not None:
+            try:
+                self.store.record_member_question(tracking_message, outcome_stage=outcome.stage)
+            except Exception:
+                logger.exception("Telegram FAQ analytics failed for message %s", common.message_id)
 
     def _question_to_answer(self, message: dict[str, Any], text: str) -> str | None:
         chat_type = str((message.get("chat") or {}).get("type", ""))
