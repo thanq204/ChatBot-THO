@@ -40,6 +40,8 @@ export const ops = {
   },
   incident: (id) => get(`/incidents/${encodeURIComponent(id)}`),
   updateIncident: (id, payload) => patch(`/incidents/${encodeURIComponent(id)}`, payload),
+  decideIncidentReputation: (id, payload) =>
+    post(`/incidents/${encodeURIComponent(id)}/reputation-decision`, payload),
   audit: (incidentId) => get(`/audit${incidentId ? `?incident_id=${encodeURIComponent(incidentId)}` : ""}`),
   analyze: (message) => post("/messages/analyze", { message }),
   ingest: (payload) => post("/messages/ingest", payload),
@@ -76,6 +78,9 @@ export const ops = {
   memberReports: () => get("/admin/member-reports"),
   updateMemberReport: (reportId, payload) =>
     patch(`/admin/member-reports/${encodeURIComponent(reportId)}`, payload),
+  reputation: () => get("/admin/reputation"),
+  reputationRules: () => get("/admin/reputation-rules"),
+  flaggedLinks: () => get("/admin/flagged-links"),
 };
 
 /** Sentence-level moderation surface used by the member and review-queue pages. */

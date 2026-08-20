@@ -2728,7 +2728,280 @@ button.list-row:hover {
   font-size: 11.5px;
 }
 
+/* Reputation ledger and community link blocklist. */
+.reputation-hero {
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 90% 5%, color-mix(in srgb, var(--accent-solid) 14%, transparent), transparent 32%),
+    var(--surface);
+}
+
+.reputation-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.reputation-stat {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 10px;
+  min-height: 94px;
+  padding: 15px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface-alt) 78%, transparent);
+}
+
+.reputation-stat svg {
+  grid-row: 1 / span 2;
+  color: var(--accent-solid);
+}
+
+.reputation-stat span {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.reputation-stat strong {
+  font-size: 25px;
+  line-height: 1;
+}
+
+.reputation-stat--positive svg { color: var(--sev-low); }
+.reputation-stat--warning svg { color: var(--sev-medium); }
+.reputation-stat--danger svg { color: var(--sev-critical); }
+
+.reputation-toolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.reputation-toolbar .search-field {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: min(440px, 100%);
+  min-height: 42px;
+  padding: 0 13px;
+  border: 1px solid color-mix(in srgb, var(--accent-solid) 24%, var(--border));
+  border-radius: 12px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent-solid) 5%, var(--surface-alt)), var(--surface-alt));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 4%, transparent);
+  color: var(--text-muted);
+  transition: border-color 0.18s var(--ease-out), box-shadow 0.18s var(--ease-out), background 0.18s var(--ease-out);
+}
+
+.reputation-toolbar .search-field:focus-within {
+  border-color: color-mix(in srgb, var(--accent-solid) 72%, var(--border));
+  background: color-mix(in srgb, var(--accent-solid) 7%, var(--surface-alt));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-solid) 14%, transparent);
+}
+
+.reputation-toolbar .search-field svg {
+  flex: 0 0 auto;
+  color: color-mix(in srgb, var(--accent-solid) 72%, var(--text-muted));
+}
+
+.reputation-toolbar .search-field input {
+  width: 100%;
+  min-width: 0;
+  padding: 10px 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text-primary);
+}
+
+.case-reputation-review {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--sev-medium) 28%, var(--border));
+  border-radius: var(--radius-control);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--sev-medium) 7%, var(--surface-alt)), var(--surface-alt));
+}
+
+.case-reputation-review > div:first-child {
+  display: grid;
+  gap: 5px;
+}
+
+.case-reputation-review__actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.reputation-toolbar .search-field input::placeholder {
+  color: color-mix(in srgb, var(--text-muted) 82%, transparent);
+}
+
+.reputation-toolbar select {
+  min-height: 42px;
+  padding: 0 36px 0 13px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background-color: var(--surface-alt);
+  color: var(--text-secondary);
+  outline: none;
+}
+
+.reputation-toolbar select:focus-visible {
+  border-color: var(--accent-solid);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-solid) 12%, transparent);
+}
+
+.reputation-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+}
+
+.reputation-table {
+  width: 100%;
+  min-width: 880px;
+  border-collapse: collapse;
+}
+
+.reputation-table th,
+.reputation-table td {
+  padding: 13px 14px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.reputation-table th {
+  color: var(--text-muted);
+  background: var(--surface-alt);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.reputation-table tr:last-child td { border-bottom: 0; }
+.reputation-table tbody tr:hover { background: color-mix(in srgb, var(--accent-solid) 4%, transparent); }
+
+.reputation-table td:nth-child(2) {
+  display: grid;
+  gap: 2px;
+}
+
+.reputation-table td small,
+.flagged-link-row small {
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.reputation-rank {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  color: white;
+  background: var(--accent-gradient);
+  font-weight: 800;
+}
+
+.score-positive { color: var(--sev-low); font-weight: 750; }
+.score-negative { color: var(--sev-critical); font-weight: 750; }
+
+.reputation-rule-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.reputation-rule {
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--sev-low) 22%, var(--border));
+  border-radius: 15px;
+  background:
+    radial-gradient(circle at 100% 0, color-mix(in srgb, var(--sev-low) 8%, transparent), transparent 36%),
+    var(--surface-alt);
+}
+
+.reputation-rule--penalty {
+  border-color: color-mix(in srgb, var(--sev-critical) 24%, var(--border));
+  background:
+    radial-gradient(circle at 100% 0, color-mix(in srgb, var(--sev-critical) 8%, transparent), transparent 36%),
+    var(--surface-alt);
+}
+
+.reputation-rule__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.reputation-rule__head > span { font-size: 20px; }
+.reputation-rule p { color: var(--text-secondary); font-size: 12.5px; line-height: 1.55; }
+.reputation-rule ul { margin: 12px 0 0; padding-left: 18px; color: var(--text-muted); font-size: 12px; line-height: 1.6; }
+
+.flagged-link-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.flagged-link-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 13px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: var(--surface-alt);
+}
+
+.flagged-link-row > svg { color: var(--sev-critical); }
+.flagged-link-row > div { display: grid; gap: 3px; min-width: 0; }
+.flagged-link-row > div:last-child { justify-items: end; }
+.flagged-link-row code { overflow: hidden; color: var(--text-secondary); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+
 @media (max-width: 720px) {
+  .case-reputation-review {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .case-reputation-review__actions {
+    flex-wrap: wrap;
+  }
+
+  .reputation-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .reputation-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .reputation-rule-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .flagged-link-row {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .flagged-link-row > div:last-child {
+    grid-column: 2;
+    justify-items: start;
+  }
+
   .faq-stats {
     grid-template-columns: 1fr;
   }

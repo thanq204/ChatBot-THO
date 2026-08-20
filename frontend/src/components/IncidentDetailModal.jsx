@@ -34,6 +34,7 @@ export default function IncidentDetailModal({ incidentId, headline, onClose, onU
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [savingStatus, setSavingStatus] = useState(false);
+  const [savingReputation, setSavingReputation] = useState(false);
 
   const loadDetail = useCallback((id) => {
     setDetail(null);
@@ -65,6 +66,23 @@ export default function IncidentDetailModal({ incidentId, headline, onClose, onU
     }
   }
 
+  async function decideReputation(outcome) {
+    if (!incidentId) return;
+    setSavingReputation(true);
+    try {
+      await ops.decideIncidentReputation(incidentId, {
+        outcome,
+        note: outcome === "confirmed" ? "Admin/Mod xác nhận case vi phạm." : "Admin/Mod xác nhận case không vi phạm.",
+      });
+      setDetail(await ops.incident(incidentId));
+      onUpdated?.();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSavingReputation(false);
+    }
+  }
+
   return (
     <Modal open={Boolean(incidentId)} title={headline || "Chi tiết case"} onClose={onClose}>
       {loading && (
@@ -79,6 +97,8 @@ export default function IncidentDetailModal({ incidentId, headline, onClose, onU
           detail={detail}
           onStatusChange={updateStatus}
           savingStatus={savingStatus}
+          onReputationDecision={decideReputation}
+          savingReputation={savingReputation}
           onActed={() => {
             // A completed action writes an audit entry, so refresh the case.
             loadDetail(incidentId);
@@ -99,10 +119,12 @@ function Fact({ label, value }) {
   );
 }
 
-function DetailBody({ detail, onStatusChange, savingStatus, onActed }) {
+function DetailBody({ detail, onStatusChange, savingStatus, onReputationDecision, savingReputation, onActed }) {
   const { incident, messages = [], audit = [] } = detail;
   const root = messages.find((item) => !item.parent_message_id) || messages[0];
   const category = primaryCategory(incident);
+  const reputationDecision = audit.find((item) => item.event_type === "incident_reputation_decision");
+  const reputationPayload = reputationDecision?.payload || {};
 
   return (
     <div className="stack">
@@ -159,6 +181,43 @@ function DetailBody({ detail, onStatusChange, savingStatus, onActed }) {
           Phụ trách
           <span className="muted small">{incident.assigned_to || "Chưa gán"}</span>
         </label>
+      </div>
+
+      <div className="case-reputation-review">
+        <div>
+          <span className="section-heading">Duyệt vi phạm và điểm uy tín</span>
+          {reputationDecision ? (
+            <p className="muted small">
+              {reputationPayload.outcome === "confirmed"
+                ? `Đã xác nhận vi phạm: ${reputationPayload.affected_members || 0} thành viên, ${reputationPayload.points_applied || 0} điểm.`
+                : "Đã xác nhận case không vi phạm, không trừ điểm thành viên."}
+            </p>
+          ) : (
+            <p className="muted small">
+              AI chỉ cung cấp bằng chứng. Chỉ thao tác tại đây mới được phép trừ điểm, tối đa một lần cho mỗi User ID trong case.
+            </p>
+          )}
+        </div>
+        {!reputationDecision && (
+          <div className="case-reputation-review__actions">
+            <button
+              type="button"
+              className="btn btn--primary"
+              disabled={savingReputation || messages.length === 0}
+              onClick={() => onReputationDecision("confirmed")}
+            >
+              Xác nhận vi phạm
+            </button>
+            <button
+              type="button"
+              className="btn btn--ghost"
+              disabled={savingReputation}
+              onClick={() => onReputationDecision("dismissed")}
+            >
+              Không vi phạm
+            </button>
+          </div>
+        )}
       </div>
 
       <Disclosure label="Xử lý thủ công người vi phạm" count={messages.length ? undefined : 0}>

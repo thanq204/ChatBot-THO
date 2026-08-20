@@ -21,6 +21,7 @@ from backend.services.chat_orchestrator import ChatOrchestrator
 from backend.services.operations_pipeline import OperationsPipeline
 from backend.services.operations_store import OperationsStore
 from backend.services.question_intent import is_reusable_faq_question
+from backend.services.link_safety import extract_urls
 from backend.services.telegram.alerts import TelegramAlertSender
 from backend.services.platform_moderation import PlatformModerationService
 
@@ -225,6 +226,8 @@ class DiscordRagBot:
         intents.guild_messages = True
         intents.dm_messages = True
         intents.message_content = True
+        intents.reactions = True
+        intents.guild_reactions = True
         client = discord.Client(intents=intents)
         tree = discord.app_commands.CommandTree(client)
         self._client = client
@@ -297,6 +300,12 @@ class DiscordRagBot:
 
         @client.event
         async def on_ready() -> None:
+            await asyncio.to_thread(
+                self.store.mark_platform_bot,
+                "discord",
+                str(client.user.id),
+                getattr(client.user, "display_name", None) or getattr(client.user, "name", None),
+            )
             try:
                 synced = await self._sync_tree()
                 print(f"[Discord] Slash commands synced: {', '.join(command.name for command in synced)}", flush=True)
@@ -310,9 +319,9 @@ class DiscordRagBot:
 
         @client.event
         async def on_message(message: Any) -> None:
-            print(f"[Discord] Message event in channel {getattr(message.channel, 'id', 'unknown')}", flush=True)
-            if message.author.bot or client.user is None:
+            if not self._is_member_message(message, client.user):
                 return
+            print(f"[Discord] Member message in channel {getattr(message.channel, 'id', 'unknown')}", flush=True)
             message_id = str(getattr(message, "id", ""))
             if message_id and message_id in self._seen_message_ids:
                 return
@@ -320,6 +329,56 @@ class DiscordRagBot:
                 self._seen_message_ids.add(message_id)
 
             common_message = self._common_message(message)
+            blocked_links = await asyncio.to_thread(self.store.find_blocked_links, common_message.text)
+            if blocked_links:
+                deleted = False
+                try:
+                    await message.delete(reason="Known community-blocked link")
+                    deleted = True
+                except Exception:
+                    logger.warning(
+                        "Discord could not delete blocked-link message %s; check Manage Messages permission.",
+                        message_id,
+                        exc_info=True,
+                    )
+
+                async def process_blocked_link() -> None:
+                    result = None
+                    try:
+                        result = await asyncio.to_thread(self.pipeline.analyze, common_message)
+                        await asyncio.to_thread(
+                            self.store.add_audit,
+                            result.incident_id,
+                            common_message.message_id,
+                            "known_blocked_link_seen",
+                            "system",
+                            {
+                                "canonical_url": blocked_links[0].canonical_url,
+                                "author_id": common_message.author_id,
+                                "deleted": deleted,
+                            },
+                        )
+                    except Exception:
+                        logger.exception("Blocked-link persistence failed for Discord message %s", message_id)
+                    await asyncio.to_thread(
+                        self.telegram_alerts.send_blocked_link_alert,
+                        common_message,
+                        blocked_links[0].canonical_url,
+                        deleted=deleted,
+                    )
+                    if result:
+                        await asyncio.to_thread(
+                            self.platform_moderation.send_automatic_warning,
+                            common_message,
+                            result,
+                            self.store,
+                        )
+
+                task = asyncio.create_task(process_blocked_link())
+                self._background_tasks.add(task)
+                task.add_done_callback(self._background_tasks.discard)
+                return
+
             mentioned = client.user in message.mentions or bool(re.search(fr"<@!?{client.user.id}>", message.content or ""))
             started = time.perf_counter()
             outcome = None
@@ -400,6 +459,42 @@ class DiscordRagBot:
             self._background_tasks.add(task)
             task.add_done_callback(self._background_tasks.discard)
 
+        @client.event
+        async def on_raw_reaction_add(payload: Any) -> None:
+            emoji = str(getattr(payload, "emoji", ""))
+            if emoji not in {"✅", "❌"} or getattr(payload, "guild_id", None) is None:
+                return
+            try:
+                channel = client.get_channel(payload.channel_id) or await client.fetch_channel(payload.channel_id)
+                message = await channel.fetch_message(payload.message_id)
+                if not self._is_member_message(message, client.user):
+                    return
+                target_reaction = next((item for item in message.reactions if str(item.emoji) == emoji), None)
+                if target_reaction is None:
+                    return
+                reactor_ids: set[int] = set()
+                async for user in target_reaction.users(limit=None):
+                    if not getattr(user, "bot", False) and user.id != message.author.id:
+                        reactor_ids.add(user.id)
+                reaction_count = len(reactor_ids)
+                common_message = self._common_message(message)
+                if emoji == "✅" and reaction_count >= self.settings.reputation_helpful_reaction_threshold:
+                    await asyncio.to_thread(self.store.award_helpful_reputation, common_message, reaction_count)
+                elif emoji == "❌" and reaction_count >= self.settings.reputation_block_link_reaction_threshold:
+                    urls = extract_urls(common_message.text)
+                    if urls:
+                        await asyncio.to_thread(
+                            self.store.flag_links_from_reactions,
+                            common_message,
+                            urls,
+                            reaction_count,
+                        )
+            except Exception:
+                logger.exception(
+                    "Discord reaction reputation processing failed for message %s",
+                    getattr(payload, "message_id", "unknown"),
+                )
+
         try:
             self._loop.run_until_complete(client.start(self.settings.discord_bot_token))
         except Exception:
@@ -436,8 +531,29 @@ class DiscordRagBot:
             text=(getattr(message, "content", "") or "").strip() or "[attachment]",
             timestamp=created_at,
             source_url=source_url,
-            raw={"guild_name": getattr(guild, "name", None), "channel_name": getattr(channel, "name", None)},
+            raw={
+                "guild_name": getattr(guild, "name", None),
+                "channel_name": getattr(channel, "name", None),
+                "author_is_bot": bool(getattr(author, "bot", False)),
+                "webhook_id": str(getattr(message, "webhook_id", "") or "") or None,
+                "application_id": str(getattr(message, "application_id", "") or "") or None,
+            },
         )
+
+    @staticmethod
+    def _is_member_message(message: Any, client_user: Any) -> bool:
+        """Accept human member inputs only; reject bot/webhook/application/system output."""
+        author = getattr(message, "author", None)
+        if author is None or client_user is None or getattr(author, "bot", False):
+            return False
+        if str(getattr(author, "id", "")) == str(getattr(client_user, "id", "")):
+            return False
+        if getattr(message, "webhook_id", None) is not None or getattr(message, "application_id", None) is not None:
+            return False
+        is_system = getattr(message, "is_system", None)
+        if callable(is_system) and is_system():
+            return False
+        return True
 
     def _answer(self, question: str) -> str:
         if not question:

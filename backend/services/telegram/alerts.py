@@ -48,7 +48,34 @@ class TelegramAlertSender:
             )
             return False
 
-        text = self._format_alert(message, result)
+        return self._send_text(message.message_id, self._format_alert(message, result))
+
+    def send_blocked_link_alert(
+        self,
+        message: CommonMessage,
+        canonical_url: str,
+        *,
+        deleted: bool,
+    ) -> bool:
+        """Always alert on a known blocked link, independent of duplicate-case suppression."""
+        if not self.configured:
+            return False
+        content = " ".join(message.text.split())
+        if len(content) > 1800:
+            content = content[:1797] + "..."
+        lines = [
+            "🚨 LINK ĐÃ BỊ CỘNG ĐỒNG CHẶN XUẤT HIỆN LẠI",
+            f"Nền tảng: {message.platform.upper()} · Kênh: {message.channel_id}",
+            f"User ID: {message.author_id}",
+            f"Nội dung đầy đủ: {content}",
+            f"Link chuẩn hóa: {canonical_url}",
+            f"Xóa khỏi Discord: {'thành công' if deleted else 'không thành công - cần Admin xử lý'}",
+        ]
+        if message.source_url:
+            lines.append(f"Mở message: {message.source_url}")
+        return self._send_text(message.message_id, "\n".join(lines)[:3900])
+
+    def _send_text(self, message_id: str, text: str) -> bool:
         endpoint = f"https://api.telegram.org/bot{self.settings.telegram_bot_token}/sendMessage"
         try:
             response = requests.post(
@@ -64,13 +91,13 @@ class TelegramAlertSender:
             payload = response.json()
             if not payload.get("ok"):
                 raise RuntimeError(payload.get("description", "Telegram API returned ok=false"))
-            logger.info("Telegram moderation alert sent for message %s", message.message_id)
+            logger.info("Telegram moderation alert sent for message %s", message_id)
             return True
         except requests.RequestException as exc:
             # Do not log the endpoint: it contains the bot token.
             logger.error(
                 "Telegram moderation alert failed for message %s (%s)",
-                message.message_id,
+                message_id,
                 type(exc).__name__,
             )
             return False
@@ -78,7 +105,7 @@ class TelegramAlertSender:
             # The moderation pipeline must continue even if Telegram is down.
             logger.error(
                 "Telegram moderation alert failed for message %s (%s)",
-                message.message_id,
+                message_id,
                 type(exc).__name__,
             )
             return False

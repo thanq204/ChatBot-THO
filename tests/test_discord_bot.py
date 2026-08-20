@@ -43,3 +43,43 @@ def test_empty_discord_mention_returns_input_prompt() -> None:
 
     assert outcome.stage == "rule"
     assert "nhập câu hỏi" in outcome.answer
+
+
+def test_realtime_listener_accepts_human_member_only() -> None:
+    client_user = SimpleNamespace(id=99)
+    human = SimpleNamespace(
+        author=SimpleNamespace(id=4, bot=False),
+        webhook_id=None,
+        application_id=None,
+        is_system=lambda: False,
+    )
+    bot_output = SimpleNamespace(
+        author=SimpleNamespace(id=99, bot=True),
+        webhook_id=None,
+        application_id=None,
+        is_system=lambda: False,
+    )
+    webhook = SimpleNamespace(
+        author=SimpleNamespace(id=5, bot=False),
+        webhook_id=123,
+        application_id=None,
+        is_system=lambda: False,
+    )
+    application = SimpleNamespace(
+        author=SimpleNamespace(id=6, bot=False),
+        webhook_id=None,
+        application_id=456,
+        is_system=lambda: False,
+    )
+    system = SimpleNamespace(
+        author=SimpleNamespace(id=7, bot=False),
+        webhook_id=None,
+        application_id=None,
+        is_system=lambda: True,
+    )
+
+    assert DiscordRagBot._is_member_message(human, client_user) is True
+    assert DiscordRagBot._is_member_message(bot_output, client_user) is False
+    assert DiscordRagBot._is_member_message(webhook, client_user) is False
+    assert DiscordRagBot._is_member_message(application, client_user) is False
+    assert DiscordRagBot._is_member_message(system, client_user) is False
