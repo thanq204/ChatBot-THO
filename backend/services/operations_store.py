@@ -25,6 +25,7 @@ from typing import Any
 from backend.config import Settings, get_settings
 from backend.services.database import json_value, postgres_connection, timestamp_value
 from backend.services.question_intent import is_reusable_faq_question
+from backend.services.link_safety import canonicalize_url, extract_urls, url_hash
 from backend.models.operations import (
     FAQ,
     CommandContent,
@@ -41,10 +42,13 @@ from backend.models.operations import (
     KnowledgeImportRecord,
     KnowledgeImportResponse,
     MemberReport,
+    MemberReputation,
     MessageDecision,
     OperationsSummary,
     Policy,
     PolicyUpsertRequest,
+    FlaggedLink,
+    ReputationRule,
     TimelineBucket,
 )
 
@@ -96,6 +100,156 @@ _KNOWLEDGE_CONCEPTS = (
 )
 
 
+# New engagement rules remain inactive until the team approves them. The
+# existing helpful-reaction rule and human-reviewed penalties are active.
+_REPUTATION_RULES = (
+    {
+        "rule_id": "REP-DAILY-ACTIVE",
+        "name": "Điểm danh có tương tác",
+        "description": "Có ít nhất một tin nhắn an toàn và có ý nghĩa trong ngày, không tính bot hoặc tin nhắn lặp.",
+        "points": 1,
+        "trigger_mode": "automatic",
+        "daily_limit": 1,
+        "weekly_limit": 5,
+        "requirements": ["Tin nhắn không bị moderation giữ lại", "Ít nhất 8 ký tự có nghĩa", "Không trùng nội dung trong ngày"],
+        "approval_status": "draft",
+        "active": False,
+    },
+    {
+        "rule_id": "REP-STREAK-7D",
+        "name": "Chuỗi hoạt động 7 ngày",
+        "description": "Hoạt động an toàn và có ý nghĩa trong 7 ngày liên tiếp.",
+        "points": 5,
+        "trigger_mode": "automatic",
+        "daily_limit": None,
+        "weekly_limit": 1,
+        "requirements": ["Đủ 7 ngày liên tiếp", "Mỗi ngày có ít nhất một tương tác hợp lệ"],
+        "approval_status": "draft",
+        "active": False,
+    },
+    {
+        "rule_id": "REP-HELPFUL-ANSWER",
+        "name": "Câu trả lời hữu ích",
+        "description": "Một câu trả lời nhận phản hồi ✅ từ ít nhất 3 thành viên thật khác nhau.",
+        "points": 5,
+        "trigger_mode": "community_signal",
+        "daily_limit": 2,
+        "weekly_limit": 8,
+        "requirements": ["3 người thả ✅ khác nhau", "Không tính chính tác giả", "Không tính bot"],
+        "approval_status": "approved",
+        "active": True,
+    },
+    {
+        "rule_id": "REP-VALID-REPORT",
+        "name": "Báo cáo hữu ích",
+        "description": "Báo cáo vi phạm có đủ bằng chứng và được Admin/Mod xác nhận hợp lệ.",
+        "points": 3,
+        "trigger_mode": "admin_review",
+        "daily_limit": 1,
+        "weekly_limit": 3,
+        "requirements": ["Admin/Mod xác nhận báo cáo đúng", "Không thưởng báo cáo trùng"],
+        "approval_status": "draft",
+        "active": False,
+    },
+    {
+        "rule_id": "REP-APPROVED-RESOURCE",
+        "name": "Chia sẻ tài liệu tốt",
+        "description": "Tài liệu học tập hoặc hướng dẫn được Admin/Mod duyệt là hữu ích và an toàn.",
+        "points": 4,
+        "trigger_mode": "admin_review",
+        "daily_limit": 1,
+        "weekly_limit": 2,
+        "requirements": ["Nguồn truy cập được", "Không trùng tài liệu đã có", "Admin/Mod duyệt"],
+        "approval_status": "draft",
+        "active": False,
+    },
+    {
+        "rule_id": "REP-EVENT-PARTICIPANT",
+        "name": "Tham gia sự kiện hoặc game night",
+        "description": "Tham dự sự kiện, workshop hoặc buổi chơi game cộng đồng đã được lên lịch.",
+        "points": 2,
+        "trigger_mode": "event_confirmation",
+        "daily_limit": 1,
+        "weekly_limit": 3,
+        "requirements": ["Có trong danh sách tham dự", "Admin hoặc bot sự kiện xác nhận"],
+        "approval_status": "draft",
+        "active": False,
+    },
+    {
+        "rule_id": "REP-QUIZ-WINNER",
+        "name": "Thắng mini game hoặc quiz",
+        "description": "Đạt kết quả cao trong quiz, thử thách học tập hoặc mini game của cộng đồng.",
+        "points": 5,
+        "trigger_mode": "event_confirmation",
+        "daily_limit": 1,
+        "weekly_limit": 2,
+        "requirements": ["Kết quả do bot hoặc Admin xác nhận", "Mỗi sự kiện chỉ nhận một lần"],
+        "approval_status": "draft",
+        "active": False,
+    },
+    {
+        "rule_id": "REP-WEEKLY-HELPER",
+        "name": "Người hỗ trợ của tuần",
+        "description": "Giúp ít nhất 5 thành viên khác nhau trong tuần và có phản hồi tích cực.",
+        "points": 8,
+        "trigger_mode": "community_signal",
+        "daily_limit": None,
+        "weekly_limit": 1,
+        "requirements": ["Ít nhất 5 người được hỗ trợ khác nhau", "Có phản hồi ✅", "Không tính nhóm trao đổi phản hồi lặp"],
+        "approval_status": "draft",
+        "active": False,
+    },
+    {
+        "rule_id": "REP-PENALTY-MEDIUM",
+        "name": "Vi phạm mức trung bình",
+        "description": "Chỉ trừ sau khi Admin/Mod xem bằng chứng và xác nhận vi phạm.",
+        "points": -1,
+        "trigger_mode": "admin_review",
+        "daily_limit": None,
+        "weekly_limit": None,
+        "requirements": ["Admin/Mod xác nhận", "Có message gốc và bằng chứng"],
+        "approval_status": "approved",
+        "active": True,
+    },
+    {
+        "rule_id": "REP-PENALTY-HIGH",
+        "name": "Vi phạm mức cao",
+        "description": "Chỉ trừ sau khi Admin/Mod xem bằng chứng và xác nhận vi phạm.",
+        "points": -2,
+        "trigger_mode": "admin_review",
+        "daily_limit": None,
+        "weekly_limit": None,
+        "requirements": ["Admin/Mod xác nhận", "Có message gốc và bằng chứng"],
+        "approval_status": "approved",
+        "active": True,
+    },
+    {
+        "rule_id": "REP-PENALTY-CRITICAL",
+        "name": "Vi phạm nghiêm trọng",
+        "description": "Chỉ trừ sau khi Admin/Mod xem bằng chứng và xác nhận vi phạm.",
+        "points": -3,
+        "trigger_mode": "admin_review",
+        "daily_limit": None,
+        "weekly_limit": None,
+        "requirements": ["Admin/Mod xác nhận", "Có message gốc và bằng chứng"],
+        "approval_status": "approved",
+        "active": True,
+    },
+    {
+        "rule_id": "REP-PENALTY-SPAM",
+        "name": "Spam hoặc lừa đảo đã xác nhận",
+        "description": "Spam/link lừa đảo chỉ bị trừ sau khi Admin/Mod xác nhận; giảm từ -10 xuống -5 điểm.",
+        "points": -5,
+        "trigger_mode": "admin_review",
+        "daily_limit": None,
+        "weekly_limit": None,
+        "requirements": ["Admin/Mod xác nhận", "Không trừ chỉ dựa trên dự đoán của AI hoặc phản hồi ❌"],
+        "approval_status": "approved",
+        "active": True,
+    },
+)
+
+
 class OperationsStore:
     def __init__(self, settings: Settings | None = None) -> None:
         settings = settings or get_settings()
@@ -118,6 +272,7 @@ class OperationsStore:
             self.path = Path(url.removeprefix("sqlite:///"))
             self.path.parent.mkdir(parents=True, exist_ok=True)
         self._create_tables()
+        self.seed_reputation_rules()
         if not self.is_postgres or self.settings.operations_seed_defaults:
             self.seed_defaults()
 
@@ -199,6 +354,38 @@ class OperationsStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_ops_messages_platform ON operations_messages(platform);
                 CREATE INDEX IF NOT EXISTS idx_ops_messages_incident ON operations_messages(incident_id);
+                CREATE TABLE IF NOT EXISTS community_members (
+                    member_id TEXT PRIMARY KEY, platform TEXT NOT NULL, community_id TEXT NOT NULL,
+                    platform_user_id TEXT NOT NULL, display_name TEXT, is_bot INTEGER NOT NULL DEFAULT 0,
+                    reputation_score INTEGER NOT NULL DEFAULT 0,
+                    first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL, metadata TEXT NOT NULL DEFAULT '{}',
+                    UNIQUE(platform, community_id, platform_user_id)
+                );
+                CREATE TABLE IF NOT EXISTS member_reputation_events (
+                    event_id TEXT PRIMARY KEY, member_id TEXT NOT NULL, platform TEXT NOT NULL,
+                    community_id TEXT NOT NULL, platform_user_id TEXT NOT NULL, delta INTEGER NOT NULL,
+                    event_type TEXT NOT NULL, source_message_id TEXT, reaction_emoji TEXT,
+                    metadata TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL,
+                    FOREIGN KEY(member_id) REFERENCES community_members(member_id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS idx_member_reputation_events_member
+                    ON member_reputation_events(member_id, created_at DESC);
+                CREATE TABLE IF NOT EXISTS reputation_rules (
+                    rule_id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL,
+                    points INTEGER NOT NULL, trigger_mode TEXT NOT NULL, daily_limit INTEGER,
+                    weekly_limit INTEGER, requirements_json TEXT NOT NULL DEFAULT '[]',
+                    approval_status TEXT NOT NULL DEFAULT 'draft', active INTEGER NOT NULL DEFAULT 0,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS operations_flagged_links (
+                    link_id TEXT PRIMARY KEY, canonical_url TEXT NOT NULL, url_hash TEXT NOT NULL UNIQUE,
+                    original_url TEXT NOT NULL, domain TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'blocked',
+                    flag_count INTEGER NOT NULL DEFAULT 1, first_message_id TEXT, last_message_id TEXT,
+                    reported_by TEXT, first_flagged_at TEXT NOT NULL, last_seen_at TEXT NOT NULL,
+                    metadata TEXT NOT NULL DEFAULT '{}'
+                );
+                CREATE INDEX IF NOT EXISTS idx_flagged_links_status
+                    ON operations_flagged_links(status, last_seen_at DESC);
                 CREATE TABLE IF NOT EXISTS operations_gate_runs (
                     run_id TEXT PRIMARY KEY, message_id TEXT NOT NULL, gate TEXT NOT NULL, passed INTEGER NOT NULL,
                     label TEXT NOT NULL, category TEXT NOT NULL, risk_score REAL NOT NULL, evidence_json TEXT NOT NULL,
@@ -286,6 +473,40 @@ class OperationsStore:
             incident_columns = {row[1] for row in db.execute("PRAGMA table_info(operations_incidents)").fetchall()}
             if "source_url" not in incident_columns:
                 db.execute("ALTER TABLE operations_incidents ADD COLUMN source_url TEXT")
+            member_columns = {row[1] for row in db.execute("PRAGMA table_info(community_members)").fetchall()}
+            if "is_bot" not in member_columns:
+                db.execute("ALTER TABLE community_members ADD COLUMN is_bot INTEGER NOT NULL DEFAULT 0")
+
+    def seed_reputation_rules(self) -> None:
+        """Install product-owned rules without activating unapproved missions."""
+        now = _now()
+        with self._connect() as db:
+            db.executemany(
+                """INSERT INTO reputation_rules
+                (rule_id, name, description, points, trigger_mode, daily_limit, weekly_limit,
+                 requirements_json, approval_status, active, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(rule_id) DO UPDATE SET
+                    name=excluded.name, description=excluded.description, points=excluded.points,
+                    trigger_mode=excluded.trigger_mode, daily_limit=excluded.daily_limit,
+                    weekly_limit=excluded.weekly_limit, requirements_json=excluded.requirements_json""",
+                [
+                    (
+                        item["rule_id"],
+                        item["name"],
+                        item["description"],
+                        item["points"],
+                        item["trigger_mode"],
+                        item["daily_limit"],
+                        item["weekly_limit"],
+                        _json(item["requirements"]),
+                        item["approval_status"],
+                        item["active"],
+                        now,
+                    )
+                    for item in _REPUTATION_RULES
+                ],
+            )
 
     def seed_defaults(self) -> None:
         with self._connect() as db:
@@ -388,9 +609,7 @@ class OperationsStore:
                 db.execute("UPDATE operations_incidents SET message_ids_json=?, categories_json=?, risk_score=?, updated_at=? WHERE incident_id=?", (_json(list(dict.fromkeys(message_ids))), _json(list(dict.fromkeys(categories))), max(row["risk_score"] for row in duplicates), _now(), winner["incident_id"]))
         return merged
 
-    def _upsert_member(self, message: CommonMessage) -> str | None:
-        if not self.is_postgres:
-            return None
+    def _upsert_member(self, message: CommonMessage) -> str:
         member_id = str(
             uuid.uuid5(
                 uuid.NAMESPACE_URL,
@@ -400,10 +619,12 @@ class OperationsStore:
         with self._connect() as db:
             db.execute(
                 """INSERT INTO community_members
-                (member_id, platform, community_id, platform_user_id, display_name, first_seen_at, last_seen_at, metadata)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (member_id, platform, community_id, platform_user_id, display_name, is_bot, reputation_score,
+                 first_seen_at, last_seen_at, metadata)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(platform, community_id, platform_user_id) DO UPDATE SET
                 display_name=COALESCE(excluded.display_name, community_members.display_name),
+                is_bot=community_members.is_bot OR excluded.is_bot,
                 last_seen_at=excluded.last_seen_at""",
                 (
                     member_id,
@@ -411,12 +632,318 @@ class OperationsStore:
                     message.community_id,
                     message.author_id,
                     message.author_name,
+                    bool(message.raw.get("author_is_bot", False)),
+                    0,
                     message.timestamp.isoformat(),
                     message.timestamp.isoformat(),
                     _json({"source": message.platform}),
                 ),
             )
         return member_id
+
+    def mark_platform_bot(self, platform: str, platform_user_id: str, display_name: str | None = None) -> int:
+        """Mark an authenticated platform bot across communities without relying on its display name."""
+        with self._connect() as db:
+            cursor = db.execute(
+                """UPDATE community_members SET is_bot=TRUE,
+                display_name=COALESCE(?, display_name), last_seen_at=?
+                WHERE platform=? AND platform_user_id=?""",
+                (display_name, _now(), platform, platform_user_id),
+            )
+            return max(0, cursor.rowcount)
+
+    def add_reputation_event(
+        self,
+        message: CommonMessage,
+        *,
+        delta: int,
+        event_type: str,
+        event_key: str,
+        reaction_emoji: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        """Apply one immutable reputation event and update the member total atomically."""
+        if delta == 0:
+            return False
+        member_id = self._upsert_member(message)
+        event_id = "REP-" + hashlib.sha256(
+            f"{message.platform}\0{message.community_id}\0{message.author_id}\0{event_key}".encode("utf-8")
+        ).hexdigest()[:32]
+        now = _now()
+        with self._connect() as db:
+            cursor = db.execute(
+                """INSERT INTO member_reputation_events
+                (event_id, member_id, platform, community_id, platform_user_id, delta, event_type,
+                 source_message_id, reaction_emoji, metadata, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(event_id) DO NOTHING""",
+                (
+                    event_id,
+                    member_id,
+                    message.platform,
+                    message.community_id,
+                    message.author_id,
+                    delta,
+                    event_type,
+                    message.message_id,
+                    reaction_emoji,
+                    _json(metadata or {}),
+                    now,
+                ),
+            )
+            inserted = cursor.rowcount == 1
+            if inserted:
+                db.execute(
+                    "UPDATE community_members SET reputation_score=reputation_score+?, last_seen_at=? WHERE member_id=?",
+                    (delta, message.timestamp.isoformat(), member_id),
+                )
+        return inserted
+
+    def _reviewed_penalty(self, category: str, severity: str) -> int:
+        """Resolve the configured penalty after a human confirms the case."""
+        if severity == "low":
+            return 0
+        rule_id = (
+            "REP-PENALTY-SPAM"
+            if category == "spam"
+            else {
+                "medium": "REP-PENALTY-MEDIUM",
+                "high": "REP-PENALTY-HIGH",
+                "critical": "REP-PENALTY-CRITICAL",
+            }.get(severity)
+        )
+        if not rule_id:
+            return 0
+        rule = self.get_reputation_rule(rule_id)
+        return rule.points if rule and rule.active else 0
+
+    def award_helpful_reputation(self, message: CommonMessage, reaction_count: int) -> bool:
+        rule = self.get_reputation_rule("REP-HELPFUL-ANSWER")
+        if not rule or not rule.active or self._reputation_limit_reached(message, "helpful_reactions", rule):
+            return False
+        return self.add_reputation_event(
+            message,
+            delta=rule.points,
+            event_type="helpful_reactions",
+            event_key=f"helpful:{message.message_id}",
+            reaction_emoji="✅",
+            metadata={"distinct_reactors": reaction_count},
+        )
+
+    def flag_links_from_reactions(
+        self,
+        message: CommonMessage,
+        urls: list[str],
+        reaction_count: int,
+    ) -> bool:
+        """Block rejected URLs without changing reputation outside case review."""
+        normalized_urls = [url for url in dict.fromkeys(canonicalize_url(item) for item in urls) if url]
+        if not normalized_urls:
+            return False
+        from urllib.parse import urlsplit
+
+        now = _now()
+        changed = False
+        with self._connect() as db:
+            for url in normalized_urls:
+                digest = url_hash(url)
+                previous = db.execute(
+                    "SELECT last_message_id FROM operations_flagged_links WHERE url_hash=?",
+                    (digest,),
+                ).fetchone()
+                if previous and previous["last_message_id"] == message.message_id:
+                    continue
+                db.execute(
+                    """INSERT INTO operations_flagged_links
+                    (link_id, canonical_url, url_hash, original_url, domain, status, flag_count,
+                     first_message_id, last_message_id, reported_by, first_flagged_at, last_seen_at, metadata)
+                    VALUES (?, ?, ?, ?, ?, 'blocked', 1, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(url_hash) DO UPDATE SET
+                    status='blocked', flag_count=operations_flagged_links.flag_count+1,
+                    last_message_id=excluded.last_message_id, reported_by=excluded.reported_by,
+                    last_seen_at=excluded.last_seen_at, metadata=excluded.metadata""",
+                    (
+                        f"LINK-{digest[:20].upper()}",
+                        url,
+                        digest,
+                        url,
+                        urlsplit(url).hostname or "",
+                        message.message_id,
+                        message.message_id,
+                        message.author_id,
+                        now,
+                        now,
+                        _json({"reaction_emoji": "❌", "distinct_reactors": reaction_count}),
+                    ),
+                )
+                changed = True
+        return changed
+
+    def find_blocked_links(self, text: str) -> list[FlaggedLink]:
+        urls = extract_urls(text)
+        hashes = [url_hash(url) for url in urls]
+        if not hashes:
+            return []
+        placeholders = ",".join("?" for _ in hashes)
+        now = _now()
+        with self._connect() as db:
+            rows = db.execute(
+                f"SELECT * FROM operations_flagged_links WHERE status='blocked' AND url_hash IN ({placeholders})",
+                hashes,
+            ).fetchall()
+            if rows:
+                db.execute(
+                    f"UPDATE operations_flagged_links SET last_seen_at=? WHERE status='blocked' AND url_hash IN ({placeholders})",
+                    (now, *hashes),
+                )
+        return [self._flagged_link_from_row(row) for row in rows]
+
+    def list_reputation_rules(self) -> list[ReputationRule]:
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT * FROM reputation_rules ORDER BY CASE WHEN points > 0 THEN 0 ELSE 1 END, points DESC, rule_id"
+            ).fetchall()
+        return [
+            ReputationRule(
+                rule_id=row["rule_id"],
+                name=row["name"],
+                description=row["description"],
+                points=int(row["points"]),
+                trigger_mode=row["trigger_mode"],
+                daily_limit=int(row["daily_limit"]) if row["daily_limit"] is not None else None,
+                weekly_limit=int(row["weekly_limit"]) if row["weekly_limit"] is not None else None,
+                requirements=json_value(row["requirements_json"], []),
+                approval_status=row["approval_status"],
+                active=bool(row["active"]),
+                updated_at=timestamp_value(row["updated_at"]),
+            )
+            for row in rows
+        ]
+
+    def get_reputation_rule(self, rule_id: str) -> ReputationRule | None:
+        return next((rule for rule in self.list_reputation_rules() if rule.rule_id == rule_id), None)
+
+    def _reputation_limit_reached(
+        self,
+        message: CommonMessage,
+        event_type: str,
+        rule: ReputationRule,
+    ) -> bool:
+        if rule.daily_limit is None and rule.weekly_limit is None:
+            return False
+        now = datetime.now(UTC)
+        with self._connect() as db:
+            rows = db.execute(
+                """SELECT created_at FROM member_reputation_events
+                WHERE platform=? AND platform_user_id=? AND event_type=?""",
+                (message.platform, message.author_id, event_type),
+            ).fetchall()
+        timestamps = [timestamp_value(row["created_at"]) for row in rows]
+        if rule.daily_limit is not None:
+            today_count = sum(timestamp.date() == now.date() for timestamp in timestamps)
+            if today_count >= rule.daily_limit:
+                return True
+        if rule.weekly_limit is not None:
+            weekly_count = sum(timestamp >= now - timedelta(days=7) for timestamp in timestamps)
+            if weekly_count >= rule.weekly_limit:
+                return True
+        return False
+
+    def list_member_reputation(self) -> list[MemberReputation]:
+        with self._connect() as db:
+            rows = db.execute(
+                """SELECT m.*,
+                COALESCE(SUM(CASE WHEN e.delta > 0 THEN e.delta ELSE 0 END), 0) AS positive_points,
+                COALESCE(SUM(CASE WHEN e.delta < 0 THEN -e.delta ELSE 0 END), 0) AS penalty_points,
+                COUNT(e.event_id) AS event_count, MAX(e.created_at) AS last_event_at
+                FROM community_members m
+                LEFT JOIN member_reputation_events e ON e.member_id=m.member_id
+                    AND e.event_type NOT IN ('moderation_penalty','community_rejected_link','unapproved_penalty_reversed')
+                WHERE m.is_bot=FALSE AND m.platform='discord'
+                GROUP BY m.member_id, m.platform, m.community_id, m.platform_user_id, m.display_name,
+                         m.is_bot, m.reputation_score, m.first_seen_at, m.last_seen_at, m.metadata
+                ORDER BY m.last_seen_at DESC"""
+            ).fetchall()
+        # One Discord account may have been seen in several guild/community
+        # rows. The leaderboard is identity-based, so merge them by the
+        # immutable Discord user ID and aggregate their ledger totals.
+        grouped: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            user_id = str(row["platform_user_id"])
+            last_seen = timestamp_value(row["last_seen_at"])
+            last_event = timestamp_value(row["last_event_at"]) if row["last_event_at"] else None
+            current = grouped.get(user_id)
+            if current is None:
+                grouped[user_id] = {
+                    "member_id": str(row["member_id"]),
+                    "community_id": str(row["community_id"]),
+                    "display_name": row["display_name"],
+                    "reputation_score": int(row["reputation_score"] or 0),
+                    "positive_points": int(row["positive_points"] or 0),
+                    "penalty_points": int(row["penalty_points"] or 0),
+                    "event_count": int(row["event_count"] or 0),
+                    "last_event_at": last_event,
+                    "last_seen_at": last_seen,
+                }
+                continue
+            current["reputation_score"] += int(row["reputation_score"] or 0)
+            current["positive_points"] += int(row["positive_points"] or 0)
+            current["penalty_points"] += int(row["penalty_points"] or 0)
+            current["event_count"] += int(row["event_count"] or 0)
+            if last_seen > current["last_seen_at"]:
+                current["last_seen_at"] = last_seen
+                current["community_id"] = str(row["community_id"])
+                if row["display_name"]:
+                    current["display_name"] = row["display_name"]
+            elif not current["display_name"] and row["display_name"]:
+                current["display_name"] = row["display_name"]
+            if last_event and (current["last_event_at"] is None or last_event > current["last_event_at"]):
+                current["last_event_at"] = last_event
+
+        output: list[MemberReputation] = []
+        for user_id, member in grouped.items():
+            score = member["reputation_score"]
+            status = "trusted" if score >= 10 else "neutral" if score >= 0 else "watch" if score > -10 else "risk"
+            output.append(
+                MemberReputation(
+                    member_id=member["member_id"],
+                    platform="discord",
+                    community_id=member["community_id"],
+                    platform_user_id=user_id,
+                    display_name=member["display_name"],
+                    reputation_score=score,
+                    positive_points=member["positive_points"],
+                    penalty_points=member["penalty_points"],
+                    event_count=member["event_count"],
+                    last_event_at=member["last_event_at"],
+                    last_seen_at=member["last_seen_at"],
+                    status=status,
+                )
+            )
+        output.sort(key=lambda item: (item.reputation_score, item.last_seen_at), reverse=True)
+        return output
+
+    def list_flagged_links(self) -> list[FlaggedLink]:
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT * FROM operations_flagged_links ORDER BY status ASC, last_seen_at DESC"
+            ).fetchall()
+        return [self._flagged_link_from_row(row) for row in rows]
+
+    @staticmethod
+    def _flagged_link_from_row(row: Any) -> FlaggedLink:
+        return FlaggedLink(
+            link_id=row["link_id"],
+            canonical_url=row["canonical_url"],
+            domain=row["domain"],
+            status=row["status"],
+            flag_count=int(row["flag_count"]),
+            first_message_id=row["first_message_id"],
+            last_message_id=row["last_message_id"],
+            reported_by=row["reported_by"],
+            first_flagged_at=timestamp_value(row["first_flagged_at"]),
+            last_seen_at=timestamp_value(row["last_seen_at"]),
+        )
 
     def save_message(self, message: CommonMessage, result: MessageDecision, incident_id: str | None) -> None:
         now = _now()
@@ -853,6 +1380,104 @@ class OperationsStore:
             else:
                 row = db.execute("SELECT * FROM operations_messages WHERE incident_id=? ORDER BY timestamp DESC LIMIT 1", (incident_id,)).fetchone()
         return dict(row) if row else None
+
+    def decide_incident_reputation(
+        self,
+        incident_id: str,
+        outcome: str,
+        actor: str,
+        note: str = "",
+    ) -> tuple[str, int, int] | None:
+        """Resolve one Community case and apply at most one penalty per real user."""
+        incident = self.get_incident(incident_id)
+        if not incident:
+            return None
+        with self._connect() as db:
+            previous = db.execute(
+                """SELECT payload_json FROM operations_audit
+                WHERE incident_id=? AND event_type='incident_reputation_decision'
+                ORDER BY created_at DESC LIMIT 1""",
+                (incident_id,),
+            ).fetchone()
+        if previous:
+            payload = json_value(previous["payload_json"], {})
+            return (
+                str(payload.get("outcome", outcome)),
+                int(payload.get("affected_members", 0)),
+                int(payload.get("points_applied", 0)),
+            )
+
+        affected_members = 0
+        points_applied = 0
+        if outcome == "confirmed":
+            selected: dict[str, tuple[int, dict[str, Any]]] = {}
+            for row in self.list_incident_messages(incident_id):
+                raw = json_value(row.get("raw_json"), {})
+                if bool(raw.get("author_is_bot", False)) or row.get("decision") == "allow":
+                    continue
+                delta = self._reviewed_penalty(
+                    str(row.get("category") or "other"),
+                    str(row.get("severity") or incident.severity),
+                )
+                if delta >= 0:
+                    continue
+                author_id = str(row["author_id"])
+                current = selected.get(author_id)
+                if current is None or delta < current[0]:
+                    selected[author_id] = (delta, row)
+
+            for author_id, (delta, row) in selected.items():
+                raw = json_value(row.get("raw_json"), {})
+                message = CommonMessage(
+                    message_id=str(row["message_id"]),
+                    platform=row["platform"],
+                    community_id=str(row["community_id"]),
+                    channel_id=str(row["channel_id"]),
+                    thread_key=row.get("thread_key"),
+                    parent_message_id=row.get("parent_message_id"),
+                    author_id=author_id,
+                    text=str(row["text"]),
+                    timestamp=timestamp_value(row["timestamp"]),
+                    source_url=row.get("source_url"),
+                    raw=raw,
+                )
+                applied = self.add_reputation_event(
+                    message,
+                    delta=delta,
+                    event_type="admin_confirmed_penalty",
+                    event_key=f"confirmed-incident:{incident_id}:{author_id}",
+                    metadata={
+                        "incident_id": incident_id,
+                        "category": row.get("category"),
+                        "severity": row.get("severity"),
+                        "reviewed_by": actor,
+                        "review_note": note,
+                    },
+                )
+                if applied:
+                    affected_members += 1
+                    points_applied += delta
+
+        with self._connect() as db:
+            db.execute(
+                "UPDATE operations_incidents SET status='resolved', updated_at=? WHERE incident_id=?",
+                (_now(), incident_id),
+            )
+        self.add_audit(
+            incident_id,
+            None,
+            "incident_reputation_decision",
+            actor,
+            {
+                "outcome": outcome,
+                "affected_members": affected_members,
+                "points_applied": points_applied,
+                "note": note,
+            },
+        )
+        if outcome == "confirmed":
+            self.remember_incident(incident_id, actor, note or "Admin/Mod xác nhận vi phạm.")
+        return outcome, affected_members, points_applied
 
     def update_incident(self, incident_id: str, status: str | None, assigned_to: str | None, note: str) -> Incident | None:
         with self._connect() as db:

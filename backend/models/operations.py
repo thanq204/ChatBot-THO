@@ -319,6 +319,60 @@ class MemberReportUpdateRequest(BaseModel):
     actor: str = Field(default="Admin", min_length=1, max_length=100)
 
 
+class MemberReputation(BaseModel):
+    member_id: str
+    platform: PlatformName
+    community_id: str
+    platform_user_id: str
+    display_name: str | None = None
+    reputation_score: int = 0
+    positive_points: int = 0
+    penalty_points: int = 0
+    event_count: int = 0
+    last_event_at: datetime | None = None
+    last_seen_at: datetime
+    status: Literal["trusted", "neutral", "watch", "risk"] = "neutral"
+
+
+class ReputationRule(BaseModel):
+    rule_id: str
+    name: str
+    description: str
+    points: int
+    trigger_mode: Literal["automatic", "community_signal", "admin_review", "event_confirmation"]
+    daily_limit: int | None = None
+    weekly_limit: int | None = None
+    requirements: list[str] = Field(default_factory=list)
+    approval_status: Literal["draft", "approved", "rejected"] = "draft"
+    active: bool = False
+    updated_at: datetime
+
+
+class IncidentReputationDecisionRequest(BaseModel):
+    outcome: Literal["confirmed", "dismissed"]
+    note: str = Field(default="", max_length=1000)
+
+
+class IncidentReputationDecisionResponse(BaseModel):
+    incident_id: str
+    outcome: Literal["confirmed", "dismissed"]
+    affected_members: int = 0
+    points_applied: int = 0
+
+
+class FlaggedLink(BaseModel):
+    link_id: str
+    canonical_url: str
+    domain: str
+    status: Literal["blocked", "released"] = "blocked"
+    flag_count: int = 1
+    first_message_id: str | None = None
+    last_message_id: str | None = None
+    reported_by: str | None = None
+    first_flagged_at: datetime
+    last_seen_at: datetime
+
+
 class CommunityHealth(BaseModel):
     window_hours: int
     messages_total: int

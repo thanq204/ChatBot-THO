@@ -6,10 +6,58 @@ CREATE TABLE IF NOT EXISTS public.community_members (
     community_id VARCHAR(200) NOT NULL,
     platform_user_id VARCHAR(200) NOT NULL,
     display_name VARCHAR(200),
+    is_bot BOOLEAN NOT NULL DEFAULT FALSE,
     first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    reputation_score INTEGER NOT NULL DEFAULT 0,
     UNIQUE (platform, community_id, platform_user_id)
+);
+ALTER TABLE public.community_members ADD COLUMN IF NOT EXISTS reputation_score INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE public.community_members ADD COLUMN IF NOT EXISTS is_bot BOOLEAN NOT NULL DEFAULT FALSE;
+
+CREATE TABLE IF NOT EXISTS public.member_reputation_events (
+    event_id VARCHAR(200) PRIMARY KEY,
+    member_id UUID NOT NULL REFERENCES public.community_members(member_id) ON DELETE CASCADE,
+    platform VARCHAR(20) NOT NULL,
+    community_id VARCHAR(200) NOT NULL,
+    platform_user_id VARCHAR(200) NOT NULL,
+    delta INTEGER NOT NULL CHECK (delta <> 0),
+    event_type VARCHAR(80) NOT NULL,
+    source_message_id VARCHAR(200),
+    reaction_emoji VARCHAR(40),
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.reputation_rules (
+    rule_id VARCHAR(100) PRIMARY KEY,
+    name VARCHAR(200) NOT NULL,
+    description TEXT NOT NULL,
+    points INTEGER NOT NULL,
+    trigger_mode VARCHAR(40) NOT NULL CHECK (trigger_mode IN ('automatic','community_signal','admin_review','event_confirmation')),
+    daily_limit INTEGER,
+    weekly_limit INTEGER,
+    requirements_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+    approval_status VARCHAR(20) NOT NULL DEFAULT 'draft' CHECK (approval_status IN ('draft','approved','rejected')),
+    active BOOLEAN NOT NULL DEFAULT FALSE,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.operations_flagged_links (
+    link_id VARCHAR(200) PRIMARY KEY,
+    canonical_url TEXT NOT NULL,
+    url_hash VARCHAR(64) NOT NULL UNIQUE,
+    original_url TEXT NOT NULL,
+    domain VARCHAR(255) NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'blocked' CHECK (status IN ('blocked','released')),
+    flag_count INTEGER NOT NULL DEFAULT 1,
+    first_message_id VARCHAR(200),
+    last_message_id VARCHAR(200),
+    reported_by VARCHAR(200),
+    first_flagged_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 
 CREATE TABLE IF NOT EXISTS public.operations_messages (
@@ -35,6 +83,48 @@ CREATE TABLE IF NOT EXISTS public.operations_messages (
     incident_id VARCHAR(200),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Earlier versions deducted AI classifications immediately. Preserve the
+-- immutable ledger and reverse those unapproved deductions once. New
+-- deductions are written only after Admin/Mod confirms a Community case.
+INSERT INTO public.member_reputation_events (
+    event_id, member_id, platform, community_id, platform_user_id, delta,
+    event_type, source_message_id, reaction_emoji, metadata, created_at
+)
+SELECT
+    'REV-' || event.event_id,
+    event.member_id,
+    event.platform,
+    event.community_id,
+    event.platform_user_id,
+    -event.delta,
+    'unapproved_penalty_reversed',
+    event.source_message_id,
+    event.reaction_emoji,
+    jsonb_build_object('reversed_event_id', event.event_id, 'reason', 'Require Admin/Mod confirmation'),
+    NOW()
+FROM public.member_reputation_events event
+WHERE event.event_type IN ('moderation_penalty', 'community_rejected_link')
+  AND event.delta < 0
+ON CONFLICT (event_id) DO NOTHING;
+
+UPDATE public.community_members member
+SET reputation_score = COALESCE((
+    SELECT SUM(event.delta)
+    FROM public.member_reputation_events event
+    WHERE event.member_id = member.member_id
+), 0);
+
+UPDATE public.community_members AS member
+SET is_bot = TRUE
+WHERE EXISTS (
+    SELECT 1
+    FROM public.operations_messages AS message
+    WHERE message.platform = member.platform
+      AND message.community_id = member.community_id
+      AND message.author_id = member.platform_user_id
+      AND COALESCE((message.raw_json ->> 'author_is_bot')::boolean, FALSE)
 );
 
 CREATE TABLE IF NOT EXISTS public.operations_incidents (
@@ -376,6 +466,9 @@ CREATE INDEX IF NOT EXISTS idx_operations_moderation_category ON public.operatio
 CREATE INDEX IF NOT EXISTS idx_faq_questions_created_at ON public.operations_faq_questions(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_faq_clusters_rank ON public.faq_topic_clusters(status, question_count DESC);
 CREATE INDEX IF NOT EXISTS idx_knowledge_sections_document ON public.knowledge_sections(document_id, chunk_index);
+CREATE INDEX IF NOT EXISTS idx_member_reputation_rank ON public.community_members(community_id, reputation_score DESC);
+CREATE INDEX IF NOT EXISTS idx_member_reputation_events_member ON public.member_reputation_events(member_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_flagged_links_status ON public.operations_flagged_links(status, last_seen_at DESC);
 
 DO $$ BEGIN
     ALTER TABLE public.operations_messages ADD CONSTRAINT fk_operations_messages_incident

@@ -74,6 +74,10 @@ class Settings(BaseSettings):
     moderation_memory_llm_candidate_threshold: float = Field(default=0.55, ge=0.0, le=1.0)
     moderation_memory_llm_model: str = "gpt-4o-mini"
     moderation_policy_cache_seconds: int = Field(default=15, ge=0, le=300)
+    spam_repeat_window_seconds: int = Field(default=120, ge=30, le=3600)
+    spam_repeat_message_threshold: int = Field(default=3, ge=2, le=20)
+    reputation_helpful_reaction_threshold: int = Field(default=3, ge=1, le=50)
+    reputation_block_link_reaction_threshold: int = Field(default=3, ge=1, le=50)
 
     # FAQ analytics: every safe tagged question is embedded and clustered.
     faq_semantic_clustering_enabled: bool = True

@@ -10,6 +10,7 @@ import logging
 import re
 import threading
 import time
+from collections import deque
 
 from backend.config import Settings, get_settings
 from backend.models.operations import (
@@ -19,6 +20,7 @@ from backend.models.operations import (
     MessageDecision,
 )
 from backend.services.operations_store import OperationsStore
+from backend.services.link_safety import assess_spam
 from backend.services.policy_retrieval import PolicyRetriever
 
 logger = logging.getLogger(__name__)
@@ -49,6 +51,8 @@ class OperationsPipeline:
         self._policy_cache: list = []
         self._policy_cache_expires_at = 0.0
         self._policy_cache_lock = threading.Lock()
+        self._recent_messages: dict[tuple[str, str, str, str], deque[tuple[float, str]]] = {}
+        self._recent_messages_lock = threading.Lock()
         self.policy_retriever = PolicyRetriever(self.settings, self.store)
 
     def analyze(self, message: CommonMessage, context: list[CommonMessage] | None = None) -> MessageDecision:
@@ -134,6 +138,7 @@ class OperationsPipeline:
                 "system",
                 {"category": gate2.category, "duplicate_of_incident": duplicate_incident_id},
             )
+        self._record_recent_message(message)
         return result
 
     def gate1(self, message: CommonMessage) -> GateResult:
@@ -142,12 +147,20 @@ class OperationsPipeline:
         text = message.text.strip()
         candidates: list[tuple[float, str, str, list[str], str]] = []
 
+        blocked_links = self.store.find_blocked_links(text)
+        spam = assess_spam(
+            text,
+            recent_texts=self._recent_spam_texts(message),
+            blocked_urls=[item.canonical_url for item in blocked_links],
+            repeat_threshold=self.settings.spam_repeat_message_threshold,
+        )
+        if spam.suspicious:
+            candidates.append(
+                (spam.risk_score, "spam", spam.label, list(spam.evidence), "gate1-spam-scam-v2")
+            )
+
         if len(text) > 9000 or len(text.split()) > 900:
             candidates.append((0.72, "spam", "length_anomaly", ["message quá dài"], "gate1-structure"))
-        if len(re.findall(r"https?://", text, re.I)) >= 3:
-            candidates.append((0.86, "spam", "link_burst", ["nhiều đường link"], "gate1-structure"))
-        if len(text) >= 12 and len(set(text.lower().split())) <= 2:
-            candidates.append((0.64, "spam", "repetition", ["lặp từ bất thường"], "gate1-structure"))
         threat_evidence = self._composed_threat_evidence(text)
         if threat_evidence:
             candidates.append(
@@ -270,7 +283,7 @@ class OperationsPipeline:
         joke_signal = bool(re.search(r"(?:\bđùa\b|\bjoke\b|\bhaha+\b|😂|🤣)", all_text, re.I))
         strong_threat = category == "violence" and (direct_target or explicit_threat)
         strong_targeted_abuse = category == "harassment" and direct_target and gate1.risk_score >= 0.82
-        if joke_signal and not strong_threat and not strong_targeted_abuse:
+        if category in {"harassment", "hate", "violence"} and joke_signal and not strong_threat and not strong_targeted_abuse:
             risk = max(0.25, risk - 0.28)
             category = "friendly_teasing"
             label = "context_deescalated_joke"
@@ -279,7 +292,7 @@ class OperationsPipeline:
         educational_signal = bool(
             re.search(r"(?:ví dụ|nghĩa là gì|có nghĩa là|trích dẫn|nội quy|từ ngữ|policy|rule)", all_text, re.I)
         )
-        if educational_signal and not direct_target and not strong_threat:
+        if category in {"harassment", "hate", "violence"} and educational_signal and not direct_target and not strong_threat:
             risk = max(0.18, risk - 0.35)
             category = "quoted_or_educational"
             label = "context_deescalated_quote"
@@ -301,6 +314,7 @@ class OperationsPipeline:
         model = "local-context-review"
         if (
             category not in {"benign_activity", "friendly_teasing", "quoted_or_educational"}
+            and not (category == "spam" and gate1.risk_score >= 0.85)
             and self.settings.operations_use_llm
             and self.settings.openai_api_key
         ):
@@ -344,6 +358,28 @@ class OperationsPipeline:
             model_used=model,
             duration_ms=int((time.perf_counter() - started) * 1000),
         )
+
+    def _recent_spam_texts(self, message: CommonMessage) -> list[str]:
+        key = (message.platform, message.community_id, message.channel_id, message.author_id)
+        cutoff = time.monotonic() - self.settings.spam_repeat_window_seconds
+        with self._recent_messages_lock:
+            messages = self._recent_messages.get(key)
+            if not messages:
+                return []
+            while messages and messages[0][0] < cutoff:
+                messages.popleft()
+            return [text for _created_at, text in messages]
+
+    def _record_recent_message(self, message: CommonMessage) -> None:
+        key = (message.platform, message.community_id, message.channel_id, message.author_id)
+        cutoff = time.monotonic() - self.settings.spam_repeat_window_seconds
+        with self._recent_messages_lock:
+            messages = self._recent_messages.setdefault(key, deque())
+            while messages and messages[0][0] < cutoff:
+                messages.popleft()
+            messages.append((time.monotonic(), message.text))
+            while len(messages) > max(20, self.settings.spam_repeat_message_threshold * 3):
+                messages.popleft()
 
     def _active_policies(self):
         now = time.monotonic()

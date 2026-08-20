@@ -74,6 +74,7 @@ export const AUDIT_EVENT_LABELS = {
   moderation_memory_updated: "Lưu case làm mẫu tham chiếu",
   duplicate_admin_notification_suppressed: "Bỏ qua thông báo trùng lặp",
   recent_duplicate_notification_suppressed: "Bỏ qua thông báo trùng lặp gần đây",
+  incident_reputation_decision: "Admin/Mod duyệt vi phạm và điểm uy tín",
 };
 
 /** Discord/Telegram action values on an admin_platform_action audit entry. */

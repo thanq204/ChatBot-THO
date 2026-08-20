@@ -31,6 +31,8 @@ from backend.models.operations import (
     FAQUpsertRequest,
     FAQWriteResponse,
     Incident,
+    IncidentReputationDecisionRequest,
+    IncidentReputationDecisionResponse,
     IncidentUpdateRequest,
     KnowledgeDocument,
     KnowledgeDocumentRequest,
@@ -39,6 +41,8 @@ from backend.models.operations import (
     KnowledgeImportResponse,
     MemberReport,
     MemberReportUpdateRequest,
+    MemberReputation,
+    ReputationRule,
     MessageIngestRequest,
     OperationsSummary,
     PlatformStatus,
@@ -46,6 +50,7 @@ from backend.models.operations import (
     PolicyUpsertRequest,
     RagRequest,
     RagResponse,
+    FlaggedLink,
 )
 from backend.services.admin_announcements import AdminAnnouncementSender
 from backend.services.discord.bot import notify_commands_changed as notify_discord_commands_changed
@@ -390,6 +395,53 @@ async def update_member_report(report_id: str, payload: MemberReportUpdateReques
     if not result:
         raise HTTPException(status_code=404, detail="Member report not found.")
     return result
+
+
+@router.post(
+    "/incidents/{incident_id}/reputation-decision",
+    response_model=IncidentReputationDecisionResponse,
+)
+async def decide_incident_reputation(
+    incident_id: str,
+    payload: IncidentReputationDecisionRequest,
+    reviewer: UserPublic = Depends(require_roles("admin", "mod")),
+) -> IncidentReputationDecisionResponse:
+    result = get_operations_store().decide_incident_reputation(
+        incident_id,
+        payload.outcome,
+        reviewer.display_name or reviewer.email,
+        payload.note,
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Không tìm thấy case cộng đồng.")
+    outcome, affected_members, points_applied = result
+    return IncidentReputationDecisionResponse(
+        incident_id=incident_id,
+        outcome=outcome,
+        affected_members=affected_members,
+        points_applied=points_applied,
+    )
+
+
+@router.get("/admin/reputation", response_model=list[MemberReputation])
+async def member_reputation(
+    _: UserPublic = Depends(require_roles("admin", "mod")),
+) -> list[MemberReputation]:
+    return get_operations_store().list_member_reputation()
+
+
+@router.get("/admin/reputation-rules", response_model=list[ReputationRule])
+async def reputation_rules(
+    _: UserPublic = Depends(require_roles("admin", "mod")),
+) -> list[ReputationRule]:
+    return get_operations_store().list_reputation_rules()
+
+
+@router.get("/admin/flagged-links", response_model=list[FlaggedLink])
+async def flagged_links(
+    _: UserPublic = Depends(require_roles("admin", "mod")),
+) -> list[FlaggedLink]:
+    return get_operations_store().list_flagged_links()
 
 
 @router.post("/admin/announcements", response_model=AnnouncementResponse)
