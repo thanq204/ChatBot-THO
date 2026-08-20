@@ -57,6 +57,7 @@ class SemanticReranker:
 class RelevanceConfig:
     minimum_rerank_score: float = 0.52
     minimum_vector_score: float = 0.38
+    minimum_semantic_only_score: float = 0.62
     minimum_query_coverage: float = 0.24
     minimum_margin: float = 0.025
 
@@ -74,13 +75,18 @@ class RelevanceGate:
         best = ranked[0]
         runner_up = ranked[1].rerank_score if len(ranked) > 1 else 0.0
         margin = best.rerank_score - runner_up
-        if best.rerank_score < self.config.minimum_rerank_score:
-            reason = "rerank-score-below-threshold"
-        elif (
+        if (
             best.candidate.vector_score < self.config.minimum_vector_score
             and best.lexical_score < self.config.minimum_query_coverage
         ):
             reason = "insufficient-semantic-and-lexical-evidence"
+        elif (
+            best.lexical_score < self.config.minimum_query_coverage
+            and best.candidate.vector_score < self.config.minimum_semantic_only_score
+        ):
+            reason = "insufficient-query-evidence"
+        elif best.rerank_score < self.config.minimum_rerank_score:
+            reason = "rerank-score-below-threshold"
         elif len(ranked) > 1 and margin < self.config.minimum_margin and best.rerank_score < 0.78:
             reason = "ambiguous-top-candidates"
         else:

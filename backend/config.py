@@ -25,13 +25,22 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     model_name: str = "gpt-4o-mini"
     openai_embedding_model: str = "text-embedding-3-small"
+    openai_embedding_dimensions: int = Field(default=1536, ge=256, le=3072)
+    semantic_embedding_cache_size: int = Field(default=128, ge=0, le=1024)
     # Explicit opt-in: enabling this sends Knowledge Hub text to the
     # configured embedding provider for semantic indexing.
     knowledge_embedding_enabled: bool = False
     knowledge_embedding_min_score: float = Field(default=0.38, ge=0.0, le=1.0)
     knowledge_embedding_batch_size: int = Field(default=64, ge=1, le=128)
     rag_candidate_limit: int = Field(default=6, ge=1, le=20)
-    rag_relevance_threshold: float = Field(default=0.30, ge=0.0, le=1.0)
+    rag_relevance_threshold: float = Field(default=0.52, ge=0.0, le=1.0)
+    rag_vector_min_score: float = Field(default=0.38, ge=0.0, le=1.0)
+    rag_semantic_only_min_score: float = Field(default=0.62, ge=0.0, le=1.0)
+    rag_query_coverage_min_score: float = Field(default=0.24, ge=0.0, le=1.0)
+    rag_minimum_margin: float = Field(default=0.025, ge=0.0, le=1.0)
+    rag_rerank_vector_weight: float = Field(default=0.58, ge=0.0, le=1.0)
+    rag_rerank_lexical_weight: float = Field(default=0.30, ge=0.0, le=1.0)
+    rag_rerank_phrase_weight: float = Field(default=0.12, ge=0.0, le=1.0)
     llm_temperature: float = Field(default=0.7, ge=0.0, le=2.0)
 
     # Moderation pipeline
@@ -42,6 +51,7 @@ class Settings(BaseSettings):
     gemini_review_model: str = "gemini-3.6-flash"
     gemini_embedding_model: str = "gemini-embedding-001"
     enable_policy_retrieval: bool = False
+    moderation_policy_semantic_threshold: float = Field(default=0.72, ge=0.0, le=1.0)
     moderation_review_threshold: float = Field(default=0.80, ge=0.0, le=1.0)
     moderation_auto_action_threshold: float = Field(default=0.90, ge=0.0, le=1.0)
     gemini_temperature: float = Field(default=0.1, ge=0.0, le=2.0)
@@ -63,6 +73,7 @@ class Settings(BaseSettings):
     moderation_memory_llm_verify_enabled: bool = True
     moderation_memory_llm_candidate_threshold: float = Field(default=0.55, ge=0.0, le=1.0)
     moderation_memory_llm_model: str = "gpt-4o-mini"
+    moderation_policy_cache_seconds: int = Field(default=15, ge=0, le=300)
 
     # FAQ analytics: every safe tagged question is embedded and clustered.
     faq_semantic_clustering_enabled: bool = True
@@ -89,6 +100,8 @@ class Settings(BaseSettings):
     faq_pg_db: str = "faq_rag"
     faq_pg_user: str = "faq_user"
     faq_pg_password: str = "faq_pass_dev"
+    postgres_pool_min_size: int = Field(default=1, ge=1, le=10)
+    postgres_pool_max_size: int = Field(default=8, ge=1, le=32)
 
     # Vector Store
     chroma_persist_dir: str = "./data/chroma"
@@ -114,6 +127,8 @@ class Settings(BaseSettings):
     messenger_page_access_token: str = ""
     operations_demo_mode: bool = True
     operations_use_llm: bool = False
+    operations_seed_defaults: bool = False
+    operations_startup_maintenance_enabled: bool = False
     operations_incident_window_minutes: int = Field(default=60, ge=5, le=1440)
 
     # Semantic document ingestion

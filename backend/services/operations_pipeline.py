@@ -6,7 +6,9 @@ context, and Gate 3 retrieves human-reviewed cases before notifying Admin/Mod.
 
 from __future__ import annotations
 
+import logging
 import re
+import threading
 import time
 
 from backend.config import Settings, get_settings
@@ -17,6 +19,9 @@ from backend.models.operations import (
     MessageDecision,
 )
 from backend.services.operations_store import OperationsStore
+from backend.services.policy_retrieval import PolicyRetriever
+
+logger = logging.getLogger(__name__)
 
 _BENIGN_ACTIVITY_PATTERN = (
     r"(?:\bđánh\s+(?:liên\s*quân|game|rank|cờ|cầu|bóng|tennis|golf|đàn|trống|"
@@ -24,15 +29,36 @@ _BENIGN_ACTIVITY_PATTERN = (
     r"\bđập\s+hộp\b|\bxử\s+lý\b|\bgiết\s+thời\s+gian\b)"
 )
 
+_TARGETED_ABUSE_PATTERN = re.compile(
+    r"(?<!\w)(?:địt|dit|đụ)\s+(?:(?:cụ|cu|mẹ|me|má|ma)\s+)?(?:m|mày|may|mi)(?!\w)"
+    r"|(?<!\w)(?:đm|dm|đcm|dcm|dmm)(?!\w)"
+    r"|(?<!\w)(?:cút|cut)\s+(?:(?:mẹ|me)\s+)?(?:m|mày|may|mi)(?!\w)"
+    r"|(?<!\w)(?:óc\s+chó|oc\s+cho|súc\s+vật|suc\s+vat|con\s+đĩ|con\s+di|thằng\s+chó|thang\s+cho)(?!\w)",
+    re.I,
+)
+_PROFANITY_PATTERN = re.compile(
+    r"(?<!\w)(?:địt|dit|đụ|đéo|deo|lồn|lon|cặc|cac|vcl|clm)(?!\w)",
+    re.I,
+)
+
 
 class OperationsPipeline:
     def __init__(self, store: OperationsStore | None = None, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
         self.store = store or OperationsStore(self.settings)
+        self._policy_cache: list = []
+        self._policy_cache_expires_at = 0.0
+        self._policy_cache_lock = threading.Lock()
+        self.policy_retriever = PolicyRetriever(self.settings, self.store)
 
     def analyze(self, message: CommonMessage, context: list[CommonMessage] | None = None) -> MessageDecision:
-        nearby = context or self.store.recent_context(message)
         gate1 = self.gate1(message)
+        if context is not None:
+            nearby = context
+        elif gate1.passed:
+            nearby = []
+        else:
+            nearby = self.store.recent_context(message)
         gate2 = self.gate2(message, nearby, gate1)
         gate3, memory_match = self.gate3(message, gate2)
         decision, severity, confidence = self._decision(gate2)
@@ -128,8 +154,23 @@ class OperationsPipeline:
                 (0.94, "violence", "composed_threat", threat_evidence, "gate1-threat-composition")
             )
 
+        targeted_abuse = [match.group(0) for match in _TARGETED_ABUSE_PATTERN.finditer(text)]
+        if targeted_abuse:
+            candidates.append(
+                (0.92, "harassment", "targeted_profanity", targeted_abuse[:4], "gate1-safety-lexicon-v1")
+            )
+        else:
+            profanity = [match.group(0) for match in _PROFANITY_PATTERN.finditer(text)]
+            if profanity:
+                candidates.append(
+                    (0.68, "harassment", "profanity", profanity[:4], "gate1-safety-lexicon-v1")
+                )
+
         action_risk = {"allow": 0.20, "warn": 0.72, "hide": 0.92, "hold_for_review": 0.86}
-        for policy in self.store.list_policies():
+        # High-confidence local safety signals do not wait for a cloud policy
+        # lookup. Admin policies still extend the lexicon for every other case.
+        policies = [] if any(item[0] >= 0.90 for item in candidates) else self._active_policies()
+        for policy in policies:
             if not policy.active or policy.action == "allow":
                 continue
             matches = self._matching_terms(text, policy.trigger_terms)
@@ -143,6 +184,25 @@ class OperationsPipeline:
                         f"policy-v{policy.version}",
                     )
                 )
+
+        if not candidates and self.settings.enable_policy_retrieval:
+            try:
+                for candidate in self.policy_retriever.retrieve(text):
+                    semantic_risk = max(0.56, action_risk[str(candidate["action"])] - 0.12)
+                    candidates.append(
+                        (
+                            semantic_risk,
+                            self._canonical_category(str(candidate["category"])),
+                            f"semantic_policy:{candidate['policy_id']}",
+                            [
+                                f"policy={candidate['name']}",
+                                f"similarity={float(candidate['similarity']):.3f}",
+                            ],
+                            f"policy-semantic-v{candidate['version']}",
+                        )
+                    )
+            except Exception:
+                logger.warning("Semantic policy retrieval unavailable; continuing fast filter.", exc_info=True)
 
         if not candidates:
             return GateResult(
@@ -209,7 +269,8 @@ class OperationsPipeline:
 
         joke_signal = bool(re.search(r"(?:\bđùa\b|\bjoke\b|\bhaha+\b|😂|🤣)", all_text, re.I))
         strong_threat = category == "violence" and (direct_target or explicit_threat)
-        if joke_signal and not strong_threat:
+        strong_targeted_abuse = category == "harassment" and direct_target and gate1.risk_score >= 0.82
+        if joke_signal and not strong_threat and not strong_targeted_abuse:
             risk = max(0.25, risk - 0.28)
             category = "friendly_teasing"
             label = "context_deescalated_joke"
@@ -283,6 +344,19 @@ class OperationsPipeline:
             model_used=model,
             duration_ms=int((time.perf_counter() - started) * 1000),
         )
+
+    def _active_policies(self):
+        now = time.monotonic()
+        if now < self._policy_cache_expires_at:
+            return self._policy_cache
+        with self._policy_cache_lock:
+            now = time.monotonic()
+            if now < self._policy_cache_expires_at:
+                return self._policy_cache
+            policies = self.store.list_policies()
+            self._policy_cache = policies
+            self._policy_cache_expires_at = now + self.settings.moderation_policy_cache_seconds
+            return policies
 
     def gate3(self, message: CommonMessage, gate2: GateResult):
         """Retrieve approved cases and suppress only duplicate Admin alerts."""

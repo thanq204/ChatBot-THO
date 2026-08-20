@@ -45,7 +45,7 @@ class PlatformModerationService:
             return None
         status = decision.banner or {
             "warn": "Tin nhắn của bạn đã bị cảnh báo theo nội quy cộng đồng.",
-            "hide": "Tin nhắn của bạn đã bị đánh dấu ẩn theo nội quy cộng đồng.",
+            "hide": "Tin nhắn của bạn được đề xuất ẩn và đang chờ Admin/Mod xem xét.",
             "hold_for_review": "Tin nhắn của bạn đang chờ Admin/Mod xem xét theo nội quy cộng đồng.",
         }[decision.decision]
         text = (

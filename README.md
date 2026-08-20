@@ -413,7 +413,7 @@ uvicorn src.main:app --reload --port 8000
 | Backend | FastAPI + Uvicorn | 0.100+ |
 | LLM | OpenAI GPT-4o-mini | API |
 | Frontend | Next.js / Streamlit | 14+ / 1.30+ |
-| Database | SQLite (dev) / PostgreSQL (prod) | — |
+| Database | Supabase PostgreSQL + pgvector; SQLite chỉ cho unit test cô lập | — |
 | DevOps | Docker + GitHub Actions | — |
 | Testing | pytest + pytest-asyncio | 8+ |
 

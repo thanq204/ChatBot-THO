@@ -11,9 +11,11 @@ import logging
 import math
 import re
 import sqlite3
+import threading
 import unicodedata
 import uuid
 import urllib.request
+from collections import OrderedDict
 import psycopg2
 import psycopg2.extras
 from datetime import UTC, datetime, timedelta, timezone
@@ -22,6 +24,7 @@ from typing import Any
 
 from backend.config import Settings, get_settings
 from backend.services.database import json_value, postgres_connection, timestamp_value
+from backend.services.question_intent import is_reusable_faq_question
 from backend.models.operations import (
     FAQ,
     CommandContent,
@@ -73,6 +76,12 @@ def _fold_search_text(value: str) -> str:
 # Vietnamese -> English wording gap (for example "đẩy lẻ" -> "Split Push")
 # before the optional answer LLM is called, so the LLM cannot choose a source.
 _KNOWLEDGE_CONCEPTS = (
+    (
+        ("cuoi tuan", "lich hoc", "su kien gi", "su kien nao", "su kien sap toi"),
+        ("cuoi tuan", "lich hoc", "su kien sap toi", "upcoming event", "event schedule"),
+        30,
+    ),
+    (("hoc bang du an", "project based learning", "pbl"), ("hoc bang du an", "project based learning", "pbl"), 30),
     (("xa thu", "adc", "marksman", "bot lane"), ("xa thu", "adc", "marksman", "bot lane"), 30),
     (("duong tren", "top lane", "top"), ("duong tren", "top lane", "top", "nguoi choi duong tren"), 30),
     (("di rung", "jungle", "jungler", "nguoi di rung"), ("di rung", "jungle", "jungler", "nguoi di rung"), 30),
@@ -91,6 +100,12 @@ class OperationsStore:
     def __init__(self, settings: Settings | None = None) -> None:
         settings = settings or get_settings()
         self.settings = settings
+        self._openai_client: Any | None = None
+        self._openai_client_lock = threading.Lock()
+        self._embedding_cache: OrderedDict[str, tuple[str, tuple[float, ...]]] = OrderedDict()
+        self._embedding_cache_lock = threading.Lock()
+        self._knowledge_columns: set[str] | None = None
+        self._knowledge_columns_lock = threading.Lock()
         url = settings.database_url
         # Runtime uses Supabase. An explicitly isolated SQLite path remains
         # available to unit tests without ever becoming a production fallback.
@@ -103,11 +118,16 @@ class OperationsStore:
             self.path = Path(url.removeprefix("sqlite:///"))
             self.path.parent.mkdir(parents=True, exist_ok=True)
         self._create_tables()
-        self.seed_defaults()
+        if not self.is_postgres or self.settings.operations_seed_defaults:
+            self.seed_defaults()
 
     def _connect(self):
         if self.is_postgres:
-            return postgres_connection(self.settings.faq_pg_dsn)
+            return postgres_connection(
+                self.settings.faq_pg_dsn,
+                self.settings.postgres_pool_min_size,
+                self.settings.postgres_pool_max_size,
+            )
         db = sqlite3.connect(self.path)  # type: ignore[arg-type]
         db.row_factory = sqlite3.Row
         return db
@@ -127,6 +147,39 @@ class OperationsStore:
                 password=getattr(self.settings, "faq_pg_password", "faq_pass_dev"),
             )
         return conn
+
+    def _openai(self):
+        if self._openai_client is None:
+            with self._openai_client_lock:
+                if self._openai_client is None:
+                    from openai import OpenAI
+
+                    self._openai_client = OpenAI(api_key=self.settings.openai_api_key)
+        return self._openai_client
+
+    def _provider_embedding(self, text: str, model: str) -> tuple[str, list[float]]:
+        cache_size = self.settings.semantic_embedding_cache_size
+        dimensions = self.settings.openai_embedding_dimensions
+        key = f"{model}:{dimensions}\0{text.strip()}"
+        if cache_size:
+            with self._embedding_cache_lock:
+                cached = self._embedding_cache.get(key)
+                if cached is not None:
+                    self._embedding_cache.move_to_end(key)
+                    return cached[0], list(cached[1])
+
+        request: dict[str, Any] = {"model": model, "input": [text]}
+        if model.startswith("text-embedding-3"):
+            request["dimensions"] = dimensions
+        response = self._openai().embeddings.create(**request)
+        vector = tuple(float(value) for value in response.data[0].embedding)
+        if cache_size:
+            with self._embedding_cache_lock:
+                self._embedding_cache[key] = (model, vector)
+                self._embedding_cache.move_to_end(key)
+                while len(self._embedding_cache) > cache_size:
+                    self._embedding_cache.popitem(last=False)
+        return model, list(vector)
 
     def _create_tables(self) -> None:
         if self.is_postgres:
@@ -506,10 +559,7 @@ class OperationsStore:
         )
         if can_use_provider:
             try:
-                from openai import OpenAI
-
-                response = OpenAI(api_key=self.settings.openai_api_key).embeddings.create(model=model, input=[text])
-                return model, list(response.data[0].embedding)
+                return self._provider_embedding(text, model)
             except Exception:
                 logger.warning("Moderation embedding provider unavailable; using local fallback.", exc_info=True)
         return local_model, self._local_moderation_embedding(text)
@@ -518,13 +568,7 @@ class OperationsStore:
         model = self.settings.openai_embedding_model
         if self.settings.openai_api_key:
             try:
-                from openai import OpenAI
-
-                response = OpenAI(api_key=self.settings.openai_api_key).embeddings.create(
-                    model=model,
-                    input=[text],
-                )
-                return model, list(response.data[0].embedding)
+                return self._provider_embedding(text, model)
             except Exception:
                 logger.warning("Semantic embedding provider unavailable; using deterministic fallback.", exc_info=True)
         return "local-hash-embedding-v1", self._local_moderation_embedding(text)
@@ -550,11 +594,11 @@ class OperationsStore:
                 """INSERT INTO operations_moderation_marks
                 (mark_id, incident_id, message_id, text, normalized_text, category, decision, reason,
                  marked_by, marked_at, source_url, active, version, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE, ?, ?, ?)
                 ON CONFLICT(mark_id) DO UPDATE SET message_id=excluded.message_id, text=excluded.text,
                 normalized_text=excluded.normalized_text, category=excluded.category,
                 decision=excluded.decision, reason=excluded.reason, marked_by=excluded.marked_by,
-                marked_at=excluded.marked_at, source_url=excluded.source_url, active=1,
+                marked_at=excluded.marked_at, source_url=excluded.source_url, active=TRUE,
                 version=excluded.version, updated_at=excluded.updated_at""",
                 (
                     mark_id,
@@ -573,13 +617,24 @@ class OperationsStore:
                     now,
                 ),
             )
-            db.execute(
-                """INSERT INTO operations_moderation_embeddings
-                (mark_id, text_hash, model, vector_json, updated_at) VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(mark_id) DO UPDATE SET text_hash=excluded.text_hash, model=excluded.model,
-                vector_json=excluded.vector_json, updated_at=excluded.updated_at""",
-                (mark_id, self._embedding_hash(text), model, _vector_literal(vector) if self.is_postgres else _json(vector), now),
-            )
+            if self.is_postgres:
+                db.execute(
+                    """INSERT INTO operations_moderation_embeddings
+                    (mark_id, text_hash, model, vector_json, dimensions, embedding_version, updated_at)
+                    VALUES (?, ?, ?, ?::vector, ?, 1, ?)
+                    ON CONFLICT(mark_id) DO UPDATE SET text_hash=excluded.text_hash, model=excluded.model,
+                    vector_json=excluded.vector_json, dimensions=excluded.dimensions,
+                    embedding_version=excluded.embedding_version, updated_at=excluded.updated_at""",
+                    (mark_id, self._embedding_hash(text), model, _vector_literal(vector), len(vector), now),
+                )
+            else:
+                db.execute(
+                    """INSERT INTO operations_moderation_embeddings
+                    (mark_id, text_hash, model, vector_json, updated_at) VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(mark_id) DO UPDATE SET text_hash=excluded.text_hash, model=excluded.model,
+                    vector_json=excluded.vector_json, updated_at=excluded.updated_at""",
+                    (mark_id, self._embedding_hash(text), model, _json(vector), now),
+                )
         self.add_audit(
             incident_id,
             str(message["message_id"]),
@@ -596,17 +651,36 @@ class OperationsStore:
 
         if not self.settings.enable_case_based_learning:
             return ModerationMemoryMatch(False, 0.0, True, False)
-        with self._connect() as db:
-            rows = db.execute(
-                """SELECT m.*, e.model embedding_model, e.vector_json
-                FROM operations_moderation_marks m
-                JOIN operations_moderation_embeddings e ON e.mark_id=m.mark_id
-                WHERE m.active=1 AND m.category=? ORDER BY m.updated_at DESC LIMIT ?""",
-                (category, self.settings.similar_case_limit),
-            ).fetchall()
+        query_vectors: dict[str, list[float]] = {}
+        if self.is_postgres:
+            query_model, query_vector = self._moderation_embedding(text)
+            query_vectors[query_model] = query_vector
+            with self._connect() as db:
+                rows = db.execute(
+                    """SELECT m.*, e.model embedding_model, e.vector_json
+                    FROM operations_moderation_marks m
+                    JOIN operations_moderation_embeddings e ON e.mark_id=m.mark_id
+                    WHERE m.active=TRUE AND m.category=? AND e.model=? AND e.dimensions=?
+                    ORDER BY e.vector_json <=> ?::vector LIMIT ?""",
+                    (
+                        category,
+                        query_model,
+                        len(query_vector),
+                        _vector_literal(query_vector),
+                        self.settings.similar_case_limit,
+                    ),
+                ).fetchall()
+        else:
+            with self._connect() as db:
+                rows = db.execute(
+                    """SELECT m.*, e.model embedding_model, e.vector_json
+                    FROM operations_moderation_marks m
+                    JOIN operations_moderation_embeddings e ON e.mark_id=m.mark_id
+                    WHERE m.active=TRUE AND m.category=? ORDER BY m.updated_at DESC LIMIT ?""",
+                    (category, self.settings.similar_case_limit),
+                ).fetchall()
         if not rows:
             return ModerationMemoryMatch(False, 0.0, True, False)
-        query_vectors: dict[str, list[float]] = {}
         matches: list[tuple[Any, Any]] = []
         config = ModerationMemoryConfig(minimum_score=self.settings.moderation_memory_similarity_threshold)
         for row in rows:
@@ -677,9 +751,7 @@ class OperationsStore:
             )
         )
         try:
-            from openai import OpenAI
-
-            response = OpenAI(api_key=self.settings.openai_api_key).chat.completions.create(
+            response = self._openai().chat.completions.create(
                 model=self.settings.moderation_memory_llm_model,
                 temperature=0,
                 response_format={"type": "json_object"},
@@ -811,7 +883,72 @@ class OperationsStore:
             old = db.execute("SELECT version FROM operations_policies WHERE policy_id=?", (policy_id,)).fetchone()
             version = int(old["version"]) + 1 if old else 1
             db.execute("""INSERT INTO operations_policies VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(policy_id) DO UPDATE SET name=excluded.name, description=excluded.description, category=excluded.category, action=excluded.action, trigger_terms_json=excluded.trigger_terms_json, active=excluded.active, version=excluded.version, updated_at=excluded.updated_at""", (policy_id, request.name, request.description, request.category, request.action, _json(request.trigger_terms), bool(request.active), version, now))
-        return next(item for item in self.list_policies() if item.policy_id == policy_id)
+        policy = next(item for item in self.list_policies() if item.policy_id == policy_id)
+        if (
+            self.is_postgres
+            and self.settings.enable_policy_retrieval
+            and self.settings.openai_api_key
+        ):
+            policy_text = "\n".join(
+                [policy.name, policy.description, policy.category, *policy.trigger_terms]
+            )
+            model, vector = self._semantic_embedding(policy_text)
+            with self._connect() as db:
+                db.execute(
+                    """INSERT INTO operations_policy_embeddings
+                    (policy_id, text_hash, model, embedding, dimensions, embedding_version, updated_at)
+                    VALUES (?, ?, ?, ?::vector, ?, 1, ?)
+                    ON CONFLICT(policy_id) DO UPDATE SET text_hash=excluded.text_hash,
+                    model=excluded.model, embedding=excluded.embedding,
+                    dimensions=excluded.dimensions, embedding_version=excluded.embedding_version,
+                    updated_at=excluded.updated_at""",
+                    (
+                        policy_id,
+                        self._embedding_hash(policy_text),
+                        model,
+                        _vector_literal(vector),
+                        len(vector),
+                        now,
+                    ),
+                )
+        return policy
+
+    def retrieve_policy_candidates(self, text: str, limit: int = 3) -> list[tuple[float, Policy]]:
+        """Return active policies nearest to a message in the current vector space."""
+        if (
+            not self.is_postgres
+            or not self.settings.enable_policy_retrieval
+            or not self.settings.openai_api_key
+        ):
+            return []
+        model, vector = self._semantic_embedding(text)
+        literal = _vector_literal(vector)
+        with self._connect() as db:
+            rows = db.execute(
+                """SELECT p.*, 1 - (e.embedding <=> ?::vector) AS similarity
+                FROM operations_policy_embeddings e
+                JOIN operations_policies p ON p.policy_id=e.policy_id
+                WHERE p.active=TRUE AND p.action<>'allow' AND e.model=? AND e.dimensions=?
+                ORDER BY e.embedding <=> ?::vector LIMIT ?""",
+                (literal, model, len(vector), literal, limit),
+            ).fetchall()
+        return [
+            (
+                float(row["similarity"]),
+                Policy(
+                    policy_id=row["policy_id"],
+                    name=row["name"],
+                    description=row["description"],
+                    category=row["category"],
+                    action=row["action"],
+                    trigger_terms=json_value(row["trigger_terms_json"], []),
+                    active=bool(row["active"]),
+                    version=int(row["version"]),
+                    updated_at=timestamp_value(row["updated_at"]),
+                ),
+            )
+            for row in rows
+        ]
 
     def delete_policy(self, policy_id: str) -> bool:
         with self._connect() as db:
@@ -864,27 +1001,29 @@ class OperationsStore:
             return self._list_knowledge_sqlite(dataset)
 
         try:
-            conn = self._connect_pg()
-            with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-                cur.execute(
-                    "SELECT column_name FROM information_schema.columns "
-                    "WHERE table_schema='public' AND table_name='knowledge_documents'"
-                )
-                columns = {row[0] for row in cur.fetchall()}
-                if not {"document_id", "title", "body"}.issubset(columns):
-                    raise ValueError("knowledge_documents is missing required columns")
+            if self._knowledge_columns is None:
+                with self._knowledge_columns_lock:
+                    if self._knowledge_columns is None:
+                        with self._connect() as db:
+                            rows = db.execute(
+                                "SELECT column_name FROM information_schema.columns "
+                                "WHERE table_schema='public' AND table_name='knowledge_documents'"
+                            ).fetchall()
+                        self._knowledge_columns = {str(row[0]) for row in rows}
+            columns = self._knowledge_columns
+            if not {"document_id", "title", "body"}.issubset(columns):
+                raise ValueError("knowledge_documents is missing required columns")
 
+            with self._connect() as db:
                 selected = ["document_id", "title", "body"]
                 selected.extend(name for name in ("tags", "dataset", "active", "updated_at") if name in columns)
                 query = f"SELECT {', '.join(selected)} FROM knowledge_documents"
                 params: tuple[object, ...] = ()
                 if dataset and "dataset" in columns:
-                    query += " WHERE dataset=%s"
+                    query += " WHERE dataset=?"
                     params = (dataset,)
                 query += " ORDER BY updated_at DESC" if "updated_at" in columns else " ORDER BY document_id"
-                cur.execute(query, params)
-                rows = cur.fetchall()
-            conn.close()
+                rows = db.execute(query, params).fetchall()
             documents = [self._postgres_knowledge(row) for row in rows]
             if dataset and "dataset" not in columns and dataset != "general":
                 return []
@@ -901,7 +1040,6 @@ class OperationsStore:
         source_file: str | None = None,
     ) -> KnowledgeDocument:
         import psycopg2
-        from openai import OpenAI
         
         now = _now()
         
@@ -924,10 +1062,18 @@ class OperationsStore:
         if not chunks:
             chunks = [text[:1500]]
             
-        # 2. Get embeddings
-        client = OpenAI(api_key=self.settings.openai_api_key)
-        response = client.embeddings.create(model=self.settings.openai_embedding_model, input=chunks)
-        embeddings = [list(item.embedding) for item in response.data]
+        # 2. Embeddings are explicit. Documents and chunks are still stored
+        # when the provider is disabled so lexical retrieval remains usable.
+        embeddings: list[list[float] | None] = [None] * len(chunks)
+        if self.settings.knowledge_embedding_enabled and self.settings.openai_api_key:
+            request: dict[str, Any] = {
+                "model": self.settings.openai_embedding_model,
+                "input": chunks,
+            }
+            if self.settings.openai_embedding_model.startswith("text-embedding-3"):
+                request["dimensions"] = self.settings.openai_embedding_dimensions
+            response = self._openai().embeddings.create(**request)
+            embeddings = [list(item.embedding) for item in response.data]
         
         # 3. Upsert into PostgreSQL
         try:
@@ -957,11 +1103,20 @@ class OperationsStore:
                         VALUES (%s, %s, %s, %s, %s)
                     """, (chunk_id, document_id, i, chunk_text, now))
                     
-                    vector_str = "[" + ",".join(str(f) for f in embedding) + "]"
-                    cur.execute("""
-                        INSERT INTO knowledge_section_embeddings (chunk_id, embedding, updated_at)
-                        VALUES (%s, %s::vector, %s)
-                    """, (chunk_id, vector_str, now))
+                    if embedding is not None:
+                        vector_str = "[" + ",".join(str(f) for f in embedding) + "]"
+                        cur.execute("""
+                            INSERT INTO knowledge_section_embeddings
+                            (chunk_id, embedding, model, text_hash, dimensions, embedding_version, updated_at)
+                            VALUES (%s, %s::vector, %s, %s, %s, 1, %s)
+                        """, (
+                            chunk_id,
+                            vector_str,
+                            self.settings.openai_embedding_model,
+                            self._embedding_hash(chunk_text),
+                            len(embedding),
+                            now,
+                        ))
             conn.commit()
             conn.close()
         except Exception:
@@ -1068,15 +1223,15 @@ class OperationsStore:
     def find_faq(self, question: str, threshold: float = 0.72) -> FAQ | None:
         if self.is_postgres and self.settings.faq_semantic_clustering_enabled:
             try:
-                _model, vector = self._semantic_embedding(question)
+                model, vector = self._semantic_embedding(question)
                 with self._connect() as db:
                     row = db.execute(
                         """SELECT f.*, 1 - (e.embedding <=> ?::vector) AS similarity
                         FROM operations_faq_embeddings e
                         JOIN operations_faqs f ON f.faq_id=e.faq_id
-                        WHERE f.active=TRUE
+                        WHERE f.active=TRUE AND e.model=?
                         ORDER BY e.embedding <=> ?::vector LIMIT 1""",
-                        (_vector_literal(vector), _vector_literal(vector)),
+                        (_vector_literal(vector), model, _vector_literal(vector)),
                     ).fetchone()
                 if row and float(row["similarity"]) >= self.settings.faq_semantic_match_threshold:
                     return self._faq(row)
@@ -1101,10 +1256,12 @@ class OperationsStore:
             with self._connect() as db:
                 db.execute(
                     """INSERT INTO operations_faq_embeddings
-                    (faq_id, text_hash, model, embedding, updated_at) VALUES (?, ?, ?, ?::vector, ?)
+                    (faq_id, text_hash, model, embedding, dimensions, embedding_version, updated_at)
+                    VALUES (?, ?, ?, ?::vector, ?, 1, ?)
                     ON CONFLICT(faq_id) DO UPDATE SET text_hash=excluded.text_hash, model=excluded.model,
-                    embedding=excluded.embedding, updated_at=excluded.updated_at""",
-                    (faq_id, self._embedding_hash(request.question), model, _vector_literal(vector), now),
+                    embedding=excluded.embedding, dimensions=excluded.dimensions,
+                    embedding_version=excluded.embedding_version, updated_at=excluded.updated_at""",
+                    (faq_id, self._embedding_hash(request.question), model, _vector_literal(vector), len(vector), now),
                 )
         return next(faq for faq in self.list_faqs() if faq.faq_id == faq_id), similar
 
@@ -1114,6 +1271,8 @@ class OperationsStore:
         return cursor.rowcount > 0
 
     def record_unanswered_question(self, message: CommonMessage, minimum_questions: int = 3) -> FAQSuggestion | None:
+        if not is_reusable_faq_question(message.text):
+            return None
         if self.is_postgres:
             return self.record_member_question(message, minimum_questions)
         normalized = _fold_search_text(message.text)
@@ -1139,8 +1298,16 @@ class OperationsStore:
         suggestion = self._suggestion(row)
         return suggestion if suggestion.question_count >= minimum_questions else None
 
-    def record_member_question(self, message: CommonMessage, minimum_questions: int = 3) -> FAQSuggestion | None:
-        """Persist and semantically cluster every safe question sent to the bot."""
+    def record_member_question(
+        self,
+        message: CommonMessage,
+        minimum_questions: int = 3,
+        *,
+        outcome_stage: str = "unanswered",
+    ) -> FAQSuggestion | None:
+        """Persist only reusable questions that did not match an approved FAQ."""
+        if not is_reusable_faq_question(message.text):
+            return None
         if not self.is_postgres:
             return self.record_unanswered_question(message, minimum_questions)
         normalized = _fold_search_text(message.text)
@@ -1152,9 +1319,10 @@ class OperationsStore:
             row = db.execute(
                 """INSERT INTO operations_faq_questions
                 (question_id, message_id, question, normalized_question, platform, community_id,
-                 channel_id, author_id, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(message_id) DO NOTHING RETURNING question_id""",
+                 channel_id, author_id, outcome_stage, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(message_id) DO UPDATE SET outcome_stage=excluded.outcome_stage
+                RETURNING question_id""",
                 (
                     question_id,
                     message.message_id,
@@ -1164,6 +1332,7 @@ class OperationsStore:
                     message.community_id,
                     message.channel_id,
                     message.author_id,
+                    outcome_stage[:30],
                     now,
                 ),
             ).fetchone()
@@ -1179,11 +1348,12 @@ class OperationsStore:
         with self._connect() as db:
             db.execute(
                 """INSERT INTO faq_question_embeddings
-                (question_id, text_hash, model, embedding, created_at)
-                VALUES (?, ?, ?, ?::vector, ?)
+                (question_id, text_hash, model, embedding, dimensions, embedding_version, created_at)
+                VALUES (?, ?, ?, ?::vector, ?, 1, ?)
                 ON CONFLICT(question_id) DO UPDATE SET text_hash=excluded.text_hash,
-                model=excluded.model, embedding=excluded.embedding""",
-                (question_id, self._embedding_hash(message.text), model, _vector_literal(vector), now),
+                model=excluded.model, embedding=excluded.embedding,
+                dimensions=excluded.dimensions, embedding_version=excluded.embedding_version""",
+                (question_id, self._embedding_hash(message.text), model, _vector_literal(vector), len(vector), now),
             )
         cluster_id = self._cluster_member_question(question_id, message.text, normalized, model, vector)
         suggestion = self._suggestion_for_cluster(cluster_id)
@@ -1211,9 +1381,7 @@ class OperationsStore:
             + json.dumps(payload, ensure_ascii=False)
         )
         try:
-            from openai import OpenAI
-
-            response = OpenAI(api_key=self.settings.openai_api_key).chat.completions.create(
+            response = self._openai().chat.completions.create(
                 model=self.settings.faq_clustering_model,
                 temperature=0,
                 response_format={"type": "json_object"},
@@ -1238,9 +1406,9 @@ class OperationsStore:
         with self._connect() as db:
             candidates = db.execute(
                 """SELECT *, 1 - (centroid_embedding <=> ?::vector) AS similarity
-                FROM faq_topic_clusters WHERE status='open'
+                FROM faq_topic_clusters WHERE status='open' AND embedding_model=?
                 ORDER BY centroid_embedding <=> ?::vector LIMIT 5""",
-                (vector_literal, vector_literal),
+                (vector_literal, model, vector_literal),
             ).fetchall()
 
         selected = None
@@ -1272,8 +1440,9 @@ class OperationsStore:
                 db.execute(
                     """INSERT INTO faq_topic_clusters
                     (cluster_id, topic_label, normalized_label, representative_question, question_count,
-                     sample_questions, centroid_embedding, embedding_model, status, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, 1, ?, ?::vector, ?, 'open', ?, ?)""",
+                     sample_questions, centroid_embedding, embedding_model, embedding_dimensions,
+                     embedding_version, status, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, 1, ?, ?::vector, ?, ?, 1, 'open', ?, ?)""",
                     (
                         cluster_id,
                         topic_label,
@@ -1282,6 +1451,7 @@ class OperationsStore:
                         _json([question]),
                         vector_literal,
                         model,
+                        len(vector),
                         now,
                         now,
                     ),
@@ -1618,29 +1788,20 @@ class OperationsStore:
         if not self.settings.knowledge_embedding_enabled or not self.settings.openai_api_key:
             return None
         try:
-            from openai import OpenAI
-            import psycopg2
-            import psycopg2.extras
-            
-            client = OpenAI(api_key=self.settings.openai_api_key)
             model = self.settings.openai_embedding_model
-            
-            query_response = client.embeddings.create(model=model, input=[question])
-            query_vector = list(query_response.data[0].embedding)
-            
-            conn = self._connect_pg()
-            
-            with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-                vector_str = "[" + ",".join(str(f) for f in query_vector) + "]"
-                
+            _model, query_vector = self._provider_embedding(question, model)
+            vector_str = _vector_literal(query_vector)
+
+            with self._connect() as db:
                 query = """
                     WITH ranked_chunks AS (
                         SELECT 
                             s.document_id,
-                            1 - (e.embedding <=> %s::vector) AS similarity_score
+                            1 - (e.embedding <=> ?::vector) AS similarity_score
                         FROM knowledge_section_embeddings e
                         JOIN knowledge_sections s ON e.chunk_id = s.chunk_id
-                        ORDER BY e.embedding <=> %s::vector
+                        WHERE e.model=? AND e.dimensions=?
+                        ORDER BY e.embedding <=> ?::vector
                         LIMIT 50
                     ),
                     best_per_doc AS (
@@ -1648,7 +1809,7 @@ class OperationsStore:
                         FROM ranked_chunks
                         GROUP BY document_id
                         ORDER BY max_score DESC
-                        LIMIT %s
+                        LIMIT ?
                     )
                     SELECT 
                         d.document_id, d.title, d.body, d.tags, d.dataset, d.active, d.updated_at,
@@ -1658,10 +1819,16 @@ class OperationsStore:
                     WHERE d.active=TRUE
                     ORDER BY b.max_score DESC;
                 """
-                cur.execute(query, (vector_str, vector_str, limit))
-                rows = cur.fetchall()
-                
-            conn.close()
+                rows = db.execute(
+                    query,
+                    (
+                        vector_str,
+                        model,
+                        len(query_vector),
+                        vector_str,
+                        limit,
+                    ),
+                ).fetchall()
             
             scored = []
             for row in rows:
@@ -1714,6 +1881,7 @@ class OperationsStore:
             "doi", "hinh", "trong", "mot", "cac", "cho", "va", "la", "cua", "voi",
             "theo", "thong", "tin", "ve", "gi", "the", "co", "toi", "can", "khi",
             "lien", "minh", "huyen", "thoai", "vai", "tro", "nhiem", "vu", "lam",
+            "khong", "hoc", "dang", "tham", "gia", "nay", "thi", "bang", "phuong", "phap",
         }
         words = {word for word in question_tokens if word not in stopwords}
         active_concepts = [concept for concept in _KNOWLEDGE_CONCEPTS if any(alias in question_text for alias in concept[0])]
@@ -1763,6 +1931,18 @@ class OperationsStore:
                 metadata_text = _fold_search_text(f"{doc.title} {' '.join(doc.tags)}")
                 if "composition" in metadata_text or "doi hinh" in metadata_text:
                     score += 24
+            # A fallback candidate must contain topic evidence, not merely a
+            # generic word shared with unrelated documents. This prevents a
+            # question such as "cuối tuần có sự kiện gì không" from selecting
+            # an arbitrary learning document when no event source exists.
+            has_specific_evidence = (
+                title_matches > 0
+                or phrase_matches >= 2
+                or content_matches >= 3
+                or semantic_hits > 0
+            )
+            if not has_specific_evidence:
+                score = 0
             # Once the query contains a known topic (for example "xạ thủ"),
             # a document that never mentions that topic is not allowed to win
             # merely because it shares generic words such as "vai trò".
@@ -1773,12 +1953,14 @@ class OperationsStore:
         # context. An empty result must stay empty so the caller can say that
         # the knowledge hub has no answer instead of hallucinating.
         ranked = sorted(scored, key=lambda item: (item[0], item[1]), reverse=True)
-        if not ranked or ranked[0][0] <= 0:
+        if not ranked or ranked[0][0] < 3:
             return []
         best_score = ranked[0][0]
-        relevance_floor = max(2, best_score * 0.35)
+        relevance_floor = max(3, best_score * 0.35)
         selected = [item for item in ranked[:limit] if item[0] >= relevance_floor]
-        return [(min(1.0, score / best_score), doc) for score, _semantic_hits, doc in selected]
+        # Keep an absolute confidence signal. Normalizing by best_score made
+        # every weak query look like a perfect retrieval match.
+        return [(min(0.95, score / (score + 2.0)), doc) for score, _semantic_hits, doc in selected]
 
     def summary(self) -> OperationsSummary:
         with self._connect() as db:

@@ -130,6 +130,8 @@ CREATE TABLE IF NOT EXISTS public.operations_moderation_embeddings (
     vector_json VECTOR(1536) NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE public.operations_moderation_embeddings ADD COLUMN IF NOT EXISTS dimensions INTEGER NOT NULL DEFAULT 1536;
+ALTER TABLE public.operations_moderation_embeddings ADD COLUMN IF NOT EXISTS embedding_version INTEGER NOT NULL DEFAULT 1;
 
 CREATE TABLE IF NOT EXISTS public.operations_knowledge_imports (
     import_id VARCHAR(200) PRIMARY KEY,
@@ -196,6 +198,8 @@ CREATE TABLE IF NOT EXISTS public.operations_faq_embeddings (
     embedding VECTOR(1536) NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE public.operations_faq_embeddings ADD COLUMN IF NOT EXISTS dimensions INTEGER NOT NULL DEFAULT 1536;
+ALTER TABLE public.operations_faq_embeddings ADD COLUMN IF NOT EXISTS embedding_version INTEGER NOT NULL DEFAULT 1;
 
 CREATE TABLE IF NOT EXISTS public.operations_faq_questions (
     question_id VARCHAR(200) PRIMARY KEY,
@@ -220,6 +224,8 @@ CREATE TABLE IF NOT EXISTS public.faq_question_embeddings (
     embedding VECTOR(1536) NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE public.faq_question_embeddings ADD COLUMN IF NOT EXISTS dimensions INTEGER NOT NULL DEFAULT 1536;
+ALTER TABLE public.faq_question_embeddings ADD COLUMN IF NOT EXISTS embedding_version INTEGER NOT NULL DEFAULT 1;
 
 CREATE TABLE IF NOT EXISTS public.faq_topic_clusters (
     cluster_id VARCHAR(200) PRIMARY KEY,
@@ -233,6 +239,23 @@ CREATE TABLE IF NOT EXISTS public.faq_topic_clusters (
     status VARCHAR(30) NOT NULL DEFAULT 'open' CHECK (status IN ('open','approved','dismissed')),
     approved_faq_id VARCHAR(200) REFERENCES public.operations_faqs(faq_id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+ALTER TABLE public.faq_topic_clusters ADD COLUMN IF NOT EXISTS embedding_dimensions INTEGER NOT NULL DEFAULT 1536;
+ALTER TABLE public.faq_topic_clusters ADD COLUMN IF NOT EXISTS embedding_version INTEGER NOT NULL DEFAULT 1;
+
+ALTER TABLE public.knowledge_section_embeddings ADD COLUMN IF NOT EXISTS model VARCHAR(100) NOT NULL DEFAULT 'legacy-unknown';
+ALTER TABLE public.knowledge_section_embeddings ADD COLUMN IF NOT EXISTS text_hash VARCHAR(64);
+ALTER TABLE public.knowledge_section_embeddings ADD COLUMN IF NOT EXISTS dimensions INTEGER NOT NULL DEFAULT 1536;
+ALTER TABLE public.knowledge_section_embeddings ADD COLUMN IF NOT EXISTS embedding_version INTEGER NOT NULL DEFAULT 1;
+
+CREATE TABLE IF NOT EXISTS public.operations_policy_embeddings (
+    policy_id VARCHAR(200) PRIMARY KEY REFERENCES public.operations_policies(policy_id) ON DELETE CASCADE,
+    text_hash VARCHAR(64) NOT NULL,
+    model VARCHAR(100) NOT NULL,
+    embedding VECTOR(1536) NOT NULL,
+    dimensions INTEGER NOT NULL DEFAULT 1536,
+    embedding_version INTEGER NOT NULL DEFAULT 1,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

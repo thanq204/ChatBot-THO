@@ -1,8 +1,13 @@
+from datetime import UTC, datetime
+from uuid import uuid4
+
 import pytest
 
 from backend.api import routes
 from backend.config import Settings
-from backend.main import FRONTEND_DIST
+from backend.main import FRONTEND_DIST, app
+from backend.models.auth import UserPublic
+from backend.services.auth_service import current_user
 from backend.services.moderation import ModerationEngine
 from backend.services.review_store import ReviewStore
 
@@ -12,7 +17,18 @@ def moderation_api_store(monkeypatch, tmp_path):
     store = ReviewStore(f"sqlite:///{tmp_path / 'api-reviews.db'}")
     monkeypatch.setattr(routes, "_review_store", store)
     monkeypatch.setattr(routes, "_moderation_engine", ModerationEngine(Settings(moderation_mode="mock", gemini_api_key="")))
-    return store
+    admin = UserPublic(
+        user_id=uuid4(),
+        email="admin@test.local",
+        display_name="Test Admin",
+        role="admin",
+        is_root_admin=True,
+        is_active=True,
+        created_at=datetime.now(UTC),
+    )
+    app.dependency_overrides[current_user] = lambda: admin
+    yield store
+    app.dependency_overrides.pop(current_user, None)
 
 
 @pytest.mark.asyncio

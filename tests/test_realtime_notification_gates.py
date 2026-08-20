@@ -1,4 +1,6 @@
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
+from unittest.mock import Mock
 
 from backend.config import Settings
 from backend.models.operations import CommonMessage, MessageDecision, PolicyUpsertRequest
@@ -76,6 +78,35 @@ def test_gate2_automatically_reads_nearby_context(tmp_path) -> None:
     assert result.send_to_admin is False
 
 
+def test_targeted_profanity_is_blocked_even_when_nearby_context_is_joking(tmp_path) -> None:
+    settings = _settings(tmp_path)
+    store = OperationsStore(settings)
+    prior = _message("profanity-context-1", "Tụi mình đang đùa thôi nha haha")
+    store.save_message(prior, _allowed(), None)
+
+    result = OperationsPipeline(store, settings).analyze(
+        _message("profanity-context-2", "địt cụ m", seconds=1),
+    )
+
+    assert result.decision == "warn"
+    assert result.category == "harassment"
+    assert result.gates[0].label == "targeted_profanity"
+    assert result.gates[1].label != "context_deescalated_joke"
+    assert result.send_to_admin is True
+    assert result.incident_id
+
+
+def test_safe_message_skips_context_lookup(tmp_path) -> None:
+    settings = _settings(tmp_path)
+    store = OperationsStore(settings)
+    store.recent_context = Mock(side_effect=AssertionError("safe messages must not query context"))
+
+    result = OperationsPipeline(store, settings).analyze(_message("safe-fast-path", "Chào mọi người"))
+
+    assert result.decision == "allow"
+    store.recent_context.assert_not_called()
+
+
 def test_gate3_suppresses_case_after_human_resolution(tmp_path) -> None:
     settings = _settings(tmp_path)
     store = OperationsStore(settings)
@@ -95,6 +126,24 @@ def test_gate3_suppresses_case_after_human_resolution(tmp_path) -> None:
     assert repeated.banner and "mod-lan" in repeated.banner
     assert TelegramAlertSender.should_alert(repeated, 0.55) is False
     assert len(store.list_incidents()) == 1
+
+
+def test_gate3_query_uses_postgres_boolean_literal(tmp_path) -> None:
+    store = OperationsStore(_settings(tmp_path))
+    db = Mock()
+    db.execute.return_value.fetchall.return_value = []
+
+    @contextmanager
+    def fake_connect():
+        yield db
+
+    store._connect = fake_connect
+
+    result = store.match_reviewed_case("targeted abuse", "harassment")
+
+    sql = " ".join(db.execute.call_args.args[0].split())
+    assert "m.active=TRUE" in sql
+    assert result.matched is False
 
 
 def test_gate3_keeps_a_different_new_case_for_admin(tmp_path) -> None:
