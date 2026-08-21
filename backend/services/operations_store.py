@@ -276,12 +276,13 @@ class OperationsStore:
         if not self.is_postgres or self.settings.operations_seed_defaults:
             self.seed_defaults()
 
-    def _connect(self):
+    def _connect(self, readonly: bool = False):
         if self.is_postgres:
             return postgres_connection(
                 self.settings.faq_pg_dsn,
                 self.settings.postgres_pool_min_size,
                 self.settings.postgres_pool_max_size,
+                readonly=readonly,
             )
         db = sqlite3.connect(self.path)  # type: ignore[arg-type]
         db.row_factory = sqlite3.Row
@@ -1350,7 +1351,7 @@ class OperationsStore:
         return self.get_incident(incident_id)  # type: ignore[return-value]
 
     def get_incident(self, incident_id: str) -> Incident | None:
-        with self._connect() as db:
+        with self._connect(readonly=True) as db:
             row = db.execute("SELECT * FROM operations_incidents WHERE incident_id=?", (incident_id,)).fetchone()
         return self._incident(row) if row else None
 
@@ -1363,7 +1364,7 @@ class OperationsStore:
             clauses.append("platform=?")
             values.append(platform)
         where = " WHERE " + " AND ".join(clauses) if clauses else ""
-        with self._connect() as db:
+        with self._connect(readonly=True) as db:
             rows = db.execute(f"SELECT * FROM operations_incidents{where} ORDER BY CASE severity WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 ELSE 4 END, updated_at DESC", values).fetchall()
         return [self._incident(row) for row in rows]
 
@@ -1374,7 +1375,7 @@ class OperationsStore:
 
     def get_incident_message(self, incident_id: str, message_id: str | None = None) -> dict[str, Any] | None:
         """Get the explicitly selected message, or the latest case message."""
-        with self._connect() as db:
+        with self._connect(readonly=True) as db:
             if message_id:
                 row = db.execute("SELECT * FROM operations_messages WHERE incident_id=? AND message_id=?", (incident_id, message_id)).fetchone()
             else:
@@ -1774,12 +1775,12 @@ class OperationsStore:
         )
 
     def get_command_content(self, command: str) -> CommandContent | None:
-        with self._connect() as db:
+        with self._connect(readonly=True) as db:
             row = db.execute("SELECT * FROM operations_command_content WHERE command=?", (command,)).fetchone()
         return self._command_content(row) if row else None
 
     def list_command_content(self) -> list[CommandContent]:
-        with self._connect() as db:
+        with self._connect(readonly=True) as db:
             rows = db.execute("SELECT * FROM operations_command_content ORDER BY command").fetchall()
         return [self._command_content(row) for row in rows]
 
@@ -1809,7 +1810,7 @@ class OperationsStore:
         return report
 
     def list_member_reports(self) -> list[MemberReport]:
-        with self._connect() as db:
+        with self._connect(readonly=True) as db:
             rows = db.execute("SELECT * FROM operations_member_reports ORDER BY created_at DESC").fetchall()
         return [MemberReport(report_id=row["report_id"], platform=row["platform"], reporter_id=row["reporter_id"], channel_id=row["channel_id"], details=row["details"], status=row["status"], created_at=timestamp_value(row["created_at"])) for row in rows]
 
@@ -2243,7 +2244,7 @@ class OperationsStore:
 
     def community_health(self, window_hours: int = 24) -> CommunityHealth:
         since = (datetime.now(UTC) - timedelta(hours=window_hours)).isoformat()
-        with self._connect() as db:
+        with self._connect(readonly=True) as db:
             rows = db.execute("SELECT text, category, decision, author_id FROM operations_messages WHERE timestamp>=?", (since,)).fetchall()
             first_seen = db.execute("SELECT author_id, MIN(timestamp) first_seen FROM operations_messages GROUP BY author_id").fetchall()
             open_suggestions = int(db.execute("SELECT COUNT(*) FROM operations_faq_suggestions WHERE status='open'").fetchone()[0])
@@ -2282,7 +2283,7 @@ class OperationsStore:
         newest -= timedelta(hours=newest.hour % bucket_hours)
         start = newest - bucket * (slots - 1)
 
-        with self._connect() as db:
+        with self._connect(readonly=True) as db:
             rows = db.execute(
                 "SELECT timestamp, COALESCE(decision,'allow') decision FROM operations_messages WHERE timestamp>=?",
                 (start.isoformat(),),
@@ -2587,15 +2588,40 @@ class OperationsStore:
         # every weak query look like a perfect retrieval match.
         return [(min(0.95, score / (score + 2.0)), doc) for score, _semantic_hits, doc in selected]
 
+    # Six separate statements here used to cost six round-trips, which dominates
+    # the overview page against a remote database. The counts collapse into one
+    # scalar row and the three breakdowns into one tagged UNION.
+    _SUMMARY_COUNTS_SQL = """
+        SELECT
+            (SELECT COUNT(*) FROM operations_messages) total_messages,
+            (SELECT COUNT(*) FROM operations_incidents WHERE status IN ('open','monitoring')) open_incidents,
+            (SELECT COUNT(*) FROM operations_incidents WHERE severity='critical' AND status IN ('open','monitoring')) critical_incidents
+    """
+    _SUMMARY_BREAKDOWN_SQL = """
+        SELECT 'platform' dimension, platform label, COUNT(*) count FROM operations_messages GROUP BY platform
+        UNION ALL
+        SELECT 'decision', COALESCE(decision,'unknown'), COUNT(*) FROM operations_messages GROUP BY decision
+        UNION ALL
+        SELECT 'category', COALESCE(category,'unknown'), COUNT(*) FROM operations_messages GROUP BY category
+    """
+
     def summary(self) -> OperationsSummary:
-        with self._connect() as db:
-            messages = int(db.execute("SELECT COUNT(*) FROM operations_messages").fetchone()[0])
-            open_count = int(db.execute("SELECT COUNT(*) FROM operations_incidents WHERE status IN ('open','monitoring')").fetchone()[0])
-            critical = int(db.execute("SELECT COUNT(*) FROM operations_incidents WHERE severity='critical' AND status IN ('open','monitoring')").fetchone()[0])
-            platform_rows = db.execute("SELECT platform, COUNT(*) count FROM operations_messages GROUP BY platform").fetchall()
-            decision_rows = db.execute("SELECT COALESCE(decision,'unknown') decision, COUNT(*) count FROM operations_messages GROUP BY decision").fetchall()
-            category_rows = db.execute("SELECT COALESCE(category,'unknown') category, COUNT(*) count FROM operations_messages GROUP BY category").fetchall()
-        return OperationsSummary(messages_analyzed=messages, open_incidents=open_count, critical_incidents=critical, by_platform={r["platform"]: r["count"] for r in platform_rows}, by_decision={r["decision"]: r["count"] for r in decision_rows}, by_category={r["category"]: r["count"] for r in category_rows})
+        with self._connect(readonly=True) as db:
+            counts = db.execute(self._SUMMARY_COUNTS_SQL).fetchone()
+            breakdown_rows = db.execute(self._SUMMARY_BREAKDOWN_SQL).fetchall()
+
+        buckets: dict[str, dict[str, int]] = {"platform": {}, "decision": {}, "category": {}}
+        for row in breakdown_rows:
+            buckets[row["dimension"]][row["label"]] = row["count"]
+
+        return OperationsSummary(
+            messages_analyzed=int(counts["total_messages"]),
+            open_incidents=int(counts["open_incidents"]),
+            critical_incidents=int(counts["critical_incidents"]),
+            by_platform=buckets["platform"],
+            by_decision=buckets["decision"],
+            by_category=buckets["category"],
+        )
 
     @staticmethod
     def _incident(row: sqlite3.Row) -> Incident:

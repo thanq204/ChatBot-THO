@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.concurrency import run_in_threadpool
 
 from backend.agents.graph import agent
 from backend.models.moderation import (
@@ -44,7 +45,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
 
 
 @router.get("/status")
-async def agent_status():
+def agent_status():
     return {"status": "ready", "agent": "LangGraph Agent v1.0"}
 
 
@@ -54,7 +55,13 @@ async def submit_for_moderation(submission: MemberSubmission) -> ModerationSubmi
         result = await get_moderation_engine().moderate(submission)
     except ModerationConfigurationError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=exc.user_message) from exc
-    review = get_review_store().create_review(submission, result) if result.needs_admin_review else None
+    # This handler has to stay a coroutine for `moderate`, so the blocking write
+    # below must be pushed off the event loop by hand.
+    review = (
+        await run_in_threadpool(get_review_store().create_review, submission, result)
+        if result.needs_admin_review
+        else None
+    )
     message = "Nội dung đang chờ Admin xem xét." if review else "Phân tích moderation đã hoàn tất."
     return ModerationSubmissionResponse(
         moderation=result,
@@ -68,12 +75,12 @@ async def submit_for_moderation(submission: MemberSubmission) -> ModerationSubmi
 
 
 @router.get("/moderation/review-queue", response_model=list[ReviewCase])
-async def review_queue(_: UserPublic = Depends(require_roles("admin", "mod"))) -> list[ReviewCase]:
+def review_queue(_: UserPublic = Depends(require_roles("admin", "mod"))) -> list[ReviewCase]:
     return get_review_store().list_pending()
 
 
 @router.post("/moderation/review-queue/{review_id}/decision", response_model=ReviewCase)
-async def decide_review(
+def decide_review(
     review_id: str,
     decision: AdminDecisionRequest,
     _: UserPublic = Depends(require_roles("admin", "mod")),
@@ -87,17 +94,17 @@ async def decide_review(
 
 
 @router.get("/moderation/audit-logs", response_model=list[AuditLogEntry])
-async def audit_logs(_: UserPublic = Depends(require_roles("admin"))) -> list[AuditLogEntry]:
+def audit_logs(_: UserPublic = Depends(require_roles("admin"))) -> list[AuditLogEntry]:
     return get_review_store().list_audit_logs()
 
 
 @router.get("/moderation/demo-cases", response_model=list[MemberSubmission])
-async def demo_cases() -> list[MemberSubmission]:
+def demo_cases() -> list[MemberSubmission]:
     return DEMO_CASES
 
 
 @router.get("/moderation/status")
-async def moderation_status() -> dict[str, object]:
+def moderation_status() -> dict[str, object]:
     engine = get_moderation_engine()
     settings = engine.settings
     provider = engine.provider
