@@ -1,4 +1,5 @@
-import { useCallback, useDeferredValue, useEffect, useState } from "react";
+import { useCallback, useDeferredValue, useState } from "react";
+import { useQueries, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowClockwise,
   CheckCircle,
@@ -12,6 +13,7 @@ import Card from "../components/Card.jsx";
 import { EmptyState, ErrorState } from "../components/StatePanels.jsx";
 import { SkeletonBlock } from "../components/Skeleton.jsx";
 import { ops } from "../api/client.js";
+import { queryKeys } from "../lib/queryClient.js";
 import { formatNumber, relativeTime } from "../lib/format.js";
 
 const STATUS_META = {
@@ -29,37 +31,30 @@ const TRIGGER_LABELS = {
 };
 
 export default function ReputationPage() {
-  const [members, setMembers] = useState(null);
-  const [links, setLinks] = useState(null);
-  const [rules, setRules] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const queryClient = useQueryClient();
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("");
   const deferredQuery = useDeferredValue(query);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [memberRows, linkRows, ruleRows] = await Promise.all([
-        ops.reputation(),
-        ops.flaggedLinks(),
-        ops.reputationRules(),
-      ]);
-      setMembers(memberRows);
-      setLinks(linkRows);
-      setRules(ruleRows);
-      setError("");
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const [membersQuery, linksQuery, rulesQuery] = useQueries({
+    queries: [
+      { queryKey: queryKeys.reputation, queryFn: ops.reputation },
+      { queryKey: queryKeys.flaggedLinks, queryFn: ops.flaggedLinks },
+      { queryKey: queryKeys.reputationRules, queryFn: ops.reputationRules },
+    ],
+  });
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  const members = membersQuery.data ?? null;
+  const links = linksQuery.data ?? null;
+  const rules = rulesQuery.data ?? null;
+  const loading = membersQuery.isPending || linksQuery.isPending || rulesQuery.isPending;
+  const error = (membersQuery.error || linksQuery.error || rulesQuery.error)?.message ?? "";
+
+  const load = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: queryKeys.reputation });
+    queryClient.invalidateQueries({ queryKey: queryKeys.flaggedLinks });
+    queryClient.invalidateQueries({ queryKey: queryKeys.reputationRules });
+  }, [queryClient]);
 
   const needle = deferredQuery.trim().toLowerCase();
   const visibleMembers = (members || []).filter((member) => {

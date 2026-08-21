@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback } from "react";
+import { useQueries, useQueryClient } from "@tanstack/react-query";
 import Card from "../components/Card.jsx";
 import StatTile from "../components/StatTile.jsx";
 import Badge from "../components/Badge.jsx";
 import { SkeletonBlock } from "../components/Skeleton.jsx";
 import { ErrorState, EmptyState } from "../components/StatePanels.jsx";
 import { moderation, ops } from "../api/client.js";
+import { queryKeys } from "../lib/queryClient.js";
 import {
   moderationCategoryLabel,
   moderationActionLabel,
@@ -17,25 +19,28 @@ import {
 import { relativeTime, percent } from "../lib/format.js";
 
 export default function ModerationLogPage() {
-  const [audit, setAudit] = useState([]);
-  const [adminActions, setAdminActions] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const queryClient = useQueryClient();
+
+  const [auditQuery, adminActionsQuery] = useQueries({
+    queries: [
+      { queryKey: queryKeys.moderationAuditLogs, queryFn: moderation.auditLogs },
+      {
+        queryKey: queryKeys.audit(),
+        queryFn: () => ops.audit(),
+        select: (rows) => rows.filter((item) => ADMIN_ACTION_EVENT_TYPES.has(item.event_type)),
+      },
+    ],
+  });
+
+  const audit = auditQuery.data ?? [];
+  const adminActions = adminActionsQuery.data ?? [];
+  const loading = auditQuery.isPending || adminActionsQuery.isPending;
+  const error = (auditQuery.error || adminActionsQuery.error)?.message ?? null;
 
   const load = useCallback(() => {
-    setError(null);
-    return Promise.all([moderation.auditLogs(), ops.audit()])
-      .then(([entries, realAudit]) => {
-        setAudit(entries);
-        setAdminActions(realAudit.filter((item) => ADMIN_ACTION_EVENT_TYPES.has(item.event_type)));
-      })
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
-  }, []);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+    queryClient.invalidateQueries({ queryKey: queryKeys.moderationAuditLogs });
+    queryClient.invalidateQueries({ queryKey: queryKeys.audit() });
+  }, [queryClient]);
 
   if (error) {
     return (

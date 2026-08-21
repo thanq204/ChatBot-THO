@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { useQueries, useQueryClient } from "@tanstack/react-query";
 import { MagnifyingGlass, PencilSimple, Trash, FloppyDisk, Plus, UploadSimple, PaperPlaneRight } from "@phosphor-icons/react";
 import Card from "../components/Card.jsx";
 import Modal from "../components/Modal.jsx";
 import { SkeletonBlock, SkeletonLine } from "../components/Skeleton.jsx";
 import { ErrorState, EmptyState } from "../components/StatePanels.jsx";
 import { ops, fileToBase64 } from "../api/client.js";
+import { queryKeys } from "../lib/queryClient.js";
 import { relativeTime } from "../lib/format.js";
 
 const BLANK = { title: "", dataset: "", body: "", tags: "" };
@@ -14,9 +16,8 @@ function matches(item, query) {
 }
 
 export default function SettingsPage() {
-  const [knowledge, setKnowledge] = useState(null);
-  const [error, setError] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
+  const [actionError, setActionError] = useState(null);
   const [query, setQuery] = useState("");
   const [form, setForm] = useState(BLANK);
   const [editingId, setEditingId] = useState(null);
@@ -34,32 +35,27 @@ export default function SettingsPage() {
   const [importState, setImportState] = useState(null);
   const [importing, setImporting] = useState(false);
 
-  const [imports, setImports] = useState(null);
-  const [loadingImports, setLoadingImports] = useState(true);
+  const [knowledgeQuery, importsQuery] = useQueries({
+    queries: [
+      { queryKey: queryKeys.knowledge, queryFn: ops.knowledge },
+      { queryKey: queryKeys.knowledgeImports, queryFn: ops.knowledgeImports, retry: false },
+    ],
+  });
+
+  const knowledge = knowledgeQuery.data ?? null;
+  const imports = importsQuery.data ?? (importsQuery.isError ? [] : null);
+  const loading = knowledgeQuery.isPending;
+  const loadingImports = importsQuery.isPending;
+  const error = actionError ?? knowledgeQuery.error?.message ?? null;
 
   const load = useCallback(() => {
-    setLoading(true);
-    setError(null);
-    ops
-      .knowledge()
-      .then(setKnowledge)
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
-  }, []);
+    setActionError(null);
+    queryClient.invalidateQueries({ queryKey: queryKeys.knowledge });
+  }, [queryClient]);
 
   const loadImports = useCallback(() => {
-    setLoadingImports(true);
-    ops
-      .knowledgeImports()
-      .then(setImports)
-      .catch(() => setImports([]))
-      .finally(() => setLoadingImports(false));
-  }, []);
-
-  useEffect(() => {
-    load();
-    loadImports();
-  }, [load, loadImports]);
+    queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeImports });
+  }, [queryClient]);
 
   const visible = useMemo(() => {
     if (!knowledge) return [];
@@ -102,7 +98,7 @@ export default function SettingsPage() {
       setSelectedIds(new Set());
       load();
     } catch (err) {
-      setError(err.message);
+      setActionError(err.message);
     } finally {
       setBulkDeleting(false);
     }
@@ -199,7 +195,7 @@ export default function SettingsPage() {
       if (editingId === item.document_id) cancelEdit();
       load();
     } catch (err) {
-      setError(err.message);
+      setActionError(err.message);
     }
   }
 

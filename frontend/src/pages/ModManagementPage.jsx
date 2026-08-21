@@ -1,20 +1,32 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
+import { useQueries, useQueryClient } from "@tanstack/react-query";
 import Card from "../components/Card.jsx";
 import Badge from "../components/Badge.jsx";
 import { ErrorState, EmptyState } from "../components/StatePanels.jsx";
 import { auth } from "../api/client.js";
+import { queryKeys } from "../lib/queryClient.js";
 
 const EMPTY = { email: "", display_name: "", password: "", role: "mod" };
 
 export default function ModManagementPage() {
-  const [users, setUsers] = useState([]); const [invites, setInvites] = useState([]); const [form, setForm] = useState(EMPTY); const [inviteEmail, setInviteEmail] = useState(""); const [loading, setLoading] = useState(true); const [saving, setSaving] = useState(false); const [error, setError] = useState("");
-  const load = useCallback(async () => { setLoading(true); try { const [accounts, pending] = await Promise.all([auth.users(), auth.modInvites()]); setUsers(accounts); setInvites(pending); setError(""); } catch (err) { setError(err.message); } finally { setLoading(false); } }, []);
-  useEffect(() => { load(); }, [load]);
-  const create = async (event) => { event.preventDefault(); setSaving(true); try { const user = await auth.createUser(form); setUsers((items) => [...items, user]); setForm(EMPTY); setError(""); } catch (err) { setError(err.message); } finally { setSaving(false); } };
-  const invite = async (event) => { event.preventDefault(); setSaving(true); try { const pending = await auth.inviteMod(inviteEmail); setInvites((items) => [pending, ...items.filter((item) => item.email !== pending.email)]); setInviteEmail(""); setError(""); } catch (err) { setError(err.message); } finally { setSaving(false); } };
-  const cancelInvite = async (email) => { if (!window.confirm(`Hủy lời mời gửi tới ${email}?`)) return; try { await auth.deleteModInvite(email); setInvites((items) => items.filter((item) => item.email !== email)); } catch (err) { setError(err.message); } };
-  const update = async (id, changes) => { try { const user = changes.role ? await auth.updateRole(id, changes.role) : await auth.updateStatus(id, changes.is_active); setUsers((items) => items.map((item) => item.user_id === id ? user : item)); } catch (err) { setError(err.message); } };
-  const remove = async (user) => { if (!window.confirm(`Xóa tài khoản ${user.email}? Thao tác này không thể hoàn tác.`)) return; try { await auth.deleteUser(user.user_id); setUsers((items) => items.filter((item) => item.user_id !== user.user_id)); } catch (err) { setError(err.message); } };
+  const queryClient = useQueryClient();
+  const [form, setForm] = useState(EMPTY); const [inviteEmail, setInviteEmail] = useState(""); const [saving, setSaving] = useState(false); const [actionError, setActionError] = useState("");
+  const [usersQuery, invitesQuery] = useQueries({ queries: [
+    { queryKey: queryKeys.users, queryFn: auth.users },
+    { queryKey: queryKeys.modInvites, queryFn: auth.modInvites },
+  ] });
+  const users = usersQuery.data ?? []; const invites = invitesQuery.data ?? [];
+  const loading = usersQuery.isPending || invitesQuery.isPending;
+  const error = actionError || (usersQuery.error || invitesQuery.error)?.message || "";
+  // Writes return the saved row, so patch it into the cache instead of refetching.
+  const patchUsers = (updater) => queryClient.setQueryData(queryKeys.users, (items) => updater(items ?? []));
+  const patchInvites = (updater) => queryClient.setQueryData(queryKeys.modInvites, (items) => updater(items ?? []));
+  const load = useCallback(() => { setActionError(""); queryClient.invalidateQueries({ queryKey: ["auth"] }); }, [queryClient]);
+  const create = async (event) => { event.preventDefault(); setSaving(true); try { const user = await auth.createUser(form); patchUsers((items) => [...items, user]); setForm(EMPTY); setActionError(""); } catch (err) { setActionError(err.message); } finally { setSaving(false); } };
+  const invite = async (event) => { event.preventDefault(); setSaving(true); try { const pending = await auth.inviteMod(inviteEmail); patchInvites((items) => [pending, ...items.filter((item) => item.email !== pending.email)]); setInviteEmail(""); setActionError(""); } catch (err) { setActionError(err.message); } finally { setSaving(false); } };
+  const cancelInvite = async (email) => { if (!window.confirm(`Hủy lời mời gửi tới ${email}?`)) return; try { await auth.deleteModInvite(email); patchInvites((items) => items.filter((item) => item.email !== email)); } catch (err) { setActionError(err.message); } };
+  const update = async (id, changes) => { try { const user = changes.role ? await auth.updateRole(id, changes.role) : await auth.updateStatus(id, changes.is_active); patchUsers((items) => items.map((item) => item.user_id === id ? user : item)); } catch (err) { setActionError(err.message); } };
+  const remove = async (user) => { if (!window.confirm(`Xóa tài khoản ${user.email}? Thao tác này không thể hoàn tác.`)) return; try { await auth.deleteUser(user.user_id); patchUsers((items) => items.filter((item) => item.user_id !== user.user_id)); } catch (err) { setActionError(err.message); } };
   const mods = users.filter((user) => user.role === "mod");
   return <div className="page-grid">
     {error && <div className="page-grid__row"><ErrorState message={error} onRetry={load} /></div>}

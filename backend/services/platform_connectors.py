@@ -6,6 +6,8 @@ planned connectors until their business/app credentials are supplied.
 
 from __future__ import annotations
 
+import threading
+import time
 from datetime import UTC, datetime
 from typing import Any
 
@@ -17,6 +19,12 @@ from backend.models.operations import CommonMessage, DiscordChannelOption, Platf
 # Discord channel types that can hold readable text history via the REST API.
 _TEXT_CHANNEL_TYPES = {0, 5}  # GUILD_TEXT, GUILD_ANNOUNCEMENT
 
+# Listing channels costs one Discord round-trip per guild — measured at ~1.7s —
+# and the dashboard asks for it on every visit to the Community page just to
+# populate a filter dropdown. Channels change rarely, and the operator-triggered
+# sweep forces a refresh anyway, so this can stay warm for a long while.
+_CHANNEL_CACHE_TTL_S = 900.0
+
 
 class ConnectorError(ValueError):
     pass
@@ -25,6 +33,8 @@ class ConnectorError(ValueError):
 class PlatformConnectors:
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
+        self._channel_cache: tuple[float, list[DiscordChannelOption]] | None = None
+        self._channel_lock = threading.Lock()
 
     def statuses(self) -> list[PlatformStatus]:
         return [
@@ -44,7 +54,26 @@ class PlatformConnectors:
             return self._telegram(limit)
         raise ConnectorError(f"Connector {platform} chưa có live read; hãy dùng /messages/ingest với common schema hoặc demo seed.")
 
-    def list_discord_channels(self) -> list[DiscordChannelOption]:
+    def list_discord_channels(self, refresh: bool = False) -> list[DiscordChannelOption]:
+        """Text channels the bot can see, cached for `_CHANNEL_CACHE_TTL_S`.
+
+        Pass `refresh=True` right after the operator adds or renames a channel.
+        """
+        if not refresh:
+            cached = self._channel_cache
+            if cached and time.monotonic() - cached[0] < _CHANNEL_CACHE_TTL_S:
+                return cached[1]
+
+        with self._channel_lock:
+            # A second caller may have refilled the cache while we waited.
+            cached = self._channel_cache
+            if not refresh and cached and time.monotonic() - cached[0] < _CHANNEL_CACHE_TTL_S:
+                return cached[1]
+            options = self._fetch_discord_channels()
+            self._channel_cache = (time.monotonic(), options)
+            return options
+
+    def _fetch_discord_channels(self) -> list[DiscordChannelOption]:
         if not self.settings.discord_bot_token:
             raise ConnectorError("Thiếu DISCORD_BOT_TOKEN.")
         headers = {"Authorization": f"Bot {self.settings.discord_bot_token}"}
@@ -72,7 +101,9 @@ class PlatformConnectors:
         return options
 
     def _discord_all_channels(self, limit: int) -> list[CommonMessage]:
-        channels = self.list_discord_channels()
+        # An operator-triggered sweep should see channels added since the last
+        # dashboard visit, so this path pays for a fresh listing.
+        channels = self.list_discord_channels(refresh=True)
         if not channels:
             if self.settings.discord_default_channel_id:
                 return self._discord(limit, self.settings.discord_default_channel_id)

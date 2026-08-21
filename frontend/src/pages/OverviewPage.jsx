@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, ArrowsClockwise, UsersThree } from "@phosphor-icons/react";
 import Card from "../components/Card.jsx";
 import Counter from "../components/Counter.jsx";
@@ -12,6 +13,7 @@ import ActivityFeed from "../components/ActivityFeed.jsx";
 import { SkeletonLine, SkeletonBlock } from "../components/Skeleton.jsx";
 import { ErrorState, EmptyState } from "../components/StatePanels.jsx";
 import { ops } from "../api/client.js";
+import { queryKeys } from "../lib/queryClient.js";
 import { categoryLabel, platformLabel, CATEGORY_COLORS, decisionLabel, DECISION_COLORS } from "../lib/taxonomy.js";
 import { caseHeadline } from "../lib/incidents.js";
 
@@ -46,42 +48,55 @@ function Kpi({ label, value, tone, meta }) {
 }
 
 export default function OverviewPage() {
-  const [summary, setSummary] = useState(null);
-  const [platforms, setPlatforms] = useState(null);
-  const [incidents, setIncidents] = useState(null);
-  const [timeline, setTimeline] = useState(null);
-  const [health, setHealth] = useState(null);
-  const [error, setError] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
   const [seeding, setSeeding] = useState(false);
   const [pullLimit, setPullLimit] = useState("100");
   const [syncing, setSyncing] = useState("");
   const [syncResult, setSyncResult] = useState(null);
   const [openId, setOpenId] = useState(null);
+  const [actionError, setActionError] = useState(null);
+
+  const summaryQuery = useQuery({ queryKey: queryKeys.analytics, queryFn: ops.analytics });
+  const platformsQuery = useQuery({ queryKey: queryKeys.platforms, queryFn: ops.platforms });
+  const timelineQuery = useQuery({
+    queryKey: queryKeys.timeline(TREND_WINDOW_HOURS, 1),
+    queryFn: () => ops.timeline(TREND_WINDOW_HOURS, 1),
+  });
+  const incidentsQuery = useQuery({
+    queryKey: queryKeys.incidents(),
+    queryFn: () => ops.incidents(),
+    // The feed only shows the four most recent; sorting here keeps that shaping
+    // out of render and off the shared cache entry.
+    select: (rows) =>
+      [...rows].sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at)).slice(0, 4),
+  });
+  const healthQuery = useQuery({
+    queryKey: queryKeys.communityHealth(24),
+    queryFn: () => ops.communityHealth(24),
+  });
+
+  const summary = summaryQuery.data ?? null;
+  const platforms = platformsQuery.data ?? null;
+  const timeline = timelineQuery.data ?? null;
+  const incidents = incidentsQuery.data ?? null;
+  // Supporting context only: a failure here must not blank the whole page.
+  const health = healthQuery.data ?? null;
+
+  // Only a first load with nothing cached shows skeletons. A revisit paints the
+  // previous answer straight away and refreshes underneath.
+  const loading =
+    summaryQuery.isPending || platformsQuery.isPending || timelineQuery.isPending || incidentsQuery.isPending;
+  const healthLoading = healthQuery.isPending;
+
+  const error =
+    actionError ??
+    (summaryQuery.error || platformsQuery.error || timelineQuery.error || incidentsQuery.error)?.message ??
+    null;
 
   const load = useCallback(() => {
-    setLoading(true);
-    setError(null);
-    Promise.all([ops.analytics(), ops.platforms(), ops.incidents(), ops.timeline(TREND_WINDOW_HOURS, 1)])
-      .then(([summaryRes, platformsRes, incidentsRes, timelineRes]) => {
-        setSummary(summaryRes);
-        setPlatforms(platformsRes);
-        setIncidents([...incidentsRes].sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at)).slice(0, 4));
-        setTimeline(timelineRes);
-      })
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
-
-    // Supporting context only: a failure here must not blank the whole page.
-    ops
-      .communityHealth(24)
-      .then(setHealth)
-      .catch(() => setHealth(null));
-  }, []);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+    setActionError(null);
+    queryClient.invalidateQueries();
+  }, [queryClient]);
 
   const closeDetail = useCallback(() => setOpenId(null), []);
 
@@ -96,7 +111,7 @@ export default function OverviewPage() {
       await ops.seedDemo();
       load();
     } catch (err) {
-      setError(err.message);
+      setActionError(err.message);
     } finally {
       setSeeding(false);
     }
@@ -121,10 +136,15 @@ export default function OverviewPage() {
     }
   };
 
+  const retry = () => {
+    setActionError(null);
+    queryClient.invalidateQueries();
+  };
+
   if (error) {
     return (
       <div className="page-grid">
-        <ErrorState message={`Không lấy được dữ liệu: ${error}`} onRetry={load} />
+        <ErrorState message={`Không lấy được dữ liệu: ${error}`} onRetry={retry} />
       </div>
     );
   }
@@ -221,9 +241,9 @@ export default function OverviewPage() {
 
       <div className="page-grid__row">
         <Card title="Sức khoẻ cộng đồng, 24 giờ" className="span-4">
-          {loading && <SkeletonBlock height={200} />}
-          {!loading && !health && <EmptyState message="Chưa lấy được chỉ số cộng đồng." />}
-          {!loading && health && (
+          {healthLoading && <SkeletonBlock height={200} />}
+          {!healthLoading && !health && <EmptyState message="Chưa lấy được chỉ số cộng đồng." />}
+          {!healthLoading && health && (
             <>
               <div className="health-pair">
                 <div className="health-pair__item">
@@ -264,8 +284,8 @@ export default function OverviewPage() {
         </Card>
 
         <Card title="Chủ đề cộng đồng đang bàn" className="span-4" delay={0.05}>
-          {loading && <SkeletonBlock height={200} />}
-          {!loading &&
+          {healthLoading && <SkeletonBlock height={200} />}
+          {!healthLoading &&
             (health?.top_topics?.length ? (
               <TopicBars topics={health.top_topics.slice(0, 7)} />
             ) : (
