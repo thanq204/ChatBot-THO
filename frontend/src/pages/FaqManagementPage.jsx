@@ -1,4 +1,5 @@
-import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useCallback, useDeferredValue, useMemo, useState } from "react";
+import { useQueries, useQueryClient } from "@tanstack/react-query";
 import {
   CheckCircle,
   ClockCounterClockwise,
@@ -13,6 +14,7 @@ import Badge from "../components/Badge.jsx";
 import { SkeletonBlock } from "../components/Skeleton.jsx";
 import { EmptyState, ErrorState } from "../components/StatePanels.jsx";
 import { ops } from "../api/client.js";
+import { queryKeys } from "../lib/queryClient.js";
 import { formatNumber, relativeTime } from "../lib/format.js";
 
 const EMPTY_FORM = {
@@ -30,35 +32,33 @@ function parseTags(value) {
 }
 
 export default function FaqManagementPage() {
-  const [topics, setTopics] = useState(null);
-  const [faqs, setFaqs] = useState(null);
+  const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState("top");
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query);
   const [form, setForm] = useState(EMPTY_FORM);
   const [modalOpen, setModalOpen] = useState(false);
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
+  const [actionError, setActionError] = useState("");
   const [notice, setNotice] = useState(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [topTopics, faqHistory] = await Promise.all([ops.faqTopTopics(10), ops.faqs(false)]);
-      setTopics(topTopics);
-      setFaqs(faqHistory);
-      setError("");
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const [topicsQuery, faqsQuery] = useQueries({
+    queries: [
+      { queryKey: queryKeys.faqTopTopics(10), queryFn: () => ops.faqTopTopics(10) },
+      { queryKey: queryKeys.faqs(false), queryFn: () => ops.faqs(false) },
+    ],
+  });
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  const topics = topicsQuery.data ?? null;
+  const faqs = faqsQuery.data ?? null;
+  const loading = topicsQuery.isPending || faqsQuery.isPending;
+  const error = actionError || (topicsQuery.error || faqsQuery.error)?.message || "";
+
+  const load = useCallback(() => {
+    setActionError("");
+    queryClient.invalidateQueries({ queryKey: ["faqs"] });
+    queryClient.invalidateQueries({ queryKey: ["faq-top-topics"] });
+  }, [queryClient]);
 
   const visibleFaqs = useMemo(() => {
     const needle = deferredQuery.trim().toLowerCase();

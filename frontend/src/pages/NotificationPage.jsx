@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { PaperPlaneTilt } from "@phosphor-icons/react";
 import Card from "../components/Card.jsx";
 import { SkeletonBlock } from "../components/Skeleton.jsx";
 import { ErrorState, EmptyState } from "../components/StatePanels.jsx";
 import { ops } from "../api/client.js";
+import { queryKeys } from "../lib/queryClient.js";
 import { platformLabel } from "../lib/taxonomy.js";
 import { relativeTime } from "../lib/format.js";
 import { useAuth } from "../auth/AuthProvider.jsx";
@@ -16,36 +18,30 @@ const NOTIFY_PLATFORM_OPTIONS = [
 export default function NotificationPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
-  const [platformStatuses, setPlatformStatuses] = useState(null);
+  const queryClient = useQueryClient();
   const [selectedPlatforms, setSelectedPlatforms] = useState([]);
   const [actor, setActor] = useState("");
   const [message, setMessage] = useState("");
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState(null);
-  const [history, setHistory] = useState(null);
-  const [historyError, setHistoryError] = useState(null);
-  const [historyLoading, setHistoryLoading] = useState(true);
 
-  useEffect(() => {
-    ops
-      .platforms()
-      .then(setPlatformStatuses)
-      .catch(() => setPlatformStatuses([]));
-  }, []);
+  // Shared with the overview page: whichever loads first serves both.
+  const platformsQuery = useQuery({ queryKey: queryKeys.platforms, queryFn: ops.platforms, retry: false });
+  const platformStatuses = platformsQuery.data ?? (platformsQuery.isError ? [] : null);
+
+  const historyQuery = useQuery({
+    queryKey: queryKeys.audit(),
+    queryFn: () => ops.audit(),
+    enabled: isAdmin,
+    select: (rows) => rows.filter((item) => item.event_type === "admin_announcement"),
+  });
+  const history = historyQuery.data ?? null;
+  const historyLoading = isAdmin && historyQuery.isPending;
+  const historyError = historyQuery.error?.message ?? null;
 
   const loadHistory = useCallback(() => {
-    setHistoryLoading(true);
-    setHistoryError(null);
-    ops
-      .audit()
-      .then((rows) => setHistory(rows.filter((item) => item.event_type === "admin_announcement")))
-      .catch((err) => setHistoryError(err.message))
-      .finally(() => setHistoryLoading(false));
-  }, []);
-
-  useEffect(() => {
-    if (isAdmin) loadHistory();
-  }, [isAdmin, loadHistory]);
+    queryClient.invalidateQueries({ queryKey: queryKeys.audit() });
+  }, [queryClient]);
 
   const togglePlatform = (value) => {
     setSelectedPlatforms((prev) => (prev.includes(value) ? prev.filter((item) => item !== value) : [...prev, value]));

@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { FloppyDisk, WarningCircle, CheckCircle, Plus, Trash } from "@phosphor-icons/react";
 import { SkeletonBlock } from "./Skeleton.jsx";
 import { ErrorState } from "./StatePanels.jsx";
 import Modal from "./Modal.jsx";
 import { ops } from "../api/client.js";
+import { queryKeys } from "../lib/queryClient.js";
 import { relativeTime } from "../lib/format.js";
 
 /**
@@ -60,13 +62,12 @@ function PlatformCheckboxes({ value, onToggle }) {
 }
 
 export default function CommandContentEditor() {
-  const [commands, setCommands] = useState(null);
+  const queryClient = useQueryClient();
   const [active, setActive] = useState(null);
   const [draft, setDraft] = useState("");
   const [draftDescription, setDraftDescription] = useState("");
   const [draftPlatforms, setDraftPlatforms] = useState(["telegram", "discord"]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [actionError, setActionError] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -79,23 +80,36 @@ export default function CommandContentEditor() {
   const [createError, setCreateError] = useState("");
   const [createBusy, setCreateBusy] = useState(false);
 
-  const load = useCallback(() => {
-    setLoading(true);
-    setError("");
-    ops
-      .commandContents()
-      .then((list) => {
-        const sorted = sortCommands(list);
-        setCommands(sorted);
-        setActive((current) => (current && sorted.some((item) => item.command === current) ? current : sorted[0]?.command ?? null));
-      })
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
-  }, []);
+  const commandsQuery = useQuery({
+    queryKey: queryKeys.commandContents,
+    queryFn: ops.commandContents,
+    select: sortCommands,
+  });
 
+  const commands = commandsQuery.data ?? null;
+  const loading = commandsQuery.isPending;
+  const error = actionError || commandsQuery.error?.message || "";
+
+  /** Rewrite the cached list in place; every write here returns the saved row. */
+  const patchCommands = useCallback(
+    (updater) =>
+      queryClient.setQueryData(queryKeys.commandContents, (list) => updater(list ?? [])),
+    [queryClient],
+  );
+
+  const load = useCallback(() => {
+    setActionError("");
+    queryClient.invalidateQueries({ queryKey: queryKeys.commandContents });
+  }, [queryClient]);
+
+  // Selection follows the list: keep the current command if it survived the last
+  // change, otherwise fall back to the first one.
   useEffect(() => {
-    load();
-  }, [load]);
+    if (!commands) return;
+    setActive((current) =>
+      current && commands.some((item) => item.command === current) ? current : commands[0]?.command ?? null,
+    );
+  }, [commands]);
 
   useEffect(() => {
     const item = commands?.find((command) => command.command === active);
@@ -113,20 +127,20 @@ export default function CommandContentEditor() {
   async function save() {
     if (!draft.trim() || !active || draftPlatforms.length === 0) return;
     setSaving(true);
-    setError("");
+    setActionError("");
     try {
       const updated = await ops.saveCommandContent(active, {
         body: draft,
         description: draftDescription.trim(),
         platforms: draftPlatforms,
       });
-      setCommands((prev) => prev.map((item) => (item.command === active ? updated : item)));
+      patchCommands((list) => list.map((item) => (item.command === active ? updated : item)));
       setDraft(updated.body);
       setDraftDescription(updated.description);
       setDraftPlatforms(updated.platforms);
       setSaved(true);
     } catch (err) {
-      setError(err.message);
+      setActionError(err.message);
     } finally {
       setSaving(false);
     }
@@ -136,14 +150,14 @@ export default function CommandContentEditor() {
     if (!active || CORE_COMMANDS.has(active)) return;
     if (!window.confirm(`Xoá lệnh /${active}? Thành viên sẽ không dùng được lệnh này nữa.`)) return;
     setDeleting(true);
-    setError("");
+    setActionError("");
     try {
       await ops.deleteCommandContent(active);
-      const next = (commands || []).filter((item) => item.command !== active);
-      setCommands(next);
-      setActive(next[0]?.command ?? null);
+      // Dropping the active command leaves the selection dangling; the effect
+      // above notices and moves it to the first surviving command.
+      patchCommands((list) => list.filter((item) => item.command !== active));
     } catch (err) {
-      setError(err.message);
+      setActionError(err.message);
     } finally {
       setDeleting(false);
     }
@@ -197,7 +211,7 @@ export default function CommandContentEditor() {
         description: newDescription.trim(),
         platforms: newPlatforms,
       });
-      setCommands((prev) => sortCommands([...(prev || []), created]));
+      patchCommands((list) => [...list, created]);
       setActive(created.command);
       setCreating(false);
     } catch (err) {

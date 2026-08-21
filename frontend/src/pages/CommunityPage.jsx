@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowSquareOut } from "@phosphor-icons/react";
 import Card from "../components/Card.jsx";
 import MemberReportInbox from "../components/MemberReportInbox.jsx";
@@ -6,6 +7,7 @@ import IncidentDetailModal from "../components/IncidentDetailModal.jsx";
 import { SkeletonBlock, SkeletonLine } from "../components/Skeleton.jsx";
 import { ErrorState, EmptyState } from "../components/StatePanels.jsx";
 import { ops } from "../api/client.js";
+import { queryKeys } from "../lib/queryClient.js";
 import {
   platformLabel,
   severityLabel,
@@ -43,38 +45,51 @@ const TIME_RANGE_OPTIONS = [
 const TIME_RANGE_MS = { "1d": 86400000, "7d": 7 * 86400000, "30d": 30 * 86400000 };
 
 export default function CommunityPage() {
-  const [incidents, setIncidents] = useState(null);
+  const queryClient = useQueryClient();
   const [platformFilter, setPlatformFilter] = useState("");
   const [channelFilter, setChannelFilter] = useState("");
-  const [discordChannels, setDiscordChannels] = useState([]);
   const [statusFilter, setStatusFilter] = useState("");
   const [sortMode, setSortMode] = useState("severity");
   const [timeRange, setTimeRange] = useState("");
   const [openId, setOpenId] = useState(null);
-  const [error, setError] = useState(null);
-  const [loading, setLoading] = useState(true);
 
-  const load = useCallback(() => {
-    setLoading(true);
-    setError(null);
-    ops
-      .incidents({ platform: platformFilter || undefined, status: statusFilter || undefined })
-      .then(setIncidents)
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
-  }, [platformFilter, statusFilter]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+  // Each filter combination is its own cache entry, so flipping back to one you
+  // already looked at is instant instead of another round-trip.
+  const filters = useMemo(
+    () => ({ platform: platformFilter || undefined, status: statusFilter || undefined }),
+    [platformFilter, statusFilter],
+  );
+  const incidentsQuery = useQuery({
+    queryKey: queryKeys.incidents(filters),
+    queryFn: () => ops.incidents(filters),
+    // Keep the current rows on screen while the next filter loads, so changing a
+    // dropdown dims the table instead of replacing it with skeletons.
+    placeholderData: (previous) => previous,
+  });
 
   // Chỉ cần cho bộ lọc kênh Discord; im lặng bỏ qua nếu Discord chưa cấu hình.
-  useEffect(() => {
-    ops
-      .discordChannels()
-      .then(setDiscordChannels)
-      .catch(() => setDiscordChannels([]));
-  }, []);
+  // Costs a round-trip to Discord per guild — measured at ~1.7s — and only fills
+  // a dropdown whose contents almost never change, so it refreshes far less
+  // often than the case list and never blocks it.
+  const channelsQuery = useQuery({
+    queryKey: queryKeys.discordChannels,
+    queryFn: ops.discordChannels,
+    staleTime: 15 * 60_000,
+    retry: false,
+  });
+
+  const incidents = incidentsQuery.data ?? null;
+  const discordChannels = channelsQuery.data ?? [];
+  const loading = incidentsQuery.isPending;
+  // Only while the previous filter's rows stand in for a new one. Deliberately
+  // not `isFetching`: that is also true for background refreshes on mount and on
+  // window focus, which would dim the list out from under the operator.
+  const refreshing = incidentsQuery.isPlaceholderData;
+  const error = incidentsQuery.error?.message ?? null;
+
+  const load = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ["incidents"] });
+  }, [queryClient]);
 
   useEffect(() => {
     setChannelFilter("");
@@ -197,7 +212,7 @@ export default function CommunityPage() {
             <EmptyState message="Không có case nào khớp với bộ lọc đã chọn." />
           )}
           {!loading && visibleIncidents.length > 0 && (
-            <>
+            <div className={refreshing ? "is-refreshing" : undefined}>
               <p className="case-tally">
                 <strong>{counts.total}</strong> case
                 <span className="case-tally__sep">·</span>
@@ -212,7 +227,7 @@ export default function CommunityPage() {
                   <CaseRow key={item.incident_id} incident={item} channelName={channelNameById[item.channel_id]} onOpen={setOpenId} />
                 ))}
               </div>
-            </>
+            </div>
           )}
         </Card>
       </div>
@@ -239,7 +254,7 @@ export default function CommunityPage() {
  * One scannable card per case. The AI explanation is deliberately left out here:
  * it is near-identical across rows, so it hid the fields that actually differ.
  */
-function CaseRow({ incident, channelName, onOpen }) {
+const CaseRow = memo(function CaseRow({ incident, channelName, onOpen }) {
   const actor = actorFromTitle(incident.title);
 
   // A <button> can't legally contain the <a> jump-to-Discord/Telegram link
@@ -284,4 +299,4 @@ function CaseRow({ incident, channelName, onOpen }) {
       </span>
     </div>
   );
-}
+});

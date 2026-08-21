@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowSquareOut } from "@phosphor-icons/react";
 import Badge from "./Badge.jsx";
 import CaseActions from "./CaseActions.jsx";
@@ -7,6 +8,7 @@ import Disclosure from "./Disclosure.jsx";
 import { SkeletonBlock, SkeletonLine } from "./Skeleton.jsx";
 import { ErrorState, EmptyState } from "./StatePanels.jsx";
 import { ops } from "../api/client.js";
+import { queryKeys } from "../lib/queryClient.js";
 import {
   platformLabel,
   severityLabel,
@@ -30,37 +32,46 @@ const STATUS_OPTIONS = ["open", "monitoring", "resolved", "snoozed"];
  * effect on it.
  */
 export default function IncidentDetailModal({ incidentId, headline, onClose, onUpdated }) {
-  const [detail, setDetail] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  const queryClient = useQueryClient();
+  const [actionError, setActionError] = useState("");
   const [savingStatus, setSavingStatus] = useState(false);
   const [savingReputation, setSavingReputation] = useState(false);
 
-  const loadDetail = useCallback((id) => {
-    setDetail(null);
-    setLoading(true);
-    setError("");
-    ops
-      .incident(id)
-      .then(setDetail)
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
-  }, []);
+  // `enabled` keeps the query dormant until a case is actually opened; reopening
+  // the same case then renders from cache instead of re-fetching.
+  const detailQuery = useQuery({
+    queryKey: queryKeys.incident(incidentId),
+    queryFn: () => ops.incident(incidentId),
+    enabled: Boolean(incidentId),
+  });
 
-  useEffect(() => {
-    if (!incidentId) return;
-    loadDetail(incidentId);
-  }, [incidentId, loadDetail]);
+  const detail = incidentId ? detailQuery.data ?? null : null;
+  const loading = Boolean(incidentId) && detailQuery.isPending;
+  const error = actionError || (incidentId ? detailQuery.error?.message ?? "" : "");
+
+  const loadDetail = useCallback(
+    (id) => {
+      setActionError("");
+      queryClient.invalidateQueries({ queryKey: queryKeys.incident(id) });
+    },
+    [queryClient],
+  );
+
+  /** Pull the case back from the server and let the parent list refresh too. */
+  const refreshAfterWrite = useCallback(async () => {
+    queryClient.setQueryData(queryKeys.incident(incidentId), await ops.incident(incidentId));
+    onUpdated?.();
+  }, [incidentId, onUpdated, queryClient]);
 
   async function updateStatus(status) {
     if (!incidentId) return;
     setSavingStatus(true);
+    setActionError("");
     try {
       await ops.updateIncident(incidentId, { status });
-      setDetail(await ops.incident(incidentId));
-      onUpdated?.();
+      await refreshAfterWrite();
     } catch (err) {
-      setError(err.message);
+      setActionError(err.message);
     } finally {
       setSavingStatus(false);
     }
@@ -69,15 +80,15 @@ export default function IncidentDetailModal({ incidentId, headline, onClose, onU
   async function decideReputation(outcome) {
     if (!incidentId) return;
     setSavingReputation(true);
+    setActionError("");
     try {
       await ops.decideIncidentReputation(incidentId, {
         outcome,
         note: outcome === "confirmed" ? "Admin/Mod xác nhận case vi phạm." : "Admin/Mod xác nhận case không vi phạm.",
       });
-      setDetail(await ops.incident(incidentId));
-      onUpdated?.();
+      await refreshAfterWrite();
     } catch (err) {
-      setError(err.message);
+      setActionError(err.message);
     } finally {
       setSavingReputation(false);
     }
