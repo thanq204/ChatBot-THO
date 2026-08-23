@@ -458,6 +458,17 @@ DO $$ BEGIN
         FOREIGN KEY (review_id) REFERENCES public.reviews(review_id) ON DELETE CASCADE NOT VALID;
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
+-- Tracks the newest message id already pulled per (platform, channel) so a
+-- manual "Quét" rescan only fetches messages posted since the last scan
+-- instead of re-fetching and re-analyzing the same recent window every time.
+CREATE TABLE IF NOT EXISTS public.operations_platform_sync (
+    platform VARCHAR(20) NOT NULL,
+    channel_id VARCHAR(200) NOT NULL,
+    last_message_id VARCHAR(64) NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (platform, channel_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_operations_messages_context
     ON public.operations_messages(platform, community_id, channel_id, timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_operations_messages_incident ON public.operations_messages(incident_id);

@@ -15,6 +15,7 @@ import requests
 
 from backend.config import Settings, get_settings
 from backend.models.operations import CommonMessage, DiscordChannelOption, PlatformStatus
+from backend.services.operations_store import OperationsStore
 
 # Discord channel types that can hold readable text history via the REST API.
 _TEXT_CHANNEL_TYPES = {0, 5}  # GUILD_TEXT, GUILD_ANNOUNCEMENT
@@ -31,8 +32,9 @@ class ConnectorError(ValueError):
 
 
 class PlatformConnectors:
-    def __init__(self, settings: Settings | None = None) -> None:
+    def __init__(self, settings: Settings | None = None, store: OperationsStore | None = None) -> None:
         self.settings = settings or get_settings()
+        self.store = store
         self._channel_cache: tuple[float, list[DiscordChannelOption]] | None = None
         self._channel_lock = threading.Lock()
 
@@ -48,7 +50,7 @@ class PlatformConnectors:
     def pull(self, platform: str, limit: int = 20, channel_id: str | None = None) -> list[CommonMessage]:
         if platform == "discord":
             if channel_id:
-                return self._discord(limit, channel_id)
+                return self._discord_tracked(limit, channel_id)
             return self._discord_all_channels(limit)
         if platform == "telegram":
             return self._telegram(limit)
@@ -106,22 +108,41 @@ class PlatformConnectors:
         channels = self.list_discord_channels(refresh=True)
         if not channels:
             if self.settings.discord_default_channel_id:
-                return self._discord(limit, self.settings.discord_default_channel_id)
+                return self._discord_tracked(limit, self.settings.discord_default_channel_id)
             raise ConnectorError("Bot chưa tham gia server Discord nào có kênh để quét.")
         collected: list[CommonMessage] = []
         for channel in channels:
             try:
-                collected.extend(self._discord(limit, channel.channel_id))
+                collected.extend(self._discord_tracked(limit, channel.channel_id))
             except ConnectorError:
                 continue
         return collected
 
-    def _discord(self, limit: int, channel_id: str) -> list[CommonMessage]:
+    def _discord_tracked(self, limit: int, channel_id: str) -> list[CommonMessage]:
+        """Pull a channel and advance its scan cursor so the next scan only
+        fetches messages posted after this one, instead of re-fetching (and
+        re-running full AI moderation on) the same recent window every click."""
+        since = self.store.get_platform_sync_cursor("discord", channel_id) if self.store else None
+        messages, newest_seen_id = self._discord(limit, channel_id, since_message_id=since)
+        if self.store and newest_seen_id:
+            self.store.set_platform_sync_cursor("discord", channel_id, newest_seen_id)
+        return messages
+
+    def _discord(
+        self, limit: int, channel_id: str, since_message_id: str | None = None
+    ) -> tuple[list[CommonMessage], str | None]:
+        """Fetch messages newer than `since_message_id`, or the newest `limit`
+        on a first-ever scan of this channel. Also returns the highest raw
+        message id seen on the newest page, even when every item on it was
+        content-less (embeds/stickers), so the caller's cursor still advances
+        past them instead of re-fetching the same page forever."""
         if not self.settings.discord_bot_token or not channel_id:
             raise ConnectorError("Thiếu DISCORD_BOT_TOKEN hoặc DISCORD_DEFAULT_CHANNEL_ID.")
         collected: list[dict[str, Any]] = []
         before: str | None = None
         target = min(limit, 500)
+        since = int(since_message_id) if since_message_id else None
+        newest_seen_id: str | None = None
         while len(collected) < target:
             params: dict[str, Any] = {"limit": min(100, target - len(collected))}
             if before:
@@ -136,11 +157,22 @@ class PlatformConnectors:
             items = response.json()
             if not items:
                 break
-            collected.extend(items)
+            if newest_seen_id is None:
+                newest_seen_id = str(items[0]["id"])
+            if since is not None:
+                fresh = [item for item in items if int(item["id"]) > since]
+                collected.extend(fresh)
+                if len(fresh) < len(items):
+                    # The rest of this page (and everything older) was already
+                    # synced on a previous scan; no need to page back further.
+                    break
+            else:
+                collected.extend(items)
             before = items[-1].get("id")
             if len(items) < params["limit"]:
                 break
-        return [CommonMessage(message_id=item["id"], platform="discord", community_id=str(item.get("guild_id") or "discord"), channel_id=channel_id, thread_key=str(item.get("message_reference", {}).get("message_id") or item["id"]), parent_message_id=(item.get("message_reference") or {}).get("message_id"), author_id=str((item.get("author") or {}).get("id") or "anonymous"), author_name=(item.get("author") or {}).get("global_name") or (item.get("author") or {}).get("username"), text=item.get("content") or "[non-text message]", timestamp=self._date(item.get("timestamp")), source_url=f"https://discord.com/channels/{item.get('guild_id','@me')}/{channel_id}/{item['id']}", raw=item) for item in collected if item.get("content")]
+        messages = [CommonMessage(message_id=item["id"], platform="discord", community_id=str(item.get("guild_id") or "discord"), channel_id=channel_id, thread_key=str(item.get("message_reference", {}).get("message_id") or item["id"]), parent_message_id=(item.get("message_reference") or {}).get("message_id"), author_id=str((item.get("author") or {}).get("id") or "anonymous"), author_name=(item.get("author") or {}).get("global_name") or (item.get("author") or {}).get("username"), text=item.get("content") or "[non-text message]", timestamp=self._date(item.get("timestamp")), source_url=f"https://discord.com/channels/{item.get('guild_id','@me')}/{channel_id}/{item['id']}", raw=item) for item in collected if item.get("content")]
+        return messages, newest_seen_id
 
     def _telegram(self, limit: int) -> list[CommonMessage]:
         if not self.settings.telegram_bot_token:

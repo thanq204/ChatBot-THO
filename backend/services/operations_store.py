@@ -461,6 +461,10 @@ class OperationsStore:
                     weekly_enabled INTEGER NOT NULL DEFAULT 1, updated_at TEXT NOT NULL,
                     PRIMARY KEY (platform, member_id)
                 );
+                CREATE TABLE IF NOT EXISTS operations_platform_sync (
+                    platform TEXT NOT NULL, channel_id TEXT NOT NULL, last_message_id TEXT NOT NULL,
+                    updated_at TEXT NOT NULL, PRIMARY KEY (platform, channel_id)
+                );
                 """
             )
             columns = {row[1] for row in db.execute("PRAGMA table_info(operations_knowledge)").fetchall()}
@@ -557,6 +561,27 @@ class OperationsStore:
                     "INSERT INTO operations_command_content (command, body, description, platforms_json, updated_at) VALUES (?, ?, ?, ?, ?)",
                     [(command, body, description, _json(["telegram", "discord"]), _now()) for command, (body, description) in command_defaults.items()],
                 )
+
+    def get_platform_sync_cursor(self, platform: str, channel_id: str) -> str | None:
+        """Newest message id already pulled for this channel, if any."""
+        with self._connect(readonly=True) as db:
+            row = db.execute(
+                "SELECT last_message_id FROM operations_platform_sync WHERE platform=? AND channel_id=?",
+                (platform, channel_id),
+            ).fetchone()
+        return str(row["last_message_id"]) if row else None
+
+    def set_platform_sync_cursor(self, platform: str, channel_id: str, last_message_id: str) -> None:
+        """Advance the per-channel scan cursor, never letting it move backwards."""
+        with self._connect() as db:
+            db.execute(
+                """INSERT INTO operations_platform_sync (platform, channel_id, last_message_id, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT (platform, channel_id) DO UPDATE SET
+                last_message_id=excluded.last_message_id, updated_at=excluded.updated_at
+                WHERE CAST(excluded.last_message_id AS BIGINT) > CAST(operations_platform_sync.last_message_id AS BIGINT)""",
+                (platform, channel_id, last_message_id, _now()),
+            )
 
     def purge_demo_data(self) -> int:
         """Remove seeded/demo and synthetic test records, never live Discord IDs."""
