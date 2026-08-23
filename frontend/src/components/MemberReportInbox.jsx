@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle, Flag } from "@phosphor-icons/react";
 import { SkeletonBlock } from "./Skeleton.jsx";
 import { ErrorState, EmptyState } from "./StatePanels.jsx";
 import { ops } from "../api/client.js";
+import { queryKeys } from "../lib/queryClient.js";
 import { platformLabel } from "../lib/taxonomy.js";
 import { relativeTime } from "../lib/format.js";
 
@@ -11,44 +13,41 @@ import { relativeTime } from "../lib/format.js";
  * agent, so they sit next to the AI queue instead of inside it.
  */
 export default function MemberReportInbox() {
-  const [reports, setReports] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const queryClient = useQueryClient();
+  const [actionError, setActionError] = useState("");
   const [busyId, setBusyId] = useState("");
   const [showHandled, setShowHandled] = useState(false);
 
-  const load = useCallback(() => {
-    setLoading(true);
-    setError("");
-    ops
-      .memberReports()
-      .then(setReports)
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
-  }, []);
+  const reportsQuery = useQuery({ queryKey: queryKeys.memberReports, queryFn: ops.memberReports });
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  const load = useCallback(() => {
+    setActionError("");
+    queryClient.invalidateQueries({ queryKey: queryKeys.memberReports });
+  }, [queryClient]);
 
   async function setStatus(reportId, status) {
     setBusyId(reportId);
+    setActionError("");
     try {
       const updated = await ops.updateMemberReport(reportId, { status });
-      setReports((current) =>
+      // Write the server's row straight into the cache: the list updates without
+      // a refetch, and any other mounted view of it stays in step.
+      queryClient.setQueryData(queryKeys.memberReports, (current) =>
         (current ?? []).map((item) => (item.report_id === reportId ? updated : item)),
       );
     } catch (err) {
-      setError(err.message);
+      setActionError(err.message);
     } finally {
       setBusyId("");
     }
   }
 
-  if (loading) return <SkeletonBlock height={180} />;
+  const error = actionError || reportsQuery.error?.message || "";
+
+  if (reportsQuery.isPending) return <SkeletonBlock height={180} />;
   if (error) return <ErrorState message={error} onRetry={load} />;
 
-  const all = reports ?? [];
+  const all = reportsQuery.data ?? [];
   const open = all.filter((item) => item.status === "open");
   const visible = showHandled ? all : open;
 

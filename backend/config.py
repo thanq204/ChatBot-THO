@@ -104,7 +104,10 @@ class Settings(BaseSettings):
     faq_pg_db: str = "faq_rag"
     faq_pg_user: str = "faq_user"
     faq_pg_password: str = "faq_pass_dev"
-    postgres_pool_min_size: int = Field(default=1, ge=1, le=10)
+    # Opened eagerly at startup. A dashboard page load fans out into several
+    # concurrent queries, and against a remote database creating a connection
+    # on demand costs ~500ms, so the pool starts wide enough to absorb one.
+    postgres_pool_min_size: int = Field(default=5, ge=1, le=10)
     postgres_pool_max_size: int = Field(default=8, ge=1, le=32)
 
     # Vector Store

@@ -15,7 +15,7 @@ from backend.config import get_settings
 from backend.services.discord.bot import DiscordRagBot
 from backend.services.telegram.bot import TelegramRagBot
 from backend.services.auth_service import current_user, get_auth_store
-from backend.services.database import close_postgres_pools
+from backend.services.database import close_postgres_pools, warm_postgres_pool
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +23,11 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
+    warm_postgres_pool(
+        settings.faq_pg_dsn,
+        settings.postgres_pool_min_size,
+        settings.postgres_pool_max_size,
+    )
     get_auth_store()
     get_review_store()
     operations_pipeline = get_operations_pipeline()

@@ -19,6 +19,7 @@ from google.oauth2 import id_token
 
 from backend.config import Settings, get_settings
 from backend.models.auth import ModInvitePublic, Role, UserPublic
+from backend.services.database import pooled_connection
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -56,10 +57,18 @@ class AuthStore:
         self._create_tables()
         self.bootstrap_root_admin()
 
-    def _connect(self):
+    def _connect(self, readonly: bool = False):
         if not self.settings.faq_pg_dsn:
             raise RuntimeError("FAQ_PG_DSN is required for dashboard authentication.")
-        return psycopg2.connect(self.settings.faq_pg_dsn)
+        # Every authenticated request re-reads the user row, so this must come
+        # from the shared pool. A fresh connection to a remote Supabase costs
+        # ~500ms of TCP+TLS handshake versus ~70ms for a pooled one.
+        return pooled_connection(
+            self.settings.faq_pg_dsn,
+            self.settings.postgres_pool_min_size,
+            self.settings.postgres_pool_max_size,
+            readonly=readonly,
+        )
 
     def _create_tables(self) -> None:
         with self._connect() as conn, conn.cursor() as cur:
@@ -101,12 +110,13 @@ class AuthStore:
                 (str(uuid4()), email, email.split("@")[0], _hash_password(password)))
 
     def list_users(self) -> list[UserPublic]:
-        with self._connect() as conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        with self._connect(readonly=True) as conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute("SELECT user_id,email,display_name,role,is_root_admin,is_active,created_at,last_login_at FROM public.app_users ORDER BY is_root_admin DESC, created_at")
             return [self._public(dict(row)) for row in cur.fetchall()]
 
     def get_user(self, user_id: UUID) -> UserPublic | None:
-        with self._connect() as conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        # The hottest query in the app: one lookup per authenticated request.
+        with self._connect(readonly=True) as conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute("SELECT user_id,email,display_name,role,is_root_admin,is_active,created_at,last_login_at FROM public.app_users WHERE user_id=%s", (str(user_id),))
             row = cur.fetchone()
             return self._public(dict(row)) if row else None
@@ -133,7 +143,7 @@ class AuthStore:
             return ModInvitePublic.model_validate(dict(cur.fetchone()))
 
     def list_mod_invites(self) -> list[ModInvitePublic]:
-        with self._connect() as conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        with self._connect(readonly=True) as conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute("SELECT email, role, invited_by, created_at FROM public.app_mod_invites ORDER BY created_at DESC")
             return [ModInvitePublic.model_validate(dict(row)) for row in cur.fetchall()]
 
@@ -234,7 +244,10 @@ def issue_token(user: UserPublic, settings: Settings | None = None) -> str:
     return f"{head}.{body}.{signature}"
 
 
-async def current_user(credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme)) -> UserPublic:
+# Sync on purpose: the body makes a blocking PostgreSQL call, so FastAPI must be
+# free to run it on the threadpool. As `async def` it would block the event loop
+# and serialize every request in flight.
+def current_user(credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme)) -> UserPublic:
     if not credentials:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Cần đăng nhập.", headers={"WWW-Authenticate": "Bearer"})
     try:
@@ -250,7 +263,7 @@ async def current_user(credentials: HTTPAuthorizationCredentials | None = Depend
 
 
 def require_roles(*roles: Role):
-    async def dependency(user: UserPublic = Depends(current_user)) -> UserPublic:
+    def dependency(user: UserPublic = Depends(current_user)) -> UserPublic:
         if user.role not in roles:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Bạn không có quyền truy cập chức năng này.")
         return user

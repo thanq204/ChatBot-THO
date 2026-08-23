@@ -87,7 +87,7 @@ def get_operations_pipeline() -> OperationsPipeline:
 def get_connectors() -> PlatformConnectors:
     global _connectors
     if _connectors is None:
-        _connectors = PlatformConnectors()
+        _connectors = PlatformConnectors(store=get_operations_store())
     return _connectors
 
 
@@ -99,12 +99,12 @@ def get_importer() -> KnowledgeImporter:
 
 
 @router.get("/platforms", response_model=list[PlatformStatus])
-async def platform_statuses() -> list[PlatformStatus]:
+def platform_statuses() -> list[PlatformStatus]:
     return get_connectors().statuses()
 
 
 @router.get("/platforms/discord/channels", response_model=list[DiscordChannelOption])
-async def discord_channels() -> list[DiscordChannelOption]:
+def discord_channels() -> list[DiscordChannelOption]:
     try:
         return get_connectors().list_discord_channels()
     except ConnectorError as exc:
@@ -112,22 +112,22 @@ async def discord_channels() -> list[DiscordChannelOption]:
 
 
 @router.post("/platforms/{platform}/pull")
-async def pull_platform(platform: str, limit: int = Query(default=100, ge=1, le=500), channel_id: str | None = None) -> dict[str, object]:
+def pull_platform(platform: str, limit: int = Query(default=100, ge=1, le=500), channel_id: str | None = None) -> dict[str, object]:
     try:
         messages = get_connectors().pull(platform, limit, channel_id)
     except ConnectorError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    return await ingest_messages(MessageIngestRequest(messages=messages, analyze=True))
+    return ingest_messages(MessageIngestRequest(messages=messages, analyze=True))
 
 
 @router.post("/messages/analyze", response_model=AnalyzeMessageResponse)
-async def analyze_message(payload: AnalyzeMessageRequest) -> AnalyzeMessageResponse:
+def analyze_message(payload: AnalyzeMessageRequest) -> AnalyzeMessageResponse:
     result = get_operations_pipeline().analyze(payload.message, payload.context)
     return AnalyzeMessageResponse(message=payload.message, result=result)
 
 
 @router.post("/messages/ingest")
-async def ingest_messages(payload: MessageIngestRequest) -> dict[str, object]:
+def ingest_messages(payload: MessageIngestRequest) -> dict[str, object]:
     pipeline = get_operations_pipeline()
     analyzed = []
     context_by_thread: dict[str, list[CommonMessage]] = {}
@@ -140,12 +140,12 @@ async def ingest_messages(payload: MessageIngestRequest) -> dict[str, object]:
 
 
 @router.get("/incidents", response_model=list[Incident])
-async def incidents(status_filter: str | None = Query(default=None, alias="status"), platform: str | None = None) -> list[Incident]:
+def incidents(status_filter: str | None = Query(default=None, alias="status"), platform: str | None = None) -> list[Incident]:
     return get_operations_store().list_incidents(status_filter, platform)
 
 
 @router.get("/incidents/{incident_id}")
-async def incident_detail(incident_id: str) -> dict[str, object]:
+def incident_detail(incident_id: str) -> dict[str, object]:
     incident = get_operations_store().get_incident(incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found.")
@@ -153,7 +153,7 @@ async def incident_detail(incident_id: str) -> dict[str, object]:
 
 
 @router.patch("/incidents/{incident_id}", response_model=Incident)
-async def update_incident(incident_id: str, payload: IncidentUpdateRequest) -> Incident:
+def update_incident(incident_id: str, payload: IncidentUpdateRequest) -> Incident:
     result = get_operations_store().update_incident(incident_id, payload.status, payload.assigned_to, payload.note)
     if not result:
         raise HTTPException(status_code=404, detail="Incident not found.")
@@ -161,34 +161,34 @@ async def update_incident(incident_id: str, payload: IncidentUpdateRequest) -> I
 
 
 @router.get("/audit")
-async def operations_audit(incident_id: str | None = None, _: UserPublic = Depends(require_roles("admin"))) -> list[dict[str, object]]:
+def operations_audit(incident_id: str | None = None, _: UserPublic = Depends(require_roles("admin"))) -> list[dict[str, object]]:
     return get_operations_store().audit(incident_id)
 
 
 @router.get("/policies", response_model=list[Policy])
-async def policies() -> list[Policy]:
+def policies() -> list[Policy]:
     return get_operations_store().list_policies()
 
 
 @router.put("/policies/{policy_id}", response_model=Policy)
-async def upsert_policy(policy_id: str, payload: PolicyUpsertRequest) -> Policy:
+def upsert_policy(policy_id: str, payload: PolicyUpsertRequest) -> Policy:
     return get_operations_store().upsert_policy(policy_id, payload)
 
 
 @router.delete("/policies/{policy_id}")
-async def delete_policy(policy_id: str) -> dict[str, object]:
+def delete_policy(policy_id: str) -> dict[str, object]:
     if not get_operations_store().delete_policy(policy_id):
         raise HTTPException(status_code=404, detail="Không tìm thấy quy định để xóa.")
     return {"deleted": True, "policy_id": policy_id}
 
 
 @router.get("/knowledge", response_model=list[KnowledgeDocument])
-async def knowledge(dataset: str | None = Query(default=None, max_length=80)) -> list[KnowledgeDocument]:
+def knowledge(dataset: str | None = Query(default=None, max_length=80)) -> list[KnowledgeDocument]:
     return get_operations_store().list_knowledge(dataset)
 
 
 @router.post("/knowledge/import", response_model=KnowledgeImportResponse)
-async def import_knowledge(payload: KnowledgeImportRequest) -> KnowledgeImportResponse:
+def import_knowledge(payload: KnowledgeImportRequest) -> KnowledgeImportResponse:
     try:
         content = base64.b64decode(payload.content_base64, validate=True)
         return get_importer().import_file(payload.filename, content, payload.target)
@@ -199,24 +199,24 @@ async def import_knowledge(payload: KnowledgeImportRequest) -> KnowledgeImportRe
 
 
 @router.get("/knowledge/imports", response_model=list[KnowledgeImportRecord])
-async def knowledge_imports() -> list[KnowledgeImportRecord]:
+def knowledge_imports() -> list[KnowledgeImportRecord]:
     return get_operations_store().list_imports()
 
 
 @router.put("/knowledge/{document_id}", response_model=KnowledgeDocument)
-async def upsert_knowledge(document_id: str, payload: KnowledgeDocumentRequest) -> KnowledgeDocument:
+def upsert_knowledge(document_id: str, payload: KnowledgeDocumentRequest) -> KnowledgeDocument:
     return get_operations_store().upsert_knowledge(document_id, payload)
 
 
 @router.delete("/knowledge/{document_id}")
-async def delete_knowledge(document_id: str) -> dict[str, object]:
+def delete_knowledge(document_id: str) -> dict[str, object]:
     if not get_operations_store().delete_knowledge(document_id):
         raise HTTPException(status_code=404, detail="Không tìm thấy tài liệu để xóa.")
     return {"deleted": True, "document_id": document_id}
 
 
 @router.get("/faqs", response_model=list[FAQ])
-async def faqs(
+def faqs(
     active_only: bool = False,
     _: UserPublic = Depends(require_roles("admin")),
 ) -> list[FAQ]:
@@ -224,7 +224,7 @@ async def faqs(
 
 
 @router.put("/faqs/{faq_id}", response_model=FAQWriteResponse)
-async def upsert_faq(
+def upsert_faq(
     faq_id: str,
     payload: FAQUpsertRequest,
     _: UserPublic = Depends(require_roles("admin")),
@@ -235,7 +235,7 @@ async def upsert_faq(
 
 
 @router.delete("/faqs/{faq_id}")
-async def delete_faq(
+def delete_faq(
     faq_id: str,
     _: UserPublic = Depends(require_roles("admin")),
 ) -> dict[str, object]:
@@ -245,7 +245,7 @@ async def delete_faq(
 
 
 @router.get("/faq-suggestions", response_model=list[FAQSuggestion])
-async def faq_suggestions(
+def faq_suggestions(
     status_filter: str = Query(default="open", alias="status"),
     _: UserPublic = Depends(require_roles("admin")),
 ) -> list[FAQSuggestion]:
@@ -253,7 +253,7 @@ async def faq_suggestions(
 
 
 @router.get("/faq-top-topics", response_model=list[FAQTopic])
-async def faq_top_topics(
+def faq_top_topics(
     limit: int = Query(default=10, ge=1, le=50),
     _: UserPublic = Depends(require_roles("admin")),
 ) -> list[FAQTopic]:
@@ -261,7 +261,7 @@ async def faq_top_topics(
 
 
 @router.post("/faq-suggestions/{suggestion_id}/approve", response_model=FAQWriteResponse)
-async def approve_faq_suggestion(
+def approve_faq_suggestion(
     suggestion_id: str,
     payload: FAQSuggestionApproveRequest,
     _: UserPublic = Depends(require_roles("admin")),
@@ -285,7 +285,7 @@ async def approve_faq_suggestion(
 
 
 @router.post("/faq-suggestions/{suggestion_id}/dismiss", response_model=FAQSuggestion)
-async def dismiss_faq_suggestion(
+def dismiss_faq_suggestion(
     suggestion_id: str,
     _: UserPublic = Depends(require_roles("admin")),
 ) -> FAQSuggestion:
@@ -296,7 +296,7 @@ async def dismiss_faq_suggestion(
 
 
 @router.post("/incidents/{incident_id}/actions", response_model=AdminPlatformActionResponse)
-async def execute_incident_action(incident_id: str, payload: AdminPlatformActionRequest) -> AdminPlatformActionResponse:
+def execute_incident_action(incident_id: str, payload: AdminPlatformActionRequest) -> AdminPlatformActionResponse:
     """Run one Admin-confirmed platform action; never called automatically."""
     if not payload.confirmed:
         raise HTTPException(status_code=400, detail="Set confirmed=true after reviewing the case.")
@@ -337,7 +337,7 @@ async def execute_incident_action(incident_id: str, payload: AdminPlatformAction
 
 
 @router.get("/community-health", response_model=CommunityHealth)
-async def community_health(window_hours: int = Query(default=24, ge=1, le=24 * 90)) -> CommunityHealth:
+def community_health(window_hours: int = Query(default=24, ge=1, le=24 * 90)) -> CommunityHealth:
     return get_operations_store().community_health(window_hours)
 
 
@@ -345,13 +345,13 @@ _COMMAND_NAME_PATTERN = re.compile(r"^[a-z0-9_]{2,32}$")
 
 
 @router.get("/admin/command-content", response_model=list[CommandContent])
-async def list_command_content() -> list[CommandContent]:
+def list_command_content() -> list[CommandContent]:
     """Every bot command with Admin-managed content: the built-ins plus any custom ones."""
     return get_operations_store().list_command_content()
 
 
 @router.get("/admin/command-content/{command}", response_model=CommandContent)
-async def command_content(command: str) -> CommandContent:
+def command_content(command: str) -> CommandContent:
     result = get_operations_store().get_command_content(command.strip().lower().lstrip("/"))
     if not result:
         raise HTTPException(status_code=404, detail="Command content not found.")
@@ -359,7 +359,7 @@ async def command_content(command: str) -> CommandContent:
 
 
 @router.put("/admin/command-content/{command}", response_model=CommandContent)
-async def upsert_command_content(command: str, payload: CommandContentRequest) -> CommandContent:
+def upsert_command_content(command: str, payload: CommandContentRequest) -> CommandContent:
     key = command.strip().lower().lstrip("/")
     if not _COMMAND_NAME_PATTERN.fullmatch(key):
         raise HTTPException(status_code=400, detail="Tên lệnh chỉ gồm chữ thường, số và dấu gạch dưới, dài 2-32 ký tự.")
@@ -373,7 +373,7 @@ async def upsert_command_content(command: str, payload: CommandContentRequest) -
 
 
 @router.delete("/admin/command-content/{command}")
-async def delete_command_content(command: str) -> dict[str, object]:
+def delete_command_content(command: str) -> dict[str, object]:
     key = command.strip().lower().lstrip("/")
     if key in CORE_BOT_COMMANDS:
         raise HTTPException(status_code=400, detail="Không thể xoá lệnh mặc định của hệ thống.")
@@ -384,12 +384,12 @@ async def delete_command_content(command: str) -> dict[str, object]:
 
 
 @router.get("/admin/member-reports", response_model=list[MemberReport])
-async def member_reports() -> list[MemberReport]:
+def member_reports() -> list[MemberReport]:
     return get_operations_store().list_member_reports()
 
 
 @router.patch("/admin/member-reports/{report_id}", response_model=MemberReport)
-async def update_member_report(report_id: str, payload: MemberReportUpdateRequest) -> MemberReport:
+def update_member_report(report_id: str, payload: MemberReportUpdateRequest) -> MemberReport:
     """Mark a /report submission handled so it leaves the Admin inbox."""
     result = get_operations_store().set_member_report_status(report_id, payload.status, payload.actor)
     if not result:
@@ -401,7 +401,7 @@ async def update_member_report(report_id: str, payload: MemberReportUpdateReques
     "/incidents/{incident_id}/reputation-decision",
     response_model=IncidentReputationDecisionResponse,
 )
-async def decide_incident_reputation(
+def decide_incident_reputation(
     incident_id: str,
     payload: IncidentReputationDecisionRequest,
     reviewer: UserPublic = Depends(require_roles("admin", "mod")),
@@ -424,28 +424,28 @@ async def decide_incident_reputation(
 
 
 @router.get("/admin/reputation", response_model=list[MemberReputation])
-async def member_reputation(
+def member_reputation(
     _: UserPublic = Depends(require_roles("admin", "mod")),
 ) -> list[MemberReputation]:
     return get_operations_store().list_member_reputation()
 
 
 @router.get("/admin/reputation-rules", response_model=list[ReputationRule])
-async def reputation_rules(
+def reputation_rules(
     _: UserPublic = Depends(require_roles("admin", "mod")),
 ) -> list[ReputationRule]:
     return get_operations_store().list_reputation_rules()
 
 
 @router.get("/admin/flagged-links", response_model=list[FlaggedLink])
-async def flagged_links(
+def flagged_links(
     _: UserPublic = Depends(require_roles("admin", "mod")),
 ) -> list[FlaggedLink]:
     return get_operations_store().list_flagged_links()
 
 
 @router.post("/admin/announcements", response_model=AnnouncementResponse)
-async def send_admin_announcement(payload: AnnouncementRequest) -> AnnouncementResponse:
+def send_admin_announcement(payload: AnnouncementRequest) -> AnnouncementResponse:
     sender = AdminAnnouncementSender()
     targets = list(dict.fromkeys(payload.targets))
     deliveries = [sender.send(payload.message, target) for target in targets]
@@ -462,7 +462,7 @@ async def send_admin_announcement(payload: AnnouncementRequest) -> AnnouncementR
 
 
 @router.post("/rag/ask", response_model=RagResponse)
-async def rag_ask(payload: RagRequest) -> RagResponse:
+def rag_ask(payload: RagRequest) -> RagResponse:
     sources = get_operations_store().search_knowledge(payload.question, dataset=payload.dataset)
     if sources:
         answer = "Mình tìm thấy các hướng dẫn liên quan:\n" + "\n".join(f"- {source.title}: {source.body}" for source in sources)
@@ -472,12 +472,12 @@ async def rag_ask(payload: RagRequest) -> RagResponse:
 
 
 @router.get("/analytics", response_model=OperationsSummary)
-async def operations_analytics() -> OperationsSummary:
+def operations_analytics() -> OperationsSummary:
     return get_operations_store().summary()
 
 
 @router.get("/analytics/timeline", response_model=ActivityTimeline)
-async def operations_timeline(
+def operations_timeline(
     window_hours: int = Query(default=48, ge=1, le=24 * 30),
     bucket_hours: int = Query(default=1, ge=1, le=24),
 ) -> ActivityTimeline:
@@ -486,5 +486,5 @@ async def operations_timeline(
 
 
 @router.post("/demo/seed")
-async def seed_demo() -> dict[str, int]:
+def seed_demo() -> dict[str, int]:
     return {"seeded": seed_operations_demo(get_operations_pipeline())}

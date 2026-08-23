@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { MagnifyingGlass, PencilSimple, Trash, FloppyDisk, Plus, UploadSimple, PaperPlaneRight } from "@phosphor-icons/react";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { useQueries, useQueryClient } from "@tanstack/react-query";
+import { MagnifyingGlass, PencilSimple, Trash, FloppyDisk, Plus, UploadSimple, PaperPlaneRight, CaretRight, CaretDown } from "@phosphor-icons/react";
 import Card from "../components/Card.jsx";
 import Modal from "../components/Modal.jsx";
 import { SkeletonBlock, SkeletonLine } from "../components/Skeleton.jsx";
 import { ErrorState, EmptyState } from "../components/StatePanels.jsx";
 import { ops, fileToBase64 } from "../api/client.js";
+import { queryKeys } from "../lib/queryClient.js";
 import { relativeTime } from "../lib/format.js";
 
 const BLANK = { title: "", dataset: "", body: "", tags: "" };
@@ -14,9 +16,8 @@ function matches(item, query) {
 }
 
 export default function SettingsPage() {
-  const [knowledge, setKnowledge] = useState(null);
-  const [error, setError] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
+  const [actionError, setActionError] = useState(null);
   const [query, setQuery] = useState("");
   const [form, setForm] = useState(BLANK);
   const [editingId, setEditingId] = useState(null);
@@ -25,6 +26,10 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [expandedIds, setExpandedIds] = useState(() => new Set());
+  // Import history + RAG ask are secondary tools, not needed on every visit,
+  // so they live behind a tab instead of pushing the document list down.
+  const [activeTab, setActiveTab] = useState("documents");
 
   // "manual" types one document, "file" uploads a batch. Both write to the same
   // knowledge store, so they belong behind the same "Thêm tài liệu" action.
@@ -34,32 +39,27 @@ export default function SettingsPage() {
   const [importState, setImportState] = useState(null);
   const [importing, setImporting] = useState(false);
 
-  const [imports, setImports] = useState(null);
-  const [loadingImports, setLoadingImports] = useState(true);
+  const [knowledgeQuery, importsQuery] = useQueries({
+    queries: [
+      { queryKey: queryKeys.knowledge, queryFn: ops.knowledge },
+      { queryKey: queryKeys.knowledgeImports, queryFn: ops.knowledgeImports, retry: false },
+    ],
+  });
+
+  const knowledge = knowledgeQuery.data ?? null;
+  const imports = importsQuery.data ?? (importsQuery.isError ? [] : null);
+  const loading = knowledgeQuery.isPending;
+  const loadingImports = importsQuery.isPending;
+  const error = actionError ?? knowledgeQuery.error?.message ?? null;
 
   const load = useCallback(() => {
-    setLoading(true);
-    setError(null);
-    ops
-      .knowledge()
-      .then(setKnowledge)
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
-  }, []);
+    setActionError(null);
+    queryClient.invalidateQueries({ queryKey: queryKeys.knowledge });
+  }, [queryClient]);
 
   const loadImports = useCallback(() => {
-    setLoadingImports(true);
-    ops
-      .knowledgeImports()
-      .then(setImports)
-      .catch(() => setImports([]))
-      .finally(() => setLoadingImports(false));
-  }, []);
-
-  useEffect(() => {
-    load();
-    loadImports();
-  }, [load, loadImports]);
+    queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeImports });
+  }, [queryClient]);
 
   const visible = useMemo(() => {
     if (!knowledge) return [];
@@ -71,6 +71,15 @@ export default function SettingsPage() {
 
   function toggleSelect(id) {
     setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleExpand(id) {
+    setExpandedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -102,7 +111,7 @@ export default function SettingsPage() {
       setSelectedIds(new Set());
       load();
     } catch (err) {
-      setError(err.message);
+      setActionError(err.message);
     } finally {
       setBulkDeleting(false);
     }
@@ -199,7 +208,7 @@ export default function SettingsPage() {
       if (editingId === item.document_id) cancelEdit();
       load();
     } catch (err) {
-      setError(err.message);
+      setActionError(err.message);
     }
   }
 
@@ -213,11 +222,28 @@ export default function SettingsPage() {
 
   return (
     <div className="page-grid">
-      <div className="page-grid__row">
-        <ImportHistoryCard imports={imports} loading={loadingImports} />
-        <RagAskCard />
+      <div className="segmented" role="tablist" aria-label="Chế độ xem">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === "documents"}
+          className={`segmented__option ${activeTab === "documents" ? "is-active" : ""}`.trim()}
+          onClick={() => setActiveTab("documents")}
+        >
+          Tài liệu
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === "tools"}
+          className={`segmented__option ${activeTab === "tools" ? "is-active" : ""}`.trim()}
+          onClick={() => setActiveTab("tools")}
+        >
+          Lịch sử import & Hỏi tri thức
+        </button>
       </div>
 
+      {activeTab === "documents" && (
       <div className="page-grid__row">
         <Card
           title="Tài liệu tri thức (RAG)"
@@ -258,36 +284,57 @@ export default function SettingsPage() {
                 Chọn tất cả ({visible.length})
               </label>
               <div className="list">
-                {visible.map((item) => (
-                  <div className="list-row" key={item.document_id}>
-                    <div className="list-row__head">
-                      <span className="list-row__title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <input
-                          type="checkbox"
-                          checked={selectedIds.has(item.document_id)}
-                          onChange={() => toggleSelect(item.document_id)}
-                        />
-                        {item.title}
-                      </span>
-                      <span className="list-row__meta">{item.dataset}</span>
+                {visible.map((item) => {
+                  const expanded = expandedIds.has(item.document_id);
+                  return (
+                    <div className="list-row" key={item.document_id}>
+                      <div
+                        className="list-row__head"
+                        style={{ cursor: "pointer" }}
+                        onClick={() => toggleExpand(item.document_id)}
+                      >
+                        <span className="list-row__title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.has(item.document_id)}
+                            onChange={() => toggleSelect(item.document_id)}
+                            onClick={(event) => event.stopPropagation()}
+                          />
+                          {expanded ? <CaretDown size={13} /> : <CaretRight size={13} />}
+                          {item.title}
+                        </span>
+                        <span className="list-row__meta">{item.dataset}</span>
+                      </div>
+                      {expanded && (
+                        <>
+                          <p className="list-row__body">{item.body}</p>
+                          <span className="list-row__meta">tags: {(item.tags || []).join(", ") || "không có"}</span>
+                        </>
+                      )}
+                      <div className="list-row__actions">
+                        <button type="button" className="btn btn--ghost" onClick={() => startEdit(item)}>
+                          <PencilSimple size={13} /> Sửa
+                        </button>
+                        <button type="button" className="btn btn--ghost" onClick={() => remove(item)}>
+                          <Trash size={13} /> Xoá
+                        </button>
+                      </div>
                     </div>
-                    <p className="list-row__body">{item.body}</p>
-                    <span className="list-row__meta">tags: {(item.tags || []).join(", ") || "không có"}</span>
-                    <div className="list-row__actions">
-                      <button type="button" className="btn btn--ghost" onClick={() => startEdit(item)}>
-                        <PencilSimple size={13} /> Sửa
-                      </button>
-                      <button type="button" className="btn btn--ghost" onClick={() => remove(item)}>
-                        <Trash size={13} /> Xoá
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </>
           )}
         </Card>
       </div>
+      )}
+
+      {activeTab === "tools" && (
+      <div className="page-grid__row">
+        <ImportHistoryCard imports={imports} loading={loadingImports} />
+        <RagAskCard />
+      </div>
+      )}
 
       <Modal open={formOpen} title={editingId ? "Sửa tài liệu" : "Thêm tài liệu"} onClose={cancelEdit}>
         {!editingId && (

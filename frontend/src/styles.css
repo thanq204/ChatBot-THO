@@ -978,6 +978,15 @@ a {
   }
 }
 
+/* The previous filter's rows, still on screen while the new ones load. Dimming
+   keeps their position stable, where a skeleton would throw the layout away and
+   make a filter change feel like a page load. Rows stay clickable: the data is
+   real, just one filter behind. */
+.is-refreshing {
+  opacity: 0.6;
+  transition: opacity 140ms ease-out;
+}
+
 /* ==========================================================================
    AI sandbox
    ========================================================================== */
