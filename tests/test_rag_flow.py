@@ -239,3 +239,81 @@ def test_general_question_labels_deterministic_fallback_honestly() -> None:
 
     assert outcome.answer == "[Hệ thống]\nMình tên là CHAT-10, trợ lý cộng đồng học tập."
     assert outcome.model_used == "system-fallback"
+
+
+def test_out_of_scope_cooking_question_rejected() -> None:
+    store = Mock()
+    pipeline = Mock()
+    pipeline.analyze.return_value = _allowed()
+    chat = ChatOrchestrator(store, Settings(discord_rag_llm_enabled=True), pipeline)
+    chat._general_llm_answer = Mock()
+
+    outcome = chat.reply(_message("scope-cooking", "Cách nấu phở ngon nhất"))
+
+    assert outcome.stage == "scope-filter"
+    assert outcome.model_used == "deterministic-scope-filter"
+    assert "Ngoài phạm vi" in outcome.answer
+    chat._general_llm_answer.assert_not_called()
+    store.search_knowledge_ranked.assert_not_called()
+
+
+def test_out_of_scope_crypto_question_rejected() -> None:
+    store = Mock()
+    store.find_faq.return_value = None
+    store.search_knowledge_ranked.return_value = []
+    pipeline = Mock()
+    pipeline.analyze.return_value = _allowed()
+    chat = ChatOrchestrator(store, Settings(discord_rag_llm_enabled=True), pipeline)
+    chat._general_llm_answer = Mock()
+
+    outcome = chat.reply(_message("scope-crypto", "Bitcoin giá bao nhiêu"))
+
+    assert outcome.stage == "scope-filter"
+    assert "Ngoài phạm vi" in outcome.answer
+    chat._general_llm_answer.assert_not_called()
+
+
+def test_out_of_scope_gaming_question_rejected() -> None:
+    store = Mock()
+    store.find_faq.return_value = None
+    store.search_knowledge_ranked.return_value = []
+    pipeline = Mock()
+    pipeline.analyze.return_value = _allowed()
+    chat = ChatOrchestrator(store, Settings(discord_rag_llm_enabled=True), pipeline)
+    chat._general_llm_answer = Mock()
+
+    outcome = chat.reply(_message("scope-gaming", "Rank Liên Quân mùa này thế nào"))
+
+    assert outcome.stage == "scope-filter"
+    assert "Ngoài phạm vi" in outcome.answer
+    chat._general_llm_answer.assert_not_called()
+
+
+def test_in_scope_study_question_passes_through() -> None:
+    store = Mock()
+    store.find_faq.return_value = None
+    store.search_knowledge_ranked.return_value = []
+    pipeline = Mock()
+    pipeline.analyze.return_value = _allowed()
+    chat = ChatOrchestrator(store, Settings(discord_rag_llm_enabled=True), pipeline)
+    chat._general_llm_answer = Mock(return_value=("Hãy chia nhỏ mục tiêu.", "test-llm"))
+
+    outcome = chat.reply(_message("scope-study", "Làm sao để học Python hiệu quả"))
+
+    assert outcome.stage != "scope-filter"
+
+
+def test_mixed_scope_with_in_scope_keyword_passes() -> None:
+    """Cross-domain like 'code Python để crawl giá Bitcoin' has in-scope keywords."""
+    store = Mock()
+    store.find_faq.return_value = None
+    store.search_knowledge_ranked.return_value = []
+    pipeline = Mock()
+    pipeline.analyze.return_value = _allowed()
+    chat = ChatOrchestrator(store, Settings(discord_rag_llm_enabled=True), pipeline)
+    chat._general_llm_answer = Mock(return_value=("Bạn có thể dùng requests.", "test-llm"))
+
+    outcome = chat.reply(_message("scope-mixed", "Code Python để crawl giá Bitcoin"))
+
+    assert outcome.stage != "scope-filter"
+

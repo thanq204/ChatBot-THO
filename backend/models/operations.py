@@ -266,7 +266,7 @@ class FAQSuggestionApproveRequest(BaseModel):
 
 class ChatOutcome(BaseModel):
     answer: str
-    stage: Literal["rule", "faq", "moderation", "rag", "llm"]
+    stage: Literal["rule", "faq", "moderation", "rag", "llm", "scope-filter"]
     model_used: str
     moderation: MessageDecision | None = None
     faq_id: str | None = None
