@@ -22,11 +22,14 @@ export function AuthProvider({ children }) {
   const signIn = useCallback(async (email, password) => {
     try { return accept(await auth.login({ email, password })); } catch (error) { return { ok: false, error: error.message }; }
   }, [accept]);
-  const signInWithGoogle = useCallback(async (credential, password) => {
-    try { return accept(await auth.google(credential, password)); } catch (error) { return { ok: false, error: error.message }; }
+  const register = useCallback(async (payload) => {
+    try { return accept(await auth.register(payload)); } catch (error) { return { ok: false, error: error.message }; }
+  }, [accept]);
+  const acceptInvite = useCallback(async (token, payload) => {
+    try { return accept(await auth.acceptInvite(token, payload)); } catch (error) { return { ok: false, error: error.message }; }
   }, [accept]);
   const signOut = useCallback(() => { clearAccessToken(); window.localStorage.removeItem(STORAGE_KEY); setUser(null); }, []);
-  const value = useMemo(() => ({ user, isAuthenticated: Boolean(user && getAccessToken()), signIn, signInWithGoogle, signOut }), [user, signIn, signInWithGoogle, signOut]);
+  const value = useMemo(() => ({ user, isAuthenticated: Boolean(user && getAccessToken()), signIn, register, acceptInvite, signOut }), [user, signIn, register, acceptInvite, signOut]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
