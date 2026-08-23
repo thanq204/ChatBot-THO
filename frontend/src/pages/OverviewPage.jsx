@@ -124,10 +124,11 @@ export default function OverviewPage() {
     setSyncResult({ tone: "", text: `Đang đọc dữ liệu thật từ ${platformLabel(platform)}...` });
     try {
       const pulled = await ops.pullPlatform(platform, limit);
-      setSyncResult({
-        tone: "success",
-        text: `Đã nhận ${pulled.received} tin nhắn và phân tích ${pulled.analyzed} tin từ ${platformLabel(platform)}.`,
-      });
+      const text =
+        pulled.received > 0
+          ? `Đã nhận ${pulled.received} tin nhắn và phân tích ${pulled.analyzed} tin từ ${platformLabel(platform)}.`
+          : `Không có tin nhắn mới từ ${platformLabel(platform)} kể từ lần quét trước.`;
+      setSyncResult({ tone: "success", text });
       load();
     } catch (err) {
       setSyncResult({ tone: "error", text: err.message });
@@ -188,6 +189,9 @@ export default function OverviewPage() {
           {!loading && (
             <>
               <p className="muted small">Trạng thái kết nối theo nền tảng.</p>
+              <p className="muted small">
+                Khi "Đang hoạt động", Discord và Telegram đã tự động phân loại tin nhắn mới theo thời gian thực — không cần quét thủ công. Các nút bên dưới chỉ dùng để lấy lại tin nhắn cũ (bot vừa mất kết nối, mới vào server, v.v.).
+              </p>
               <div className="platform-ring-grid">
                 {(platforms ?? []).map((status, index) => (
                   <PlatformRing key={status.platform} status={status} delay={index * 0.1} />
@@ -227,9 +231,13 @@ export default function OverviewPage() {
                     disabled={Boolean(syncing)}
                   >
                     <ArrowsClockwise size={14} className={syncing === "telegram" ? "spin-icon" : undefined} />
-                    {syncing === "telegram" ? "Đang đồng bộ..." : "Đồng bộ Telegram"}
+                    {syncing === "telegram" ? "Đang quét..." : "Quét Telegram"}
                   </button>
                 </div>
+                <p className="muted small">
+                  Discord: chỉ lấy tin nhắn mới kể từ lần quét trước, không quét lại tin đã xử lý. Telegram: bot xử lý
+                  real-time nên quét thủ công có thể báo 0 tin mới — đó là bình thường, không phải lỗi.
+                </p>
                 {syncResult && (
                   <p className={`platform-sync__result platform-sync__result--${syncResult.tone}`}>{syncResult.text}</p>
                 )}

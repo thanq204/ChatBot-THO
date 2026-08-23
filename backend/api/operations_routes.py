@@ -87,7 +87,7 @@ def get_operations_pipeline() -> OperationsPipeline:
 def get_connectors() -> PlatformConnectors:
     global _connectors
     if _connectors is None:
-        _connectors = PlatformConnectors()
+        _connectors = PlatformConnectors(store=get_operations_store())
     return _connectors
 
 
