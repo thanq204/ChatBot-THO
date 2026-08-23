@@ -15,6 +15,7 @@ import { SkeletonBlock } from "./components/Skeleton.jsx";
  */
 const LandingPage = lazy(() => import("./pages/LandingPage.jsx"));
 const LoginPage = lazy(() => import("./pages/LoginPage.jsx"));
+const AcceptInvitePage = lazy(() => import("./pages/AcceptInvitePage.jsx"));
 const OverviewPage = lazy(() => import("./pages/OverviewPage.jsx"));
 const AiSandboxPage = lazy(() => import("./pages/AiSandboxPage.jsx"));
 const CommunityPage = lazy(() => import("./pages/CommunityPage.jsx"));
@@ -42,6 +43,7 @@ export default function App() {
         {/* Public surface: no sidebar, no topbar. */}
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/dang-ky" element={<AcceptInvitePage />} />
 
         {/* Dashboard sits behind the mock session and off "/" so the landing
             page can own the root. */}

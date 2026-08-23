@@ -56,5 +56,22 @@ class ModInviteRequest(BaseModel):
 class ModInvitePublic(BaseModel):
     email: str
     role: Literal["mod"] = "mod"
+    token: str
     invited_by: UUID
     created_at: datetime
+    email_sent: bool = False
+
+
+class RegisterRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=254)
+    display_name: str = Field(min_length=1, max_length=120)
+    password: str = Field(min_length=8, max_length=256)
+
+
+class InvitePreview(BaseModel):
+    email: str
+
+
+class InviteAcceptRequest(BaseModel):
+    display_name: str = Field(min_length=1, max_length=120)
+    password: str = Field(min_length=8, max_length=256)

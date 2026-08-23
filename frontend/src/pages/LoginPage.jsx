@@ -1,50 +1,77 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { Navigate, useLocation } from "react-router-dom";
-import { ArrowLeft, Eye, EyeSlash, SpinnerGap, WarningCircle } from "@phosphor-icons/react";
+import { ArrowLeft, EnvelopeSimple, Eye, EyeSlash, IdentificationBadge, Info, LockSimple, SpinnerGap, WarningCircle } from "@phosphor-icons/react";
 import Mascot from "../components/landing/Mascot.jsx";
 import SakuraField from "../components/landing/SakuraField.jsx";
 import { useAuth } from "../auth/AuthProvider.jsx";
-import { auth } from "../api/client.js";
 import { TransitionLink, usePageTransition } from "../transitions/PageTransition.jsx";
 import "../login.css";
 
+const REGISTER_BLANK = { email: "", display_name: "", password: "" };
+
 export default function LoginPage() {
-  const location = useLocation(); const { isAuthenticated, signIn, signInWithGoogle } = useAuth(); const { transitionTo } = usePageTransition();
-  const [values, setValues] = useState({ email: "", password: "" }); const [revealed, setRevealed] = useState(false); const [submitting, setSubmitting] = useState(false); const [formError, setFormError] = useState(""); const [googleClientId, setGoogleClientId] = useState(""); const [googleCredential, setGoogleCredential] = useState(""); const [googlePassword, setGooglePassword] = useState(""); const submitRef = useRef(null); const googleButtonRef = useRef(null);
+  const location = useLocation(); const { isAuthenticated, signIn, register } = useAuth(); const { transitionTo } = usePageTransition();
+  const [tab, setTab] = useState("login"); const [values, setValues] = useState({ email: "", password: "" }); const [registerValues, setRegisterValues] = useState(REGISTER_BLANK); const [revealed, setRevealed] = useState(false); const [submitting, setSubmitting] = useState(false); const [formError, setFormError] = useState(""); const submitRef = useRef(null);
+  const switchTab = (next) => { setTab(next); setFormError(""); };
   const destination = location.state?.from && location.state.from !== "/login" ? location.state.from : "/tong-quan";
-  useEffect(() => { auth.googleConfig().then((config) => setGoogleClientId(config.client_id || "")).catch(() => setGoogleClientId("")); }, []);
   const submit = async (event) => {
     event.preventDefault(); setFormError(""); setSubmitting(true);
     const result = await signIn(values.email, values.password);
     if (!result.ok) { setSubmitting(false); setFormError(result.error); return; }
     const rect = submitRef.current?.getBoundingClientRect(); transitionTo(destination, rect && { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
   };
-  const finishGoogle = async (credential, password) => {
-    setSubmitting(true); const result = await signInWithGoogle(credential, password);
-    if (!result.ok) {
-      setSubmitting(false);
-      if (result.error.includes("Hãy tạo mật khẩu")) { setGoogleCredential(credential); setFormError(""); return; }
-      setFormError(result.error); return;
-    }
-    transitionTo(destination);
+  const submitRegister = async (event) => {
+    event.preventDefault(); setFormError(""); setSubmitting(true);
+    const result = await register(registerValues);
+    if (!result.ok) { setSubmitting(false); setFormError(result.error); return; }
+    const rect = submitRef.current?.getBoundingClientRect(); transitionTo(destination, rect && { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
   };
-  const createGooglePassword = (event) => { event.preventDefault(); if (googlePassword.length < 8) { setFormError("Mật khẩu cần ít nhất 8 ký tự."); return; } finishGoogle(googleCredential, googlePassword); };
-  useEffect(() => {
-    const clientId = googleClientId || import.meta.env.VITE_GOOGLE_CLIENT_ID;
-    let timer;
-    const render = () => {
-      if (!clientId || !googleButtonRef.current) return;
-      if (!window.google?.accounts?.id) { timer = window.setTimeout(render, 100); return; }
-      window.google.accounts.id.initialize({ client_id: clientId, auto_select: false, callback: ({ credential }) => finishGoogle(credential) });
-      window.google.accounts.id.renderButton(googleButtonRef.current, { type: "standard", theme: "outline", size: "large", text: "signin_with", shape: "pill", width: 360 });
-    };
-    render();
-    return () => window.clearTimeout(timer);
-  }, [googleClientId, signInWithGoogle, destination, transitionTo]);
   if (isAuthenticated) return <Navigate to={destination} replace />;
   return <div className="auth"><div className="auth__blobs" aria-hidden="true"><span className="auth__blob auth__blob--pink" /><span className="auth__blob auth__blob--lavender" /></div><SakuraField />
-    <div className="auth__card"><TransitionLink to="/" className="auth__back"><ArrowLeft size={15} weight="bold" />Quay lại trang chủ</TransitionLink><div className="auth__head"><Mascot size={62} variant="auth" className="auth__mascot" /><span className="auth__brand">AI Community Manager</span><h1 className="auth__title">{googleCredential ? "Tạo mật khẩu" : "Chào mừng trở lại"}</h1>{googleCredential && <p className="auth__foot">Đăng nhập Google lần đầu. Hãy đặt mật khẩu để bảo vệ tài khoản.</p>}</div>
-      {!googleCredential && <><form className="auth__form" onSubmit={submit}><div className="field"><label className="field__label" htmlFor="email">Email</label><input id="email" type="email" autoComplete="email" className="field__input" value={values.email} onChange={(e) => setValues({ ...values, email: e.target.value })} required /></div><div className="field"><label className="field__label" htmlFor="password">Mật khẩu</label><div className="field__wrap"><input id="password" type={revealed ? "text" : "password"} autoComplete="current-password" className="field__input" value={values.password} onChange={(e) => setValues({ ...values, password: e.target.value })} minLength="8" required /><button type="button" className="field__reveal" onClick={() => setRevealed(!revealed)} aria-label="Hiện hoặc ẩn mật khẩu">{revealed ? <EyeSlash size={17} /> : <Eye size={17} />}</button></div></div>{formError && <p className="auth__alert" role="alert"><WarningCircle size={16} weight="fill" />{formError}</p>}<button ref={submitRef} type="submit" className="auth__submit" disabled={submitting}>{submitting ? <><SpinnerGap size={17} className="spin-icon" />Đang đăng nhập</> : <>Đăng nhập</>}</button></form><div className="auth__divider"><span>hoặc</span></div><div className="auth__google" ref={googleButtonRef} aria-label="Đăng nhập với Google" /></>}
-      {googleCredential && <form className="auth__form" onSubmit={createGooglePassword}><div className="field"><label className="field__label" htmlFor="google-password">Mật khẩu mới</label><input id="google-password" className="field__input" type="password" minLength="8" value={googlePassword} onChange={(event) => setGooglePassword(event.target.value)} required /></div>{formError && <p className="auth__alert" role="alert"><WarningCircle size={16} weight="fill" />{formError}</p>}<button type="submit" className="auth__submit" disabled={submitting}>{submitting ? "Đang tạo tài khoản…" : "Tạo mật khẩu và tiếp tục"}</button></form>}
+    <div className="auth__card"><TransitionLink to="/" className="auth__back"><ArrowLeft size={15} weight="bold" />Quay lại trang chủ</TransitionLink>
+      <div className="auth__head">
+        <Mascot size={62} variant="auth" className="auth__mascot" />
+        <span className="auth__brand">AI Community Manager</span>
+        <h1 className="auth__title">{tab === "register" ? "Tạo tài khoản" : "Chào mừng trở lại"}</h1>
+        <p className="auth__subtitle">{tab === "register" ? "Tạo tài khoản Admin để bắt đầu quản lý cộng đồng." : "Đăng nhập để tiếp tục quản lý cộng đồng."}</p>
+      </div>
+
+      <div className="auth__tabs" role="tablist" aria-label="Đăng nhập hoặc đăng ký">
+        <button type="button" role="tab" aria-selected={tab === "login"} className={`auth__tab ${tab === "login" ? "is-active" : ""}`.trim()} onClick={() => switchTab("login")}>Đăng nhập</button>
+        <button type="button" role="tab" aria-selected={tab === "register"} className={`auth__tab ${tab === "register" ? "is-active" : ""}`.trim()} onClick={() => switchTab("register")}>Đăng ký</button>
+      </div>
+
+      {tab === "login" && <form className="auth__form" onSubmit={submit}>
+        <div className="field">
+          <label className="field__label" htmlFor="email">Email</label>
+          <div className="field__wrap"><EnvelopeSimple size={17} className="field__icon" /><input id="email" type="email" autoComplete="email" className="field__input" value={values.email} onChange={(e) => setValues({ ...values, email: e.target.value })} required /></div>
+        </div>
+        <div className="field">
+          <label className="field__label" htmlFor="password">Mật khẩu</label>
+          <div className="field__wrap field__wrap--password"><LockSimple size={17} className="field__icon" /><input id="password" type={revealed ? "text" : "password"} autoComplete="current-password" className="field__input" value={values.password} onChange={(e) => setValues({ ...values, password: e.target.value })} minLength="8" required /><button type="button" className="field__reveal" onClick={() => setRevealed(!revealed)} aria-label="Hiện hoặc ẩn mật khẩu">{revealed ? <EyeSlash size={17} /> : <Eye size={17} />}</button></div>
+        </div>
+        {formError && <p className="auth__alert" role="alert"><WarningCircle size={16} weight="fill" />{formError}</p>}
+        <button ref={submitRef} type="submit" className="auth__submit" disabled={submitting}>{submitting ? <><SpinnerGap size={17} className="spin-icon" />Đang đăng nhập</> : <>Đăng nhập</>}</button>
+      </form>}
+
+      {tab === "register" && <>
+        <p className="auth__notice"><Info size={16} weight="fill" /><span>Tài khoản tạo ở đây có quyền <strong>Admin</strong>. Nếu bạn được mời làm Mod, hãy dùng link mời Admin đã gửi cho bạn thay vì đăng ký ở đây.</span></p>
+        <form className="auth__form" onSubmit={submitRegister}>
+          <div className="field">
+            <label className="field__label" htmlFor="register-email">Email</label>
+            <div className="field__wrap"><EnvelopeSimple size={17} className="field__icon" /><input id="register-email" type="email" autoComplete="email" className="field__input" value={registerValues.email} onChange={(e) => setRegisterValues({ ...registerValues, email: e.target.value })} required /></div>
+          </div>
+          <div className="field">
+            <label className="field__label" htmlFor="register-name">Tên hiển thị</label>
+            <div className="field__wrap"><IdentificationBadge size={17} className="field__icon" /><input id="register-name" className="field__input" value={registerValues.display_name} onChange={(e) => setRegisterValues({ ...registerValues, display_name: e.target.value })} required /></div>
+          </div>
+          <div className="field">
+            <label className="field__label" htmlFor="register-password">Mật khẩu</label>
+            <div className="field__wrap field__wrap--password"><LockSimple size={17} className="field__icon" /><input id="register-password" type={revealed ? "text" : "password"} autoComplete="new-password" className="field__input" value={registerValues.password} onChange={(e) => setRegisterValues({ ...registerValues, password: e.target.value })} minLength="8" required /><button type="button" className="field__reveal" onClick={() => setRevealed(!revealed)} aria-label="Hiện hoặc ẩn mật khẩu">{revealed ? <EyeSlash size={17} /> : <Eye size={17} />}</button></div>
+          </div>
+          {formError && <p className="auth__alert" role="alert"><WarningCircle size={16} weight="fill" />{formError}</p>}
+          <button ref={submitRef} type="submit" className="auth__submit" disabled={submitting}>{submitting ? <><SpinnerGap size={17} className="spin-icon" />Đang tạo tài khoản</> : <>Đăng ký</>}</button>
+        </form>
+      </>}
     </div></div>;
 }
