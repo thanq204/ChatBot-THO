@@ -15,17 +15,24 @@ FROM python:3.11-slim AS builder
 
 WORKDIR /app
 
+ENV VIRTUAL_ENV=/opt/venv
+ENV PATH=$VIRTUAL_ENV/bin:$PATH
+
+# Keep Python executables outside /root so the unprivileged runtime user can
+# execute uvicorn and every installed dependency.
+RUN python -m venv $VIRTUAL_ENV
+
 COPY requirements.txt .
-RUN pip install --no-cache-dir --user -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # ---- Stage 3: Production ----
 FROM python:3.11-slim
 
 WORKDIR /app
 
-# Copy installed packages from builder
-COPY --from=builder /root/.local /root/.local
-ENV PATH=/root/.local/bin:$PATH
+# Copy the runtime virtual environment from builder.
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH=/opt/venv/bin:$PATH
 
 # Security: run as non-root user
 RUN useradd -m appuser
