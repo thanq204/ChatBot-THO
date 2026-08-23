@@ -116,7 +116,18 @@
 }
 
 .auth__mascot {
+  position: relative;
   margin: 0 auto 14px;
+}
+
+.auth__mascot::before {
+  content: "";
+  position: absolute;
+  inset: -16px;
+  z-index: -1;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--sk-pink-wash), transparent 72%);
+  opacity: 0.65;
 }
 
 .auth__brand {
@@ -137,10 +148,106 @@
   color: var(--sk-text);
 }
 
+.auth__subtitle {
+  margin-top: 6px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--sk-text-2);
+}
+
 .auth__form {
   margin-top: 26px;
   display: grid;
   gap: 16px;
+}
+
+/* --------------------------------------------------------------------------
+   Login / register tabs
+   -------------------------------------------------------------------------- */
+
+.auth__tabs {
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+  margin-top: 20px;
+  padding: 4px;
+  border-radius: var(--sk-radius-chip);
+  border: 1px solid var(--sk-border);
+  background: var(--sk-surface-2);
+}
+
+.auth__tab {
+  flex: 1;
+  padding: 9px 14px;
+  border: none;
+  border-radius: var(--sk-radius-chip);
+  background: none;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--sk-text-2);
+  transition: background 0.24s var(--sk-ease), color 0.24s var(--sk-ease), box-shadow 0.24s var(--sk-ease);
+}
+
+.auth__tab:hover {
+  color: var(--sk-text);
+}
+
+.auth__tab.is-active {
+  background: var(--sk-btn);
+  color: #fff;
+  box-shadow: 0 3px 10px rgb(219 39 119 / 0.3);
+}
+
+.auth__tab.is-active:hover {
+  color: #fff;
+}
+
+.auth__foot--lead {
+  margin-top: 20px;
+  margin-bottom: 4px;
+  text-align: left;
+}
+
+/* --------------------------------------------------------------------------
+   Notice callout. Used where a form needs one clear heads-up (e.g. "this
+   creates an Admin account") without it reading as a form error.
+   -------------------------------------------------------------------------- */
+
+.auth__notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 20px;
+  padding: 12px 14px;
+  border-radius: var(--sk-radius-control);
+  border: 1px solid var(--sk-border-2);
+  background: var(--sk-lavender-mist);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--sk-text-2);
+  text-align: left;
+}
+
+.auth__notice svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--sk-accent-quiet);
+}
+
+.auth__notice strong {
+  color: var(--sk-text);
+  font-weight: 600;
+}
+
+:root[data-theme="dark"] .auth__notice {
+  background: color-mix(in srgb, var(--sk-lavender-mist) 22%, var(--sk-surface-2));
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .auth__notice {
+    background: color-mix(in srgb, var(--sk-lavender-mist) 22%, var(--sk-surface-2));
+  }
 }
 
 /* --------------------------------------------------------------------------
@@ -174,7 +281,27 @@
 }
 
 .field__wrap .field__input {
+  padding-left: 42px;
+}
+
+.field__wrap--password .field__input {
   padding-right: 46px;
+}
+
+.field__icon {
+  position: absolute;
+  top: 50%;
+  left: 14px;
+  transform: translateY(-50%);
+  display: flex;
+  color: var(--sk-text-3);
+  pointer-events: none;
+}
+
+.field__input:disabled {
+  color: var(--sk-text-3);
+  cursor: not-allowed;
+  opacity: 0.8;
 }
 
 .field__input:focus {
@@ -341,6 +468,20 @@
 .auth__minor:hover {
   color: var(--sk-accent);
   text-decoration: underline;
+}
+
+.auth__decline {
+  background: none;
+  border: none;
+  font: inherit;
+  cursor: pointer;
+  padding: 4px;
+  margin-top: 2px;
+}
+
+.auth__decline:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 /* --------------------------------------------------------------------------

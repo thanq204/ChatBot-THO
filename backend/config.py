@@ -96,7 +96,20 @@ class Settings(BaseSettings):
     auth_root_admin_email: str = ""
     auth_root_admin_password: str = ""
     google_oauth_client_id: str = ""
-    
+    # Origin used to build links inside emails (invite links, etc). Set to the
+    # deployed frontend URL in production; defaults to the Vite dev server.
+    app_public_url: str = "http://localhost:5173"
+
+    # Outbound email (Mod invite links). Empty smtp_host disables sending and
+    # the invite flow falls back to the Admin copying the link manually.
+    smtp_host: str = ""
+    smtp_port: int = Field(default=587, ge=1, le=65535)
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = ""
+    smtp_from_name: str = "AI Community Manager"
+    smtp_use_tls: bool = True
+
     # PostgreSQL Database for FAQ RAG
     faq_pg_dsn: str = ""  # If set, overrides individual parameters (useful for Supabase/Neon)
     faq_pg_host: str = "localhost"

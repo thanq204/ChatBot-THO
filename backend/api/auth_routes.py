@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from backend.models.auth import AuthResponse, GoogleLoginRequest, LoginRequest, ModInvitePublic, ModInviteRequest, UserCreateRequest, UserPublic, UserRoleUpdateRequest, UserStatusUpdateRequest
+from backend.models.auth import AuthResponse, GoogleLoginRequest, InviteAcceptRequest, InvitePreview, LoginRequest, ModInvitePublic, ModInviteRequest, RegisterRequest, UserCreateRequest, UserPublic, UserRoleUpdateRequest, UserStatusUpdateRequest
 from backend.services.auth_service import current_user, get_auth_store, issue_token, require_roles, verify_google
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
@@ -18,6 +18,15 @@ def google_config() -> dict[str, str | bool]:
 def login(payload: LoginRequest) -> AuthResponse:
     user = get_auth_store().login_password(str(payload.email), payload.password)
     if not user: raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Email hoặc mật khẩu không đúng.")
+    return _response(user)
+
+@router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
+def register(payload: RegisterRequest) -> AuthResponse:
+    """Open self-registration. Creates an Admin account directly, no invite required."""
+    try:
+        user = get_auth_store().register_admin(payload.email, payload.display_name, payload.password)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return _response(user)
 
 @router.post("/google", response_model=AuthResponse)
@@ -61,6 +70,30 @@ def invite_mod(payload: ModInviteRequest, admin: UserPublic = Depends(require_ro
 def delete_mod_invite(email: str, _: UserPublic = Depends(require_roles("admin"))) -> None:
     if not get_auth_store().delete_mod_invite(email):
         raise HTTPException(status_code=404, detail="Không tìm thấy lời mời đang chờ.")
+
+@router.get("/invites/{token}", response_model=InvitePreview)
+def preview_invite(token: str) -> InvitePreview:
+    """Public: lets the invite-link page show which email it will register, before the Mod submits anything."""
+    invite = get_auth_store().get_invite_by_token(token)
+    if not invite:
+        raise HTTPException(status_code=404, detail="Link mời không hợp lệ hoặc đã được sử dụng.")
+    return InvitePreview(email=invite.email)
+
+@router.post("/invites/{token}/accept", response_model=AuthResponse)
+def accept_invite(token: str, payload: InviteAcceptRequest) -> AuthResponse:
+    try:
+        user = get_auth_store().accept_mod_invite(token, payload.display_name, payload.password)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if not user:
+        raise HTTPException(status_code=404, detail="Link mời không hợp lệ hoặc đã được sử dụng.")
+    return _response(user)
+
+@router.post("/invites/{token}/decline", status_code=status.HTTP_204_NO_CONTENT)
+def decline_invite(token: str) -> None:
+    """Public: the invited person opts out from the invite-link page."""
+    if not get_auth_store().decline_mod_invite(token):
+        raise HTTPException(status_code=404, detail="Link mời không hợp lệ hoặc đã được sử dụng.")
 
 @router.patch("/users/{user_id}/role", response_model=UserPublic)
 def update_role(user_id: str, payload: UserRoleUpdateRequest, _: UserPublic = Depends(require_roles("admin"))) -> UserPublic:

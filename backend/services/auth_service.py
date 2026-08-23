@@ -20,6 +20,7 @@ from google.oauth2 import id_token
 from backend.config import Settings, get_settings
 from backend.models.auth import ModInvitePublic, Role, UserPublic
 from backend.services.database import pooled_connection
+from backend.services.email_service import send_mod_invite_email
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -88,9 +89,14 @@ class AuthStore:
             cur.execute("CREATE TABLE IF NOT EXISTS public.app_auth_revocations (jti TEXT PRIMARY KEY, expires_at TIMESTAMPTZ NOT NULL)")
             cur.execute("""CREATE TABLE IF NOT EXISTS public.app_mod_invites (
                 email TEXT PRIMARY KEY, role TEXT NOT NULL DEFAULT 'mod' CHECK (role = 'mod'),
+                token TEXT,
                 invited_by UUID NOT NULL REFERENCES public.app_users(user_id),
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                email_sent BOOLEAN NOT NULL DEFAULT FALSE
             )""")
+            cur.execute("ALTER TABLE public.app_mod_invites ADD COLUMN IF NOT EXISTS token TEXT")
+            cur.execute("ALTER TABLE public.app_mod_invites ADD COLUMN IF NOT EXISTS email_sent BOOLEAN NOT NULL DEFAULT FALSE")
+            cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS app_mod_invites_token_idx ON public.app_mod_invites (token)")
 
     @staticmethod
     def _public(row: dict[str, Any]) -> UserPublic:
@@ -133,24 +139,79 @@ class AuthStore:
 
     def invite_mod(self, email: str, invited_by: UUID) -> ModInvitePublic:
         normalized = email.strip().lower()
+        # Re-inviting an address rolls the token, so a previously shared link
+        # stops working the moment Admin sends a fresh one.
+        token = secrets.token_urlsafe(24)
         with self._connect() as conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute("SELECT 1 FROM public.app_users WHERE lower(email)=lower(%s)", (normalized,))
             if cur.fetchone():
                 raise ValueError("Email này đã có tài khoản.")
-            cur.execute("""INSERT INTO public.app_mod_invites (email, invited_by) VALUES (%s, %s)
-                ON CONFLICT (email) DO UPDATE SET invited_by=EXCLUDED.invited_by, created_at=NOW()
-                RETURNING email, role, invited_by, created_at""", (normalized, str(invited_by)))
-            return ModInvitePublic.model_validate(dict(cur.fetchone()))
+            cur.execute("""INSERT INTO public.app_mod_invites (email, token, invited_by, email_sent) VALUES (%s, %s, %s, FALSE)
+                ON CONFLICT (email) DO UPDATE SET token=EXCLUDED.token, invited_by=EXCLUDED.invited_by, created_at=NOW(), email_sent=FALSE
+                RETURNING email, role, token, invited_by, created_at, email_sent""", (normalized, token, str(invited_by)))
+            row = dict(cur.fetchone())
+        # Sending happens after the row is committed: a slow SMTP round-trip
+        # shouldn't hold the row lock, and a delivery failure must not undo the
+        # invite (Admin can still copy the link manually as a fallback).
+        invite_link = f"{self.settings.app_public_url.rstrip('/')}/dang-ky?token={token}"
+        if send_mod_invite_email(row["email"], invite_link, self.settings):
+            row["email_sent"] = True
+            with self._connect() as conn, conn.cursor() as cur:
+                cur.execute("UPDATE public.app_mod_invites SET email_sent=TRUE WHERE token=%s", (token,))
+        return ModInvitePublic.model_validate(row)
 
     def list_mod_invites(self) -> list[ModInvitePublic]:
+        # Rows created before the token column existed have token=NULL and are
+        # unusable as a link anyway, so exclude them rather than fail the read.
         with self._connect(readonly=True) as conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute("SELECT email, role, invited_by, created_at FROM public.app_mod_invites ORDER BY created_at DESC")
+            cur.execute("SELECT email, role, token, invited_by, created_at, email_sent FROM public.app_mod_invites WHERE token IS NOT NULL ORDER BY created_at DESC")
             return [ModInvitePublic.model_validate(dict(row)) for row in cur.fetchall()]
 
     def delete_mod_invite(self, email: str) -> bool:
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute("DELETE FROM public.app_mod_invites WHERE lower(email)=lower(%s)", (email.strip(),))
             return cur.rowcount > 0
+
+    def get_invite_by_token(self, token: str) -> ModInvitePublic | None:
+        with self._connect(readonly=True) as conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT email, role, token, invited_by, created_at, email_sent FROM public.app_mod_invites WHERE token=%s", (token,))
+            row = cur.fetchone()
+            return ModInvitePublic.model_validate(dict(row)) if row else None
+
+    def decline_mod_invite(self, token: str) -> bool:
+        """The invited person opted out from the invite-link page itself."""
+        with self._connect() as conn, conn.cursor() as cur:
+            cur.execute("DELETE FROM public.app_mod_invites WHERE token=%s", (token,))
+            return cur.rowcount > 0
+
+    def accept_mod_invite(self, token: str, display_name: str, password: str) -> UserPublic | None:
+        """Turn a pending invite into a real Mod account. The invite row is the
+        single source of truth for which email may register — the caller never
+        supplies its own email."""
+        with self._connect() as conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT email FROM public.app_mod_invites WHERE token=%s FOR UPDATE", (token,))
+            invite = cur.fetchone()
+            if not invite:
+                return None
+            try:
+                cur.execute("""INSERT INTO public.app_users (user_id,email,display_name,password_hash,role)
+                    VALUES (%s,%s,%s,%s,'mod') RETURNING user_id,email,display_name,role,is_root_admin,is_active,created_at,last_login_at""",
+                    (str(uuid4()), invite["email"], display_name.strip(), _hash_password(password)))
+            except psycopg2.IntegrityError as exc:
+                raise ValueError("Email này đã có tài khoản.") from exc
+            row = cur.fetchone()
+            cur.execute("DELETE FROM public.app_mod_invites WHERE token=%s", (token,))
+            return self._public(dict(row))
+
+    def register_admin(self, email: str, display_name: str, password: str) -> UserPublic:
+        with self._connect() as conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            try:
+                cur.execute("""INSERT INTO public.app_users (user_id,email,display_name,password_hash,role)
+                    VALUES (%s,%s,%s,%s,'admin') RETURNING user_id,email,display_name,role,is_root_admin,is_active,created_at,last_login_at""",
+                    (str(uuid4()), email.strip().lower(), display_name.strip(), _hash_password(password)))
+            except psycopg2.IntegrityError as exc:
+                raise ValueError("Email này đã có tài khoản.") from exc
+            return self._public(dict(cur.fetchone()))
 
     def update_role(self, user_id: UUID, role: Role) -> UserPublic:
         with self._connect() as conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
