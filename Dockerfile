@@ -37,8 +37,10 @@ ENV PATH=/opt/venv/bin:$PATH
 # Security: run as non-root user
 RUN useradd -m appuser
 
-# Backend and model-only pipeline, then the compiled SPA served by FastAPI.
+# Backend, database migrations and model-only pipeline, then the compiled SPA
+# served by FastAPI.
 COPY backend/ ./backend/
+COPY supabase/ ./supabase/
 COPY src/ai_models/ ./src/ai_models/
 COPY --from=frontend /frontend/dist ./frontend/dist
 
