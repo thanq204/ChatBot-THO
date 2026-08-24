@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from backend.models.auth import AuthResponse, GoogleLoginRequest, InviteAcceptRequest, InvitePreview, LoginRequest, ModInvitePublic, ModInviteRequest, RegisterRequest, UserCreateRequest, UserPublic, UserRoleUpdateRequest, UserStatusUpdateRequest
+from backend.models.auth import AuthResponse, GoogleLoginRequest, InviteAcceptRequest, InvitePreview, LoginRequest, ModInvitePublic, ModInviteRequest, RegisterRequest, SelfProfileUpdateRequest, UserCreateRequest, UserPublic, UserRoleUpdateRequest, UserStatusUpdateRequest
 from backend.services.auth_service import current_user, get_auth_store, issue_token, require_roles, verify_google
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
@@ -46,6 +46,13 @@ def google_login(payload: GoogleLoginRequest) -> AuthResponse:
 
 @router.get("/me", response_model=UserPublic)
 def me(user: UserPublic = Depends(current_user)) -> UserPublic: return user
+
+@router.patch("/me", response_model=UserPublic)
+def update_me(payload: SelfProfileUpdateRequest, user: UserPublic = Depends(current_user)) -> UserPublic:
+    try:
+        return get_auth_store().update_self_profile(user.user_id, payload.display_name, payload.current_password, payload.new_password)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 @router.get("/users", response_model=list[UserPublic])
 def users(_: UserPublic = Depends(require_roles("admin"))) -> list[UserPublic]: return get_auth_store().list_users()

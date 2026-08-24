@@ -29,7 +29,14 @@ export function AuthProvider({ children }) {
     try { return accept(await auth.acceptInvite(token, payload)); } catch (error) { return { ok: false, error: error.message }; }
   }, [accept]);
   const signOut = useCallback(() => { clearAccessToken(); window.localStorage.removeItem(STORAGE_KEY); setUser(null); }, []);
-  const value = useMemo(() => ({ user, isAuthenticated: Boolean(user && getAccessToken()), signIn, register, acceptInvite, signOut }), [user, signIn, register, acceptInvite, signOut]);
+  const updateProfile = useCallback(async (payload) => {
+    try {
+      const account = await auth.updateMe(payload);
+      setUser(account); window.localStorage.setItem(STORAGE_KEY, JSON.stringify(account));
+      return { ok: true, user: account };
+    } catch (error) { return { ok: false, error: error.message }; }
+  }, []);
+  const value = useMemo(() => ({ user, isAuthenticated: Boolean(user && getAccessToken()), signIn, register, acceptInvite, signOut, updateProfile }), [user, signIn, register, acceptInvite, signOut, updateProfile]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
