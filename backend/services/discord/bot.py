@@ -646,7 +646,14 @@ class DiscordRagBot:
         guild_id = str(getattr(guild, "id", "discord"))
         source_url = getattr(message, "jump_url", None)
         return CommonMessage(
-            message_id=f"discord-{message_id}",
+            # Bare snowflake, matching the manual-pull connector
+            # (platform_connectors.py::_discord) — a real Discord message must
+            # get the same message_id from both ingestion paths, or the store
+            # treats one Discord message as two unrelated rows (duplicate
+            # incidents, message_count/message-list mismatches), and a
+            # "discord-"-prefixed id is not a valid Discord snowflake for
+            # delete/timeout/kick/ban API calls.
+            message_id=message_id,
             platform="discord",
             community_id=guild_id,
             channel_id=channel_id,

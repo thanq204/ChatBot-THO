@@ -115,6 +115,7 @@ export const auth = {
   login: (payload) => post("/auth/login", payload),
   register: (payload) => post("/auth/register", payload),
   me: () => get("/auth/me"),
+  updateMe: (payload) => patch("/auth/me", payload),
   users: () => get("/auth/users"),
     createUser: (payload) => post("/auth/users", payload),
     modInvites: () => get("/auth/mod-invites"),

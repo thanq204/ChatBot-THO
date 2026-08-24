@@ -27,6 +27,13 @@
   --cat-teasing: #0d9488;
   --cat-safe: #16a34a;
 
+  /* Case workflow stage — a different hue family from --sev-* on purpose, so
+     a case's status badge never reads as "the same color" as its severity. */
+  --status-open: #2563eb;
+  --status-monitoring: #7c3aed;
+  --status-resolved: #16a34a;
+  --status-snoozed: #64748b;
+
   --radius-card: 16px;
   --radius-control: 10px;
   --radius-pill: 999px;
@@ -190,6 +197,25 @@ a {
   display: flex;
   flex-direction: column;
   gap: 24px;
+  overflow: hidden;
+}
+
+.sidebar__brand,
+.sidebar__link span {
+  white-space: nowrap;
+}
+
+@media (min-width: 769px) {
+  .sidebar {
+    transition: width 0.22s var(--ease-out), padding 0.22s var(--ease-out), border-color 0.22s var(--ease-out);
+  }
+
+  .app-shell--sidebar-collapsed .sidebar {
+    width: 0;
+    padding-left: 0;
+    padding-right: 0;
+    border-right-color: transparent;
+  }
 }
 
 .sidebar__brand {
@@ -281,7 +307,7 @@ a {
 }
 
 .topbar__menu {
-  display: none;
+  display: inline-flex;
 }
 
 .search {
@@ -360,19 +386,33 @@ a {
 }
 
 .account {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  position: relative;
   padding-left: 8px;
   margin-left: 4px;
   border-left: 1px solid var(--border);
+}
+
+.account__trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  background: transparent;
+  padding: 6px 8px;
+  border-radius: var(--radius-control);
   color: var(--text-primary);
+  transition: background-color 0.18s var(--ease-out);
+}
+
+.account__trigger:hover {
+  background: var(--surface-alt);
 }
 
 .account__meta {
   display: flex;
   flex-direction: column;
   line-height: 1.25;
+  text-align: left;
 }
 
 .account__name {
@@ -385,6 +425,80 @@ a {
   font-size: 11px;
   color: var(--text-muted);
   white-space: nowrap;
+}
+
+.account__caret {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.account-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 220px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  box-shadow: var(--shadow-card);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 30;
+}
+
+.account-menu__header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px 10px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.account-menu__name {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.account-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  padding: 9px 10px;
+  font-size: 13px;
+  color: var(--text-primary);
+  text-align: left;
+  transition: background-color 0.18s var(--ease-out), color 0.18s var(--ease-out);
+}
+
+.account-menu__item:hover {
+  background: var(--surface-alt);
+}
+
+.account-menu__item--danger {
+  color: var(--sev-critical, #dc2626);
+}
+
+.profile-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-bottom: 14px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.profile-summary__name {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
 }
 
 /* ==========================================================================
@@ -1249,6 +1363,38 @@ a {
   outline-offset: 1px;
 }
 
+.password-input {
+  position: relative;
+  display: flex;
+}
+
+.password-input input {
+  width: 100%;
+  padding-right: 36px;
+}
+
+.password-input__toggle {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  transition: background-color 0.18s var(--ease-out), color 0.18s var(--ease-out);
+}
+
+.password-input__toggle:hover {
+  background: var(--surface);
+  color: var(--text-primary);
+}
+
 .form-actions {
   display: flex;
   align-items: center;
@@ -1665,10 +1811,12 @@ button.list-row:hover {
   color: var(--text-primary);
 }
 
-.case-row__status {
+.case-row__badges {
+  display: flex;
+  align-items: center;
   justify-self: end;
-  font-size: 12px;
-  font-weight: 600;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 
 .case-row__meta {
@@ -1685,11 +1833,6 @@ button.list-row:hover {
 .case-row__meta > span + span::before {
   content: "·";
   margin-right: 6px;
-}
-
-.case-row__severity {
-  color: var(--case-accent);
-  font-weight: 700;
 }
 
 .case-row__link {
@@ -1770,6 +1913,26 @@ button.list-row:hover {
   font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);
+}
+
+.case-resolved-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--status-resolved) 25%, var(--border));
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--status-resolved) 10%, var(--surface-alt));
+  color: var(--status-resolved);
+}
+
+.case-resolved-banner__text {
+  color: var(--text-primary);
+  font-size: 13.5px;
+}
+
+.case-resolved-banner__text strong {
+  color: var(--status-resolved);
 }
 
 .case-timeline {

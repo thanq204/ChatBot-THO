@@ -245,6 +245,24 @@ class AuthStore:
                 raise ValueError("Không thể xóa Admin gốc.")
             cur.execute("DELETE FROM public.app_users WHERE user_id=%s", (str(user_id),))
 
+    def update_self_profile(self, user_id: UUID, display_name: str | None, current_password: str | None, new_password: str | None) -> UserPublic:
+        """Self-service edit: only the display name and, given the current
+        password, the password itself — never role/status, unlike the admin
+        routes above."""
+        with self._connect() as conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT password_hash FROM public.app_users WHERE user_id=%s", (str(user_id),))
+            row = cur.fetchone()
+            if not row:
+                raise KeyError(user_id)
+            if new_password:
+                if not _verify_password(current_password or "", row["password_hash"]):
+                    raise ValueError("Mật khẩu hiện tại không đúng.")
+                cur.execute("UPDATE public.app_users SET password_hash=%s, updated_at=NOW() WHERE user_id=%s", (_hash_password(new_password), str(user_id)))
+            if display_name:
+                cur.execute("UPDATE public.app_users SET display_name=%s, updated_at=NOW() WHERE user_id=%s", (display_name.strip(), str(user_id)))
+            cur.execute("SELECT user_id,email,display_name,role,is_root_admin,is_active,created_at,last_login_at FROM public.app_users WHERE user_id=%s", (str(user_id),))
+            return self._public(dict(cur.fetchone()))
+
     def login_password(self, email: str, password: str) -> UserPublic | None:
         with self._connect() as conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute("SELECT user_id,email,display_name,password_hash,role,is_root_admin,is_active,created_at,last_login_at FROM public.app_users WHERE lower(email)=lower(%s)", (email,))

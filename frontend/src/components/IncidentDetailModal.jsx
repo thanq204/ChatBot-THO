@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowSquareOut } from "@phosphor-icons/react";
+import { ArrowSquareOut, CheckCircle } from "@phosphor-icons/react";
 import Badge from "./Badge.jsx";
 import CaseActions from "./CaseActions.jsx";
 import Modal from "./Modal.jsx";
@@ -24,7 +24,10 @@ import {
 import { primaryCategory } from "../lib/incidents.js";
 import { relativeTime, percent } from "../lib/format.js";
 
-const STATUS_OPTIONS = ["open", "monitoring", "resolved", "snoozed"];
+// "resolved" is deliberately excluded here: it's only reachable through the
+// Xác nhận vi phạm/Không vi phạm buttons below, which record who reviewed the
+// case. That keeps "Phụ trách" accurate instead of a manually-typed guess.
+const STATUS_OPTIONS = ["open", "monitoring", "snoozed"];
 
 /**
  * Case detail as a dialog, shared by the community list and the overview feed.
@@ -177,22 +180,32 @@ function DetailBody({ detail, onStatusChange, savingStatus, onReputationDecision
         </div>
       )}
 
-      <div className="field-row">
-        <label className="field">
-          Đổi trạng thái
-          <select value={incident.status} disabled={savingStatus} onChange={(event) => onStatusChange(event.target.value)}>
-            {STATUS_OPTIONS.map((status) => (
-              <option key={status} value={status}>
-                {statusLabel(status)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          Phụ trách
-          <span className="muted small">{incident.assigned_to || "Chưa gán"}</span>
-        </label>
-      </div>
+      {incident.status === "resolved" ? (
+        <div className="case-resolved-banner">
+          <CheckCircle size={20} weight="fill" />
+          <span className="case-resolved-banner__text">
+            <strong>Đã xử lý</strong>
+            {incident.assigned_to ? ` bởi ${incident.assigned_to}` : ""} · {relativeTime(incident.updated_at)}
+          </span>
+        </div>
+      ) : (
+        <div className="field-row">
+          <label className="field">
+            Đổi trạng thái
+            <select value={incident.status} disabled={savingStatus} onChange={(event) => onStatusChange(event.target.value)}>
+              {STATUS_OPTIONS.map((status) => (
+                <option key={status} value={status}>
+                  {statusLabel(status)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            Phụ trách
+            <span className="muted small">{incident.assigned_to || "Chưa gán · tự ghi nhận khi xử lý"}</span>
+          </label>
+        </div>
+      )}
 
       <div className="case-reputation-review">
         <div>
@@ -209,7 +222,7 @@ function DetailBody({ detail, onStatusChange, savingStatus, onReputationDecision
             </p>
           )}
         </div>
-        {!reputationDecision && (
+        {!reputationDecision && incident.status !== "resolved" && (
           <div className="case-reputation-review__actions">
             <button
               type="button"
