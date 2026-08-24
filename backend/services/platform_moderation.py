@@ -33,6 +33,66 @@ class PlatformModerationService:
             return self._telegram(channel_id, user_id, message_id, action, text, duration_minutes)
         raise PlatformModerationError("Nền tảng này chưa hỗ trợ hành động quản trị trực tiếp.")
 
+    def send_telegram_action_notice(
+        self,
+        *,
+        chat_id: str,
+        user_id: str,
+        target_name: str,
+        action: str,
+        duration_minutes: int | None,
+        actor_name: str,
+        actor_role: str,
+    ) -> str:
+        """Notify the affected Telegram member and the group after a confirmed action.
+
+        This is intentionally called only after the platform action succeeds.
+        A member may have never started a private chat with the bot, so a failed
+        DM must not hide the group-level accountability notice.
+        """
+        if action not in {"delete_message", "timeout", "kick", "ban"}:
+            return ""
+        if not self.settings.telegram_bot_token:
+            return "Không gửi được thông báo: TELEGRAM_BOT_TOKEN chưa được cấu hình."
+
+        action_labels = {
+            "delete_message": "xóa tin nhắn",
+            "timeout": f"tạm khóa chat {duration_minutes} phút",
+            "kick": "mời rời nhóm",
+            "ban": "cấm vĩnh viễn",
+        }
+        action_label = action_labels[action]
+        reviewer = f"{actor_role.title()} {actor_name}".strip()
+        member_text = (
+            "Thông báo kiểm duyệt\n"
+            f"Bạn đã bị {action_label} bởi {reviewer}.\n"
+            "Nếu bạn cho rằng đây là nhầm lẫn, hãy liên hệ Admin/Mod."
+        )
+        group_text = (
+            "⚠️ Thông báo kiểm duyệt\n"
+            f"Thành viên {target_name or user_id} đã bị {action_label} bởi {reviewer}."
+        )
+        base = f"https://api.telegram.org/bot{self.settings.telegram_bot_token}"
+
+        def send(chat: str, text: str) -> bool:
+            try:
+                response = requests.post(
+                    f"{base}/sendMessage",
+                    json={"chat_id": chat, "text": text},
+                    timeout=20,
+                )
+                return response.status_code < 400 and bool(response.json().get("ok"))
+            except (requests.RequestException, ValueError):
+                return False
+
+        direct_sent = user_id != "anonymous" and send(user_id, member_text)
+        group_sent = send(chat_id, group_text)
+        if direct_sent and group_sent:
+            return "Đã gửi thông báo riêng cho thành viên và thông báo minh bạch lên nhóm."
+        if group_sent:
+            return "Đã gửi thông báo lên nhóm; không gửi được chat riêng (thành viên cần /start bot trước)."
+        return "Hành động đã hoàn tất nhưng không gửi được thông báo Telegram."
+
     def send_automatic_warning(self, message: CommonMessage, decision: MessageDecision, store: OperationsStore) -> AdminPlatformActionResponse | None:
         """DM a member only when the same three gates allow an Admin alert."""
         if (
@@ -107,6 +167,8 @@ class PlatformModerationService:
             return self._result(action, "discord", user_id, message_id, False, f"Không thể gọi Discord ({type(exc).__name__}).")
 
     def _telegram(self, chat_id: str, user_id: str, message_id: str | None, action: str, text: str, duration: int | None) -> AdminPlatformActionResponse:
+        if action == "ban":
+            raise PlatformModerationError("Telegram no longer supports the permanent-ban action.")
         if not self.settings.telegram_bot_token:
             raise PlatformModerationError("TELEGRAM_BOT_TOKEN chưa được cấu hình.")
         base = f"https://api.telegram.org/bot{self.settings.telegram_bot_token}"
@@ -127,13 +189,19 @@ class PlatformModerationService:
                 response = requests.post(f"{base}/banChatMember", json={"chat_id": chat_id, "user_id": user_id}, timeout=20)
                 if response.ok and response.json().get("ok"):
                     response = requests.post(f"{base}/unbanChatMember", json={"chat_id": chat_id, "user_id": user_id, "only_if_banned": True}, timeout=20)
-            elif action == "ban":
-                response = requests.post(f"{base}/banChatMember", json={"chat_id": chat_id, "user_id": user_id}, timeout=20)
             else:
                 raise PlatformModerationError("Hành động không hợp lệ.")
-            if response.status_code >= 400 or not response.json().get("ok"):
-                description = response.json().get("description", "") if response.headers.get("content-type", "").startswith("application/json") else ""
-                return self._result(action, "telegram", user_id, message_id, False, f"Telegram API từ chối hành động: {description or response.text[:200]}. Kiểm tra bot có phải Admin của nhóm với đủ quyền không.")
+            response_payload = response.json()
+            if response.status_code >= 400 or not response_payload.get("ok"):
+                description = str(response_payload.get("description") or "không có mô tả lỗi")
+                return self._result(
+                    action,
+                    "telegram",
+                    user_id,
+                    message_id,
+                    False,
+                    f"Telegram API từ chối hành động ({response.status_code}): {description}. Kiểm tra bot có phải Admin của nhóm với đủ quyền không.",
+                )
             return self._result(action, "telegram", user_id, message_id, True, "Đã thực hiện hành động trên Telegram.")
         except requests.RequestException as exc:
             return self._result(action, "telegram", user_id, message_id, False, f"Không thể gọi Telegram ({type(exc).__name__}).")

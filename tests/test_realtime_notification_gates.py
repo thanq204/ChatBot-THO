@@ -9,13 +9,20 @@ from backend.services.operations_store import OperationsStore
 from backend.services.telegram.alerts import TelegramAlertSender
 
 
-def _message(message_id: str, text: str, *, seconds: int = 0) -> CommonMessage:
+def _message(
+    message_id: str,
+    text: str,
+    *,
+    seconds: int = 0,
+    platform: str = "discord",
+    author_id: str = "member-1",
+) -> CommonMessage:
     return CommonMessage(
         message_id=message_id,
-        platform="discord",
+        platform=platform,
         community_id="guild-1",
         channel_id="channel-1",
-        author_id="member-1",
+        author_id=author_id,
         text=text,
         timestamp=datetime.now(UTC) + timedelta(seconds=seconds),
     )
@@ -63,6 +70,53 @@ def test_gate1_uses_active_admin_policy(tmp_path) -> None:
     assert result.send_to_admin is True
 
 
+def test_legacy_telegram_case_title_uses_sender_name_instead_of_id(tmp_path) -> None:
+    store = OperationsStore(_settings(tmp_path))
+    message = CommonMessage(
+        message_id="telegram--100123-42",
+        platform="telegram",
+        community_id="-100123",
+        channel_id="-100123",
+        author_id="6593452247",
+        text="message",
+        timestamp=datetime.now(UTC),
+        raw={"from": {"id": 6593452247, "first_name": "Simon"}},
+    )
+    result = MessageDecision(
+        decision="warn", category="harassment", severity="medium", risk_score=0.7,
+        confidence=0.8, explanation="test", model_used="test",
+    )
+    store.save_message(message, result, None)
+    incident = store.upsert_incident(message, result)
+    store.link_message_incident(message.message_id, incident.incident_id)
+
+    assert store.list_incidents()[0].title == "Harassment từ Simon"
+
+
+def test_identical_telegram_messages_from_different_members_do_not_share_a_case(tmp_path) -> None:
+    store = OperationsStore(_settings(tmp_path))
+    decision = MessageDecision(
+        decision="warn", category="harassment", severity="medium", risk_score=0.7,
+        confidence=0.8, explanation="test", model_used="test",
+    )
+    simon = CommonMessage(
+        message_id="telegram--100123-1", platform="telegram", community_id="-100123", channel_id="-100123",
+        thread_key="1", author_id="1", author_name="Simon", text="con chó ngu", timestamp=datetime.now(UTC),
+        raw={"from": {"id": 1, "first_name": "Simon"}},
+    )
+    thanh = CommonMessage(
+        message_id="telegram--100123-2", platform="telegram", community_id="-100123", channel_id="-100123",
+        thread_key="2", author_id="2", author_name="Thanh Nguyen", text="con chó ngu", timestamp=datetime.now(UTC),
+        raw={"from": {"id": 2, "first_name": "Thanh", "last_name": "Nguyen"}},
+    )
+    for item in (simon, thanh):
+        store.save_message(item, decision, None)
+        incident = store.upsert_incident(item, decision)
+        store.link_message_incident(item.message_id, incident.incident_id)
+
+    assert [item.title for item in store.list_incidents()] == ["Harassment từ Thanh Nguyen", "Harassment từ Simon"]
+
+
 def test_gate2_automatically_reads_nearby_context(tmp_path) -> None:
     settings = _settings(tmp_path)
     store = OperationsStore(settings)
@@ -107,7 +161,7 @@ def test_safe_message_skips_context_lookup(tmp_path) -> None:
     store.recent_context.assert_not_called()
 
 
-def test_gate3_suppresses_case_after_human_resolution(tmp_path) -> None:
+def test_gate3_suppresses_duplicate_alert_but_keeps_case_after_human_resolution(tmp_path) -> None:
     settings = _settings(tmp_path)
     store = OperationsStore(settings)
     pipeline = OperationsPipeline(store, settings)
@@ -121,11 +175,11 @@ def test_gate3_suppresses_case_after_human_resolution(tmp_path) -> None:
     assert repeated.decision == "warn"
     assert repeated.already_marked is True
     assert repeated.send_to_admin is False
-    assert repeated.incident_id is None
+    assert repeated.incident_id
     assert repeated.matched_mark_id
     assert repeated.banner and "mod-lan" in repeated.banner
     assert TelegramAlertSender.should_alert(repeated, 0.55) is False
-    assert len(store.list_incidents()) == 1
+    assert len(store.list_incidents()) == 2
 
 
 def test_gate3_query_uses_postgres_boolean_literal(tmp_path) -> None:
@@ -177,6 +231,34 @@ def test_telegram_sender_allows_only_a_new_case_after_all_gates(tmp_path) -> Non
     duplicate = pipeline.analyze(_message("telegram-gate-2", "Mày ngu quá", seconds=1), [])
     assert duplicate.gates[2].label == "approved_case_match"
     assert TelegramAlertSender.should_alert(duplicate, 0.55) is False
+
+
+def test_identical_telegram_text_from_a_different_member_alerts_admin(tmp_path) -> None:
+    settings = _settings(tmp_path)
+    store = OperationsStore(settings)
+    pipeline = OperationsPipeline(store, settings)
+
+    first = pipeline.analyze(
+        _message(
+            "telegram-owner-1", "Mày ngu quá", platform="telegram", author_id="owner-1",
+        ),
+        [],
+    )
+    assert first.incident_id
+    store.update_incident(first.incident_id, "resolved", "mod-lan", "công kích cá nhân")
+    assert store.remember_incident(first.incident_id, "mod-lan")
+
+    second = pipeline.analyze(
+        _message(
+            "telegram-member-2", "Mày ngu quá", seconds=1, platform="telegram", author_id="member-2",
+        ),
+        [],
+    )
+
+    assert second.incident_id
+    assert second.incident_id != first.incident_id
+    assert second.already_marked is False
+    assert TelegramAlertSender.should_alert(second, 0.55) is True
 
 
 def test_game_invitation_with_ambiguous_danh_is_not_sent_to_admin(tmp_path) -> None:

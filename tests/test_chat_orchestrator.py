@@ -88,3 +88,28 @@ def test_unknown_command_stops_at_rule() -> None:
     assert outcome.stage == "rule"
     assert "Không nhận ra lệnh" in outcome.answer
     pipeline.analyze.assert_not_called()
+
+
+def test_moderation_reply_never_exposes_an_old_admin_action_as_new_action() -> None:
+    store = Mock()
+    pipeline = Mock()
+    pipeline.analyze.return_value = MessageDecision(
+        decision="warn",
+        category="harassment",
+        severity="medium",
+        risk_score=0.8,
+        confidence=0.8,
+        explanation="Công kích cá nhân.",
+        model_used="test",
+        banner="(Đã được đánh dấu: Admin action: delete_message bởi: Admin)",
+        already_marked=True,
+    )
+
+    outcome = ChatOrchestrator(store, Settings(discord_rag_llm_enabled=False), pipeline).reply(
+        message("moderation-1", "con chó ngu")
+    )
+
+    assert outcome.stage == "moderation"
+    assert outcome.answer.startswith("[Cảnh báo]")
+    assert "delete_message" not in outcome.answer
+    assert "chỉ được thực hiện sau khi Admin/Mod xác nhận" in outcome.answer

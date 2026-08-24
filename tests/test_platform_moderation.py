@@ -38,6 +38,39 @@ def test_timeout_requires_duration() -> None:
         service.execute(platform="discord", community_id="guild", channel_id="channel", user_id="member", message_id=None, action="timeout", text="", duration_minutes=None)
 
 
+def test_telegram_permanent_ban_is_not_available() -> None:
+    service = PlatformModerationService(Settings(telegram_bot_token="token"))
+    with pytest.raises(PlatformModerationError, match="permanent-ban"):
+        service.execute(
+            platform="telegram",
+            community_id="group",
+            channel_id="-10099",
+            user_id="12345",
+            message_id=None,
+            action="ban",
+            text="",
+            duration_minutes=None,
+        )
+
+
+def test_telegram_confirmed_action_notifies_member_and_group_with_reviewer() -> None:
+    service = PlatformModerationService(Settings(telegram_bot_token="token"))
+    with patch("backend.services.platform_moderation.requests.post", return_value=_response()) as post:
+        detail = service.send_telegram_action_notice(
+            chat_id="-10099",
+            user_id="12345",
+            target_name="Ngọc",
+            action="timeout",
+            duration_minutes=60,
+            actor_name="Minh",
+            actor_role="mod",
+        )
+
+    assert "riêng" in detail and "nhóm" in detail
+    assert [call.kwargs["json"]["chat_id"] for call in post.call_args_list] == ["12345", "-10099"]
+    assert "bởi Mod Minh" in post.call_args_list[0].kwargs["json"]["text"]
+
+
 def test_automatic_warning_only_sends_dm_for_warn_decision() -> None:
     service = PlatformModerationService(Settings(moderation_auto_warn_dm_enabled=True))
     service.execute = Mock(return_value=AdminPlatformActionResponse(action="dm", platform="telegram", target_user_id="member", completed=True, detail="sent"))

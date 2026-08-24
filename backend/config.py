@@ -143,6 +143,9 @@ class Settings(BaseSettings):
     discord_rag_temperature: float = Field(default=0.2, ge=0.0, le=1.0)
     telegram_bot_token: str = ""
     telegram_default_chat_id: str = ""
+    # Private chat ID of the Admin/Mod who receives moderation alerts.  This
+    # is deliberately separate from the community group chat ID above.
+    telegram_admin_chat_id: str = ""
     telegram_listener_enabled: bool = False
     telegram_polling_timeout_seconds: int = Field(default=25, ge=1, le=50)
     telegram_reply_max_chars: int = Field(default=3500, ge=500, le=4096)

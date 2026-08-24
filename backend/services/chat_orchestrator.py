@@ -158,14 +158,15 @@ class ChatOrchestrator:
 
         moderation = self.pipeline.analyze(message, context)
         if moderation.decision != "allow":
-            if moderation.banner:
-                answer = f"[Moderation]\n{moderation.banner}"
-            else:
-                answer = (
-                    "[Moderation]\n"
-                    "Mình không thể trả lời nội dung này vì có dấu hiệu vi phạm quy định cộng đồng. "
-                    f"Lý do: {moderation.explanation}"
-                )
+            # A retrieved case may contain an old Admin action (for example,
+            # delete_message).  It is context for moderators only, never an
+            # instruction or outcome for the current member's message.
+            answer = (
+                "[Cảnh báo]\n"
+                "Tin nhắn của bạn có dấu hiệu vi phạm quy định cộng đồng và đã được ghi nhận để Admin/Mod xem xét. "
+                f"Lý do: {moderation.explanation}\n"
+                "Bot không tự xóa, khóa hoặc cấm thành viên; các hành động này chỉ được thực hiện sau khi Admin/Mod xác nhận."
+            )
             return ChatOutcome(answer=answer, stage="moderation", model_used=moderation.model_used, moderation=moderation)
 
         intent = classify_question_intent(message.text)
