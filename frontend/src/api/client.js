@@ -80,7 +80,25 @@ export const ops = {
     patch(`/admin/member-reports/${encodeURIComponent(reportId)}`, payload),
   reputation: () => get("/admin/reputation"),
   reputationRules: () => get("/admin/reputation-rules"),
+  experience: () => get("/admin/experience"),
+  experienceRules: () => get("/admin/experience-rules"),
   flaggedLinks: () => get("/admin/flagged-links"),
+  trades: (status) => get(`/admin/trades${status ? `?status=${encodeURIComponent(status)}` : ""}`),
+  createTrade: (payload) => post("/admin/trades", payload),
+  confirmTrade: (tradeId, participantId) =>
+    post(`/admin/trades/${encodeURIComponent(tradeId)}/confirm`, { participant_id: participantId }),
+  updateTradeStatus: (tradeId, status) =>
+    patch(`/admin/trades/${encodeURIComponent(tradeId)}/status`, { status }),
+  sellerReviews: (sellerId) =>
+    get(`/admin/seller-reviews${sellerId ? `?seller_id=${encodeURIComponent(sellerId)}` : ""}`),
+  createSellerReview: (tradeId, payload) =>
+    post(`/admin/trades/${encodeURIComponent(tradeId)}/reviews`, payload),
+  sellers: () => get("/admin/sellers"),
+  sellerAssessments: (status) =>
+    get(`/admin/seller-assessments${status ? `?status=${encodeURIComponent(status)}` : ""}`),
+  createSellerAssessment: (payload) => post("/admin/seller-assessments", payload),
+  decideSellerAssessment: (assessmentId, payload) =>
+    post(`/admin/seller-assessments/${encodeURIComponent(assessmentId)}/decision`, payload),
 };
 
 /** Sentence-level moderation surface used by the member and review-queue pages. */

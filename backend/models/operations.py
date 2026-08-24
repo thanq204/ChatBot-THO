@@ -334,6 +334,19 @@ class MemberReputation(BaseModel):
     status: Literal["trusted", "neutral", "watch", "risk"] = "neutral"
 
 
+class MemberExperience(BaseModel):
+    member_id: str
+    platform: PlatformName
+    community_id: str
+    platform_user_id: str
+    display_name: str | None = None
+    exp_score: int = 0
+    event_count: int = 0
+    last_event_at: datetime | None = None
+    last_seen_at: datetime
+    level: Literal["new", "active", "contributor", "veteran"] = "new"
+
+
 class ReputationRule(BaseModel):
     rule_id: str
     name: str
@@ -345,6 +358,124 @@ class ReputationRule(BaseModel):
     requirements: list[str] = Field(default_factory=list)
     approval_status: Literal["draft", "approved", "rejected"] = "draft"
     active: bool = False
+    updated_at: datetime
+
+
+class TradeCaseCreateRequest(BaseModel):
+    platform: Literal["discord"] = "discord"
+    community_id: str = Field(..., min_length=1, max_length=200)
+    channel_id: str = Field(..., min_length=1, max_length=200)
+    buyer_id: str = Field(..., min_length=1, max_length=200)
+    buyer_name: str | None = Field(default=None, max_length=200)
+    seller_id: str = Field(..., min_length=1, max_length=200)
+    seller_name: str | None = Field(default=None, max_length=200)
+    item_summary: str = Field(..., min_length=3, max_length=500)
+    evidence_urls: list[str] = Field(default_factory=list, max_length=10)
+
+
+class TradeCase(BaseModel):
+    trade_id: str
+    platform: Literal["discord"] = "discord"
+    community_id: str
+    channel_id: str
+    buyer_id: str
+    buyer_name: str | None = None
+    seller_id: str
+    seller_name: str | None = None
+    item_summary: str
+    status: Literal["opened", "partially_confirmed", "completed", "cancelled", "disputed"]
+    buyer_confirmed: bool = False
+    seller_confirmed: bool = False
+    evidence_urls: list[str] = Field(default_factory=list)
+    created_by: str
+    completed_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class TradeConfirmRequest(BaseModel):
+    participant_id: str = Field(..., min_length=1, max_length=200)
+
+
+class TradeStatusUpdateRequest(BaseModel):
+    status: Literal["cancelled", "disputed"]
+
+
+class SellerReviewCreateRequest(BaseModel):
+    buyer_id: str = Field(..., min_length=1, max_length=200)
+    overall_rating: int = Field(..., ge=1, le=5)
+    item_accuracy: int = Field(..., ge=1, le=5)
+    communication: int = Field(..., ge=1, le=5)
+    fulfillment: int = Field(..., ge=1, le=5)
+    would_trade_again: bool
+    comment: str = Field(default="", max_length=2000)
+
+
+class SellerReview(BaseModel):
+    review_id: str
+    trade_id: str
+    buyer_id: str
+    seller_id: str
+    overall_rating: int
+    item_accuracy: int
+    communication: int
+    fulfillment: int
+    would_trade_again: bool
+    comment: str
+    verification_status: Literal["verified_transaction", "under_review", "excluded"]
+    created_at: datetime
+
+
+class SellerTrustSummary(BaseModel):
+    platform: Literal["discord"] = "discord"
+    community_id: str
+    seller_id: str
+    seller_name: str | None = None
+    completed_trades: int = 0
+    verified_reviews: int = 0
+    unique_buyers: int = 0
+    average_rating: float | None = None
+    item_accuracy: float | None = None
+    communication: float | None = None
+    fulfillment: float | None = None
+    would_trade_again_rate: float | None = None
+    open_disputes: int = 0
+    confirmed_spam_incidents: int = 0
+    anomaly_flags: list[str] = Field(default_factory=list)
+    data_status: Literal["insufficient_data", "transaction_history_available", "admin_review_required"]
+    evidence_notes: list[str] = Field(default_factory=list)
+    updated_at: datetime | None = None
+
+
+class SellerAssessmentCreateRequest(BaseModel):
+    platform: Literal["discord"] = "discord"
+    community_id: str = Field(..., min_length=1, max_length=200)
+    requester_id: str = Field(..., min_length=1, max_length=200)
+    seller_id: str = Field(..., min_length=1, max_length=200)
+    reason: str = Field(default="Yêu cầu kiểm tra thông tin người bán", max_length=1000)
+
+
+class SellerAssessmentDecisionRequest(BaseModel):
+    decision: Literal["insufficient_data", "no_confirmed_issue", "review_required", "restricted"]
+    admin_note: str = Field(..., min_length=3, max_length=2000)
+
+
+class SellerAssessment(BaseModel):
+    assessment_id: str
+    platform: Literal["discord"] = "discord"
+    community_id: str
+    requester_id: str
+    seller_id: str
+    reason: str
+    status: Literal["open", "resolved"]
+    ai_summary: str
+    model_used: str
+    evidence: dict[str, object] = Field(default_factory=dict)
+    final_decision: Literal["pending", "insufficient_data", "no_confirmed_issue", "review_required", "restricted"]
+    admin_note: str = ""
+    reviewed_by: str | None = None
+    reviewed_at: datetime | None = None
+    created_at: datetime
     updated_at: datetime
 
 

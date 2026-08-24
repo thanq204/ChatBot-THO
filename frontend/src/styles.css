@@ -3120,6 +3120,60 @@ button.list-row:hover {
 .reputation-rule p { color: var(--text-secondary); font-size: 12.5px; line-height: 1.55; }
 .reputation-rule ul { margin: 12px 0 0; padding-left: 18px; color: var(--text-muted); font-size: 12px; line-height: 1.6; }
 
+.seller-table td { vertical-align: top; }
+.seller-table code { color: var(--accent-solid); font-size: 11px; }
+
+.seller-assessment-card {
+  margin-top: 14px;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--sev-medium) 24%, var(--border));
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface-raised) 92%, var(--sev-medium));
+}
+
+.seller-assessment-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.seller-assessment-card__head small {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-muted);
+}
+
+.seller-assessment-card__form {
+  display: grid;
+  grid-template-columns: minmax(190px, .7fr) minmax(260px, 1.6fr) auto;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.seller-assessment-card__form select,
+.seller-assessment-card__form input {
+  min-height: 40px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  padding: 0 12px;
+  outline: none;
+}
+
+.seller-assessment-card__form select:focus,
+.seller-assessment-card__form input:focus {
+  border-color: var(--accent-solid);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-solid) 16%, transparent);
+}
+
+.seller-criteria-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
 .flagged-link-list {
   display: grid;
   gap: 10px;
@@ -3162,6 +3216,11 @@ button.list-row:hover {
   }
 
   .reputation-rule-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .seller-assessment-card__form,
+  .seller-criteria-grid {
     grid-template-columns: 1fr;
   }
 

@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 from unittest.mock import Mock
 
 from backend.config import Settings
-from backend.models.operations import CommonMessage, FAQ, KnowledgeDocument, MessageDecision
+from backend.models.operations import FAQ, CommonMessage, KnowledgeDocument, MessageDecision
 from backend.services.chat_orchestrator import ChatOrchestrator
 from backend.services.operations_store import OperationsStore
 from src.ai_models.contracts import RetrievalCandidate

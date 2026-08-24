@@ -17,6 +17,8 @@ CHAT-10 hỗ trợ Admin/Moderator quản lý cộng đồng học tập trên D
 - Câu hội thoại chung như tên bot, khả năng, ngày/giờ dùng LLM thật và hiển thị nhãn `[LLM]`.
 - Câu kiến thức dùng retrieval, reranking và relevance gate; chỉ trả nguồn đạt ngưỡng với nhãn `[RAG]` và citation.
 - Câu chưa đủ nguồn được ghi nhận để Admin cân nhắc bổ sung FAQ hoặc tài liệu.
+- EXP chỉ ghi nhận đóng góp tích cực; moderation và tranh chấp không làm EXP âm.
+- Đánh giá người bán chỉ nhận từ giao dịch Discord được buyer và seller cùng xác nhận; AI tóm tắt dữ kiện, Admin/Mod quyết định case nhạy cảm.
 
 ## Người dùng
 
@@ -30,6 +32,8 @@ CHAT-10 hỗ trợ Admin/Moderator quản lý cộng đồng học tập trên D
 | Chatbot | Lệnh `/help`, `/rule`, `/event`, `/daily`, `/weekly`, `/faq`, `/report`, `/admin`, `/resources` |
 | Hỏi đáp | FAQ match, LLM hội thoại chung, RAG có citation, ghi nhận câu chưa có đáp án |
 | Moderation | Ba gate, incident grouping, review queue, audit log, manual action |
+| Cộng đồng | Bảng EXP cho thành viên thật; giới hạn chống cày và không trộn với vi phạm |
+| Giao dịch | `/trade_open`, `/trade_confirm`, `/trade_review`, `/seller_check`; hồ sơ người bán có cỡ mẫu và hàng đợi Admin/Mod |
 | Nền tảng | Discord listener, Telegram listener/alert, FastAPI, React/Vite admin dashboard |
 | Dữ liệu | Supabase PostgreSQL + pgvector; `data/` chỉ giữ contract/example, import knowledge CSV/JSON/TXT, embedding OpenAI tùy chọn |
 
@@ -50,7 +54,7 @@ FastAPI + platform listeners
         |
         v
 Supabase PostgreSQL + pgvector
-  (messages, moderation, FAQ, knowledge, embeddings, audit)
+  (messages, moderation, FAQ, knowledge, embeddings, EXP, trades, seller reviews, audit)
 ```
 
 ## Tech Stack
@@ -104,7 +108,10 @@ Khi `FAQ_PG_DSN` được cấu hình, Supabase là source of truth của runtim
 ```dotenv
 DISCORD_BOT_TOKEN=your-discord-token
 DISCORD_LISTENER_ENABLED=true
+DISCORD_TRADE_CHANNEL_ID=your-dedicated-trade-channel-id
 ```
+
+Luồng giao dịch chỉ mở trong `DISCORD_TRADE_CHANNEL_ID`. Hai bên xác nhận cùng một `trade_id`; sau đó chỉ buyer mới được gửi một review. Mặc định cần ít nhất `3` giao dịch xác thực và `3` buyer khác nhau để hồ sơ chuyển từ “Chưa đủ dữ liệu” sang “Có lịch sử giao dịch”. Đây không phải chứng nhận người bán an toàn.
 
 Để bật Telegram:
 
@@ -149,6 +156,10 @@ docker compose up --build
 @CHAT-10 hôm nay ngày bao nhiêu
 @CHAT-10 tôi đang tham gia một dự án, muốn học bằng dự án thì phương pháp này như nào?
 @CHAT-10 làm sao để báo cáo spam?
+/trade_open @seller Bàn phím cơ cũ
+/trade_confirm TRD-XXXXXXXXXXXX
+/trade_review TRD-XXXXXXXXXXXX
+/seller_check @seller
 ```
 
 Kỳ vọng:

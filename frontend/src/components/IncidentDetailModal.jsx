@@ -209,16 +209,16 @@ function DetailBody({ detail, onStatusChange, savingStatus, onReputationDecision
 
       <div className="case-reputation-review">
         <div>
-          <span className="section-heading">Duyệt vi phạm và điểm uy tín</span>
+          <span className="section-heading">Duyệt vi phạm</span>
           {reputationDecision ? (
             <p className="muted small">
               {reputationPayload.outcome === "confirmed"
-                ? `Đã xác nhận vi phạm: ${reputationPayload.affected_members || 0} thành viên, ${reputationPayload.points_applied || 0} điểm.`
-                : "Đã xác nhận case không vi phạm, không trừ điểm thành viên."}
+                ? `Đã xác nhận vi phạm của ${reputationPayload.affected_members || 0} thành viên. Quyết định được lưu vào audit và không làm thay đổi EXP.`
+                : "Đã xác nhận case không vi phạm. Không có thay đổi EXP."}
             </p>
           ) : (
             <p className="muted small">
-              AI chỉ cung cấp bằng chứng. Chỉ thao tác tại đây mới được phép trừ điểm, tối đa một lần cho mỗi User ID trong case.
+              AI chỉ cung cấp bằng chứng. Admin/Mod quyết định case; kết quả được lưu riêng và không trộn với EXP hoạt động cộng đồng.
             </p>
           )}
         </div>
