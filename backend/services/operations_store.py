@@ -780,7 +780,13 @@ class OperationsStore:
         rule = self.get_reputation_rule(rule_id)
         return rule.points if rule and rule.active else 0
 
-    def award_helpful_reputation(self, message: CommonMessage, reaction_count: int) -> bool:
+    def award_helpful_reputation(
+        self,
+        message: CommonMessage,
+        reaction_count: int,
+        *,
+        reaction_emoji: str = "✅",
+    ) -> bool:
         rule = self.get_reputation_rule("REP-HELPFUL-ANSWER")
         if not rule or not rule.active or self._reputation_limit_reached(message, "helpful_reactions", rule):
             return False
@@ -789,7 +795,7 @@ class OperationsStore:
             delta=rule.points,
             event_type="helpful_reactions",
             event_key=f"helpful:{message.message_id}",
-            reaction_emoji="✅",
+            reaction_emoji=reaction_emoji,
             metadata={"distinct_reactors": reaction_count},
         )
 
@@ -930,23 +936,27 @@ class OperationsStore:
                 FROM community_members m
                 LEFT JOIN member_reputation_events e ON e.member_id=m.member_id
                     AND e.event_type NOT IN ('moderation_penalty','community_rejected_link','unapproved_penalty_reversed')
-                WHERE m.is_bot=FALSE AND m.platform='discord'
+                WHERE m.is_bot=FALSE AND m.platform IN ('discord', 'telegram')
                 GROUP BY m.member_id, m.platform, m.community_id, m.platform_user_id, m.display_name,
                          m.is_bot, m.reputation_score, m.first_seen_at, m.last_seen_at, m.metadata
                 ORDER BY m.last_seen_at DESC"""
             ).fetchall()
-        # One Discord account may have been seen in several guild/community
-        # rows. The leaderboard is identity-based, so merge them by the
-        # immutable Discord user ID and aggregate their ledger totals.
+        # One account may have been seen in several communities on the same
+        # platform. Merge those rows, but keep Discord and Telegram separate:
+        # their user-ID namespaces are independent.
         grouped: dict[str, dict[str, Any]] = {}
         for row in rows:
             user_id = str(row["platform_user_id"])
+            platform = str(row["platform"])
             last_seen = timestamp_value(row["last_seen_at"])
             last_event = timestamp_value(row["last_event_at"]) if row["last_event_at"] else None
-            current = grouped.get(user_id)
+            identity = f"{platform}:{user_id}"
+            current = grouped.get(identity)
             if current is None:
-                grouped[user_id] = {
+                grouped[identity] = {
                     "member_id": str(row["member_id"]),
+                    "platform": platform,
+                    "platform_user_id": user_id,
                     "community_id": str(row["community_id"]),
                     "display_name": row["display_name"],
                     "reputation_score": int(row["reputation_score"] or 0),
@@ -972,15 +982,15 @@ class OperationsStore:
                 current["last_event_at"] = last_event
 
         output: list[MemberReputation] = []
-        for user_id, member in grouped.items():
+        for member in grouped.values():
             score = member["reputation_score"]
             status = "trusted" if score >= 10 else "neutral" if score >= 0 else "watch" if score > -10 else "risk"
             output.append(
                 MemberReputation(
                     member_id=member["member_id"],
-                    platform="discord",
+                    platform=member["platform"],
                     community_id=member["community_id"],
-                    platform_user_id=user_id,
+                    platform_user_id=member["platform_user_id"],
                     display_name=member["display_name"],
                     reputation_score=score,
                     positive_points=member["positive_points"],
@@ -1587,6 +1597,31 @@ class OperationsStore:
                  for gate in result.gates],
             )
 
+    def get_message(self, message_id: str) -> CommonMessage | None:
+        """Return one persisted message for events delivered after a restart."""
+        with self._connect() as db:
+            row = db.execute(
+                """SELECT message_id, platform, community_id, channel_id, thread_key,
+                parent_message_id, author_id, text, timestamp, source_url, raw_json
+                FROM operations_messages WHERE message_id=?""",
+                (message_id,),
+            ).fetchone()
+        if not row:
+            return None
+        return CommonMessage(
+            message_id=row["message_id"],
+            platform=row["platform"],
+            community_id=row["community_id"],
+            channel_id=row["channel_id"],
+            thread_key=row["thread_key"],
+            parent_message_id=row["parent_message_id"],
+            author_id=row["author_id"],
+            text=row["text"],
+            timestamp=timestamp_value(row["timestamp"]),
+            source_url=row["source_url"],
+            raw=json_value(row["raw_json"], {}),
+        )
+
     def recent_context(self, message: CommonMessage) -> list[CommonMessage]:
         """Load nearby messages from the same live conversation for Gate 2."""
         since = message.timestamp - timedelta(minutes=self.settings.moderation_context_window_minutes)
@@ -1638,20 +1673,27 @@ class OperationsStore:
     def find_recent_equivalent_incident_id(self, message: CommonMessage, category: str) -> str | None:
         """Find an identical recent alert so connectors do not notify twice."""
         since = message.timestamp - timedelta(minutes=self.settings.moderation_context_window_minutes)
+        # A Telegram alert belongs to the member who sent it.  Identical text
+        # from another member is a separate moderation event and must still be
+        # delivered to Admin/Mod.
+        author_clause = " AND author_id=?" if message.platform == "telegram" else ""
+        params: list[Any] = [
+            message.platform,
+            message.community_id,
+            message.channel_id,
+            category,
+        ]
+        if message.platform == "telegram":
+            params.append(message.author_id)
+        params.extend([since.isoformat(), message.timestamp.isoformat()])
         with self._connect() as db:
             rows = db.execute(
-                """SELECT text, incident_id FROM operations_messages
+                f"""SELECT text, incident_id FROM operations_messages
                 WHERE platform=? AND community_id=? AND channel_id=? AND category=?
+                  {author_clause}
                   AND incident_id IS NOT NULL AND timestamp>=? AND timestamp<=?
                 ORDER BY timestamp DESC LIMIT 30""",
-                (
-                    message.platform,
-                    message.community_id,
-                    message.channel_id,
-                    category,
-                    since.isoformat(),
-                    message.timestamp.isoformat(),
-                ),
+                tuple(params),
             ).fetchall()
         normalized = _fold_search_text(message.text)
         match = next((row for row in rows if _fold_search_text(row["text"]) == normalized), None)
@@ -1902,15 +1944,23 @@ class OperationsStore:
             if not row:
                 # A repeated identical message in the same channel should not
                 # create a new visible incident on every connector scan.
+                # Telegram members may send the same text independently, so only
+                # that platform also scopes this fallback by the sender.  Discord
+                # retains its existing duplicate grouping behaviour.
+                author_clause = " AND m.author_id=?" if message.platform == "telegram" else ""
+                params: list[Any] = [message.platform, message.community_id, message.channel_id]
+                if message.platform == "telegram":
+                    params.append(message.author_id)
+                params.extend([message.text, (datetime.now(UTC) - timedelta(hours=24)).replace(microsecond=0).isoformat()])
                 row = db.execute(
-                    """SELECT i.* FROM operations_incidents i
+                    f"""SELECT i.* FROM operations_incidents i
                     JOIN operations_messages m ON m.incident_id=i.incident_id
                     WHERE i.platform=? AND i.community_id=? AND i.channel_id=?
                       AND i.status IN ('open','monitoring')
-                      AND lower(trim(m.text))=lower(trim(?))
+                      {author_clause} AND lower(trim(m.text))=lower(trim(?))
                       AND i.last_seen >= ?
                     ORDER BY i.updated_at DESC LIMIT 1""",
-                    (message.platform, message.community_id, message.channel_id, message.text, (datetime.now(UTC) - timedelta(hours=24)).replace(microsecond=0).isoformat()),
+                    tuple(params),
                 ).fetchone()
         return self._incident(row) if row else None
 
@@ -1946,7 +1996,9 @@ class OperationsStore:
     def get_incident(self, incident_id: str) -> Incident | None:
         with self._connect(readonly=True) as db:
             row = db.execute("SELECT * FROM operations_incidents WHERE incident_id=?", (incident_id,)).fetchone()
-        return self._incident(row) if row else None
+        if not row:
+            return None
+        return self._with_incident_author_names([self._incident(row)])[0]
 
     def list_incidents(self, status: str | None = None, platform: str | None = None) -> list[Incident]:
         clauses, values = [], []
@@ -1959,7 +2011,51 @@ class OperationsStore:
         where = " WHERE " + " AND ".join(clauses) if clauses else ""
         with self._connect(readonly=True) as db:
             rows = db.execute(f"SELECT * FROM operations_incidents{where} ORDER BY CASE severity WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 ELSE 4 END, updated_at DESC", values).fetchall()
-        return [self._incident(row) for row in rows]
+        return self._with_incident_author_names([self._incident(row) for row in rows])
+
+    def _with_incident_author_names(self, incidents: list[Incident]) -> list[Incident]:
+        """Use Telegram sender names for legacy case titles that only store IDs."""
+        telegram_ids = [incident.incident_id for incident in incidents if incident.platform == "telegram"]
+        if not telegram_ids:
+            return incidents
+        placeholders = ",".join("?" for _ in telegram_ids)
+        with self._connect(readonly=True) as db:
+            rows = db.execute(
+                f"""SELECT incident_id, author_id, raw_json FROM operations_messages
+                WHERE incident_id IN ({placeholders}) ORDER BY timestamp""",
+                telegram_ids,
+            ).fetchall()
+        senders_by_incident: dict[str, list[tuple[str, str]]] = {}
+        for row in rows:
+            current_id = str(row["incident_id"])
+            raw = json_value(row["raw_json"], {})
+            sender = raw.get("from") or (raw.get("message") or {}).get("from") or {}
+            name = " ".join(
+                part for part in (sender.get("first_name"), sender.get("last_name")) if part
+            ) or sender.get("username")
+            author = str(row["author_id"])
+            if name and all(existing_author != author for existing_author, _ in senders_by_incident.get(current_id, [])):
+                senders_by_incident.setdefault(current_id, []).append((author, str(name)))
+
+        enriched: list[Incident] = []
+        for incident in incidents:
+            senders = senders_by_incident.get(incident.incident_id)
+            if not senders:
+                enriched.append(incident)
+                continue
+            author_id, author_name = senders[0]
+            for separator in (" từ ", " from "):
+                if separator in incident.title:
+                    prefix, suffix = incident.title.rsplit(separator, 1)
+                    if len(senders) > 1:
+                        names = [name for _, name in senders]
+                        label = ", ".join(names[:3]) + (f" và {len(names) - 3} người khác" if len(names) > 3 else "")
+                        incident = incident.model_copy(update={"title": f"{prefix}{separator}{label}"})
+                    elif suffix.strip() == author_id:
+                        incident = incident.model_copy(update={"title": f"{prefix}{separator}{author_name}"})
+                    break
+            enriched.append(incident)
+        return enriched
 
     def list_incident_messages(self, incident_id: str) -> list[dict[str, Any]]:
         with self._connect() as db:

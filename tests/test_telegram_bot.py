@@ -35,7 +35,7 @@ def test_telegram_message_is_normalized_for_operations_pipeline() -> None:
             "date": 1_700_000_000,
             "text": "Need help",
             "chat": {"id": -100123, "type": "supergroup"},
-            "from": {"id": 9001},
+            "from": {"id": 9001, "first_name": "Simon"},
             "reply_to_message": {"message_id": 41},
         }
     )
@@ -43,6 +43,7 @@ def test_telegram_message_is_normalized_for_operations_pipeline() -> None:
     assert common.message_id == "telegram--100123-42"
     assert common.platform == "telegram"
     assert common.parent_message_id == "41"
+    assert common.author_name == "Simon"
     assert common.text == "Need help"
 
 
@@ -81,3 +82,159 @@ def test_telegram_realtime_result_passes_through_admin_alert_gate() -> None:
     sent_message, sent_result = bot.telegram_alerts.send_alert.call_args.args
     assert sent_message.message_id == "telegram--100123-42"
     assert sent_result.send_to_admin is True
+
+
+def test_telegram_replies_to_the_message_that_asked_the_question() -> None:
+    bot = build_bot()
+    bot.chat = Mock()
+    bot.chat.reply.return_value = Mock(answer="Hello", moderation=None, stage="rule")
+    bot._send_message = Mock()
+
+    bot._handle_update(
+        {
+            "message": {
+                "message_id": 42,
+                "date": 1_700_000_000,
+                "text": "/help",
+                "chat": {"id": -100123, "type": "supergroup"},
+                "from": {"id": 9001, "is_bot": False},
+            }
+        }
+    )
+
+    bot._send_message.assert_called_once_with("-100123", "Hello", reply_to_message_id=42)
+
+
+def test_telegram_custom_command_is_answered_when_scoped_to_telegram() -> None:
+    bot = build_bot()
+    bot.store.get_command_content.return_value = Mock(platforms=["telegram"])
+
+    assert bot._question_to_answer({"chat": {"type": "group"}}, "/gioithieu") == "/gioithieu"
+
+
+def test_telegram_deletes_a_known_blocked_link_before_answering() -> None:
+    bot = build_bot()
+    bot.store.find_blocked_links.return_value = [Mock(canonical_url="https://bad.example/")]
+    bot._delete_message = Mock(return_value=True)
+    bot.pipeline.analyze.return_value = Mock(incident_id="INC-1")
+    bot.telegram_alerts = Mock()
+
+    bot._handle_update(
+        {
+            "message": {
+                "message_id": 42,
+                "date": 1_700_000_000,
+                "text": "https://bad.example/",
+                "chat": {"id": -100123, "type": "supergroup"},
+                "from": {"id": 9001, "is_bot": False},
+            }
+        }
+    )
+
+    bot._delete_message.assert_called_once_with("-100123", 42)
+    bot.telegram_alerts.send_blocked_link_alert.assert_called_once()
+
+
+def test_telegram_helpful_reactions_award_reputation_at_threshold() -> None:
+    bot = build_bot()
+    bot.settings.reputation_helpful_reaction_threshold = 1
+    common = TelegramRagBot._common_message(
+        {
+            "message_id": 42,
+            "date": 1_700_000_000,
+            "text": "Useful answer",
+            "chat": {"id": -100123, "type": "supergroup"},
+            "from": {"id": 9001},
+        }
+    )
+    bot._message_cache[("-100123", "42")] = common
+
+    bot._handle_reaction_update(
+        {
+            "chat": {"id": -100123},
+            "message_id": 42,
+            "user": {"id": 9002},
+            "old_reaction": [],
+            "new_reaction": [{"type": "emoji", "emoji": "👍"}],
+        }
+    )
+
+    bot.store.award_helpful_reputation.assert_called_once_with(common, 1, reaction_emoji="👍")
+
+
+def test_telegram_anonymous_actor_reaction_awards_reputation() -> None:
+    bot = build_bot()
+    bot.settings.reputation_helpful_reaction_threshold = 1
+    common = TelegramRagBot._common_message(
+        {
+            "message_id": 42,
+            "date": 1_700_000_000,
+            "text": "Useful answer",
+            "chat": {"id": -100123, "type": "supergroup"},
+            "from": {"id": 9001},
+        }
+    )
+    bot._message_cache[("-100123", "42")] = common
+
+    bot._handle_reaction_update(
+        {
+            "chat": {"id": -100123},
+            "message_id": 42,
+            "actor_chat": {"id": -100987},
+            "old_reaction": [],
+            "new_reaction": [{"type": "emoji", "emoji": "👍"}],
+        }
+    )
+
+    bot.store.award_helpful_reputation.assert_called_once_with(common, 1, reaction_emoji="👍")
+
+
+def test_telegram_anonymous_reaction_count_awards_reputation_at_threshold() -> None:
+    bot = build_bot()
+    bot.settings.reputation_helpful_reaction_threshold = 1
+    common = TelegramRagBot._common_message(
+        {
+            "message_id": 42,
+            "date": 1_700_000_000,
+            "text": "Useful answer",
+            "chat": {"id": -100123, "type": "supergroup"},
+            "from": {"id": 9001},
+        }
+    )
+    bot._message_cache[("-100123", "42")] = common
+
+    bot._handle_reaction_count_update(
+        {
+            "chat": {"id": -100123},
+            "message_id": 42,
+            "reactions": [{"type": {"type": "emoji", "emoji": "👍"}, "total_count": 1}],
+        }
+    )
+
+    bot.store.award_helpful_reputation.assert_called_once_with(common, 1, reaction_emoji="👍")
+
+
+def test_telegram_reaction_loads_a_persisted_message_after_restart() -> None:
+    bot = build_bot()
+    bot.settings.reputation_helpful_reaction_threshold = 1
+    common = TelegramRagBot._common_message(
+        {
+            "message_id": 42,
+            "date": 1_700_000_000,
+            "text": "Useful answer",
+            "chat": {"id": -100123, "type": "supergroup"},
+            "from": {"id": 9001},
+        }
+    )
+    bot.store.get_message.return_value = common
+
+    bot._handle_reaction_count_update(
+        {
+            "chat": {"id": -100123},
+            "message_id": 42,
+            "reactions": [{"type": {"type": "emoji", "emoji": "👍"}, "total_count": 1}],
+        }
+    )
+
+    bot.store.get_message.assert_called_once_with("telegram--100123-42")
+    bot.store.award_helpful_reputation.assert_called_once_with(common, 1, reaction_emoji="👍")

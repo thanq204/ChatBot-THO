@@ -41,6 +41,36 @@ class ChatOrchestrator:
         r"nhom|cong dong|noi quy|quy dinh|admin|mod)\b",
         r"\b(du an nay|du an cua nhom|tai lieu noi bo|tai lieu cua nhom)\b",
     )
+    # Topics that ARE within community scope — learning, skills, career, etc.
+    _IN_SCOPE_PATTERNS = (
+        r"\b(hoc|on|tap|thi|bai|mon|chuong|de|dap an|kiem tra|bai tap|giao trinh)\b",
+        r"\b(lap trinh|code|python|java|html|css|javascript|sql|c\+\+|algorithm|debug)\b",
+        r"\b(ky nang|phuong phap|cach hoc|on thi|review|lam bai|giai bai)\b",
+        r"\b(tam ly|stress|ap luc|dong luc|tap trung|quan ly thoi gian|pomodoro)\b",
+        r"\b(dinh huong|nganh|nghe|cv|tuyen dung|thuc tap|intern|career)\b",
+        r"\b(nhom|admin|mod|cong dong|noi quy|server|kenh|su kien)\b",
+        r"\b(tai lieu|sach|khoa hoc|course|udemy|coursera|edx|mooc)\b",
+        r"\b(gpa|diem|hoc bong|scholarship|truong|dai hoc|university)\b",
+        r"\b(ai|machine learning|deep learning|data science|nlp)\b",
+        r"\b(toan|ly|hoa|van|su|dia|sinh|tieng anh|english|ielts|toeic)\b",
+    )
+    # Topics clearly OUTSIDE community scope — reject deterministically.
+    # IMPORTANT: avoid single common words (e.g. "ban", "gia", "nau") that
+    # also appear in everyday Vietnamese. Use multi-word phrases or
+    # distinctive terms only.
+    _OUT_OF_SCOPE_PATTERNS = (
+        r"\b(nau an|nau com|nau pho|mon an|com rang|recipe|cooking)\b",
+        r"\b(bitcoin|crypto|coin|forex|chung khoan|co phieu|dau tu tai chinh|token|nft)\b",
+        r"\b(lien quan|pubg|free fire|valorant|genshin|rank lien quan|champ|giai rank)\b",
+        r"\b(du lich|resort|khach san|hotel|tour du lich|tham quan|di choi)\b",
+        r"\b(mua ban|shopee|lazada|tiki|dat hang|mua hang|ban hang)\b",
+        r"\b(phim|netflix|anime|manga|webtoon|truyen tranh|ca si|mv)\b",
+        r"\b(bong da|ngoai hang|world cup|sea games|olympic|giai dau the thao)\b",
+        r"\b(tinh yeu|hen ho|crush|nguoi yeu|chia tay|dating|to tinh)\b",
+        r"\b(chinh tri|bau cu|chu tich|thu tuong|quoc hoi|chinh phu)\b",
+        r"\b(kham benh|tri lieu|covid|chan doan|bac si)\b",
+        r"\b(boi loi|tap gym|yoga|fitness)\b",
+    )
     STUDY_GROUP_RULES = """Nội quy nhóm học tập:
 1. Trao đổi đúng chủ đề học tập và nêu rõ môn/chương khi cần.
 2. Tôn trọng người khác; không công kích, chế giễu hoặc spam.
@@ -158,23 +188,28 @@ class ChatOrchestrator:
 
         moderation = self.pipeline.analyze(message, context)
         if moderation.decision != "allow":
-            if moderation.banner:
-                answer = f"[Moderation]\n{moderation.banner}"
-            else:
-                answer = (
-                    "[Moderation]\n"
-                    "Mình không thể trả lời nội dung này vì có dấu hiệu vi phạm quy định cộng đồng. "
-                    f"Lý do: {moderation.explanation}"
-                )
+            # A retrieved case may contain an old Admin action (for example,
+            # delete_message).  It is context for moderators only, never an
+            # instruction or outcome for the current member's message.
+            answer = (
+                "[Cảnh báo]\n"
+                "Tin nhắn của bạn có dấu hiệu vi phạm quy định cộng đồng và đã được ghi nhận để Admin/Mod xem xét. "
+                f"Lý do: {moderation.explanation}\n"
+                "Bot không tự xóa, khóa hoặc cấm thành viên; các hành động này chỉ được thực hiện sau khi Admin/Mod xác nhận."
+            )
             return ChatOutcome(answer=answer, stage="moderation", model_used=moderation.model_used, moderation=moderation)
 
         intent = classify_question_intent(message.text)
         if not intent.is_question:
+            if self._is_out_of_scope(message.text):
+                return self._out_of_scope_answer(moderation)
             return self._llm_outcome(message.text, moderation)
 
         # Volatile questions, bot metadata and social questions stay in the
         # LLM lane and never pollute reusable FAQ analytics.
         if not intent.faq_eligible:
+            if self._is_out_of_scope(message.text):
+                return self._out_of_scope_answer(moderation)
             return self._llm_outcome(message.text, moderation)
 
         faq = self.store.find_faq(message.text)
@@ -225,6 +260,10 @@ class ChatOrchestrator:
                 if best_id in source_by_id:
                     sources.append(source_by_id[best_id])
             if not self._requires_grounded_source(message.text) and self.settings.discord_rag_llm_enabled:
+                if self._is_out_of_scope(message.text):
+                    if track_question:
+                        self.store.record_member_question(message, outcome_stage="scope-filter")
+                    return self._out_of_scope_answer(moderation)
                 if track_question:
                     self.store.record_member_question(message, outcome_stage="llm")
                 return self._llm_outcome(message.text, moderation)
@@ -250,6 +289,36 @@ class ChatOrchestrator:
         normalized = normalize_intent_text(question)
         return any(re.search(pattern, normalized) for pattern in cls._GROUNDED_SOURCE_PATTERNS)
 
+    @classmethod
+    def _is_out_of_scope(cls, question: str) -> bool:
+        """Deterministic guard: reject questions clearly outside community scope.
+
+        Returns True only when the question matches an out-of-scope topic AND
+        does NOT also match an in-scope topic (to avoid false positives on
+        cross-domain questions like "code Python để crawl giá Bitcoin").
+        """
+        normalized = normalize_intent_text(question)
+        has_out = any(re.search(p, normalized) for p in cls._OUT_OF_SCOPE_PATTERNS)
+        if not has_out:
+            return False
+        has_in = any(re.search(p, normalized) for p in cls._IN_SCOPE_PATTERNS)
+        return not has_in
+
+    def _out_of_scope_answer(self, moderation) -> ChatOutcome:
+        """Deterministic refusal for questions outside community scope."""
+        return ChatOutcome(
+            answer=(
+                "[Ngoài phạm vi]\n"
+                "Câu hỏi này nằm ngoài phạm vi hỗ trợ của nhóm học tập. "
+                "Mình chỉ hỗ trợ các chủ đề liên quan đến học tập, kỹ năng, "
+                "tâm lý học đường và định hướng nghề nghiệp. "
+                "Bạn có thể dùng /help để xem các chủ đề mình hỗ trợ nhé!"
+            ),
+            stage="scope-filter",
+            model_used="deterministic-scope-filter",
+            moderation=moderation,
+        )
+
     def _llm_outcome(self, text: str, moderation) -> ChatOutcome:
         answer, model = self._general_llm_answer(text)
         label = "LLM" if model != "system-fallback" else "Hệ thống"
@@ -262,6 +331,8 @@ class ChatOrchestrator:
 
     def _fallback_after_rag(self, question: str, moderation) -> ChatOutcome:
         if not self._requires_grounded_source(question) and self.settings.discord_rag_llm_enabled:
+            if self._is_out_of_scope(question):
+                return self._out_of_scope_answer(moderation)
             return self._llm_outcome(question, moderation)
         return ChatOutcome(
             answer=(
@@ -294,8 +365,15 @@ class ChatOrchestrator:
                             "Bạn là CHAT-10, trợ lý cộng đồng học tập. "
                             f"Thời gian hệ thống tại Việt Nam là {now:%H:%M, ngày %d/%m/%Y}. "
                             "Trả lời tự nhiên, ngắn gọn bằng tiếng Việt. Với trò chuyện thông thường, hãy phản hồi thân thiện. "
-                            "Với kiến thức chung, trả lời trực tiếp nếu chắc chắn. Không được bịa thông tin cá nhân, "
-                            "dữ liệu nội bộ, dữ liệu dự án, lịch học hoặc sự kiện hiện tại; nếu câu hỏi cần các dữ liệu đó, "
+                            "CHỈ dùng kiến thức chung để tư vấn các chủ đề: học tập, phương pháp học, kỹ năng mềm, "
+                            "tâm lý học đường, định hướng nghề nghiệp, lập trình và công nghệ phục vụ học tập. "
+                            "TUYỆT ĐỐI TỪ CHỐI câu hỏi ngoài phạm vi. Khi từ chối, trả lời chính xác: "
+                            "'Câu hỏi này nằm ngoài phạm vi hỗ trợ của nhóm học tập. "
+                            "Mình chỉ hỗ trợ các chủ đề liên quan đến học tập, kỹ năng, "
+                            "tâm lý học đường và định hướng nghề nghiệp.' "
+                            "Các chủ đề ngoài phạm vi gồm: nấu ăn, game, crypto, du lịch, mua bán, phim ảnh, "
+                            "thể thao, tình yêu, chính trị, y tế. "
+                            "Không được bịa thông tin cá nhân, dữ liệu nội bộ, lịch học; nếu câu hỏi cần các dữ liệu đó, "
                             "hãy nói rõ cần nguồn đã được Admin cung cấp.",
                         ),
                         ("human", question),

@@ -15,6 +15,7 @@ import AgentFlow from "../components/landing/AgentFlow.jsx";
 import Mascot from "../components/landing/Mascot.jsx";
 import SakuraField from "../components/landing/SakuraField.jsx";
 import { TransitionLink } from "../transitions/PageTransition.jsx";
+import { useAuth } from "../auth/AuthProvider.jsx";
 import { useTheme } from "../theme/ThemeProvider.jsx";
 import "../landing.css";
 
@@ -92,8 +93,11 @@ const PLATFORMS_PLANNED = [
 
 export default function LandingPage() {
   const { theme, toggleTheme } = useTheme();
+  const { isAuthenticated } = useAuth();
   const reduce = useReducedMotion();
   const ThemeIcon = theme === "dark" ? Sun : Moon;
+  const ctaTo = isAuthenticated ? "/tong-quan" : "/login";
+  const ctaLabel = isAuthenticated ? "Vào bảng điều khiển" : "Đăng nhập";
 
   /* Blob parallax. Motion values stay outside the render cycle, so moving the
      pointer never re-renders the page. */
@@ -140,8 +144,8 @@ export default function LandingPage() {
             >
               <ThemeIcon size={16} />
             </button>
-            <TransitionLink to="/login" className="sk-btn">
-              Đăng nhập
+            <TransitionLink to={ctaTo} className="sk-btn">
+              {ctaLabel}
             </TransitionLink>
           </div>
         </div>
@@ -207,8 +211,8 @@ export default function LandingPage() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.7, delay: 0.26, ease: [0.16, 1, 0.3, 1] }}
               >
-                <TransitionLink to="/login" className="sk-btn sk-btn--lg">
-                  Đăng nhập
+                <TransitionLink to={ctaTo} className="sk-btn sk-btn--lg">
+                  {ctaLabel}
                   <ArrowRight size={16} weight="bold" />
                 </TransitionLink>
                 <a href="#how-it-works" className="sk-btn sk-btn--quiet sk-btn--lg">
@@ -381,11 +385,13 @@ export default function LandingPage() {
             <div className="lcta__copy">
               <h2 className="lcta__title">Bắt đầu với cộng đồng của bạn</h2>
               <p className="lcta__body">
-                Đăng nhập để nối kênh đầu tiên và xem agent chạy trên dữ liệu thật.
+                {isAuthenticated
+                  ? "Quay lại bảng điều khiển để tiếp tục theo dõi cộng đồng của bạn."
+                  : "Đăng nhập để nối kênh đầu tiên và xem agent chạy trên dữ liệu thật."}
               </p>
             </div>
-            <TransitionLink to="/login" className="sk-btn sk-btn--lg">
-              Đăng nhập
+            <TransitionLink to={ctaTo} className="sk-btn sk-btn--lg">
+              {ctaLabel}
               <ArrowRight size={16} weight="bold" />
             </TransitionLink>
           </Reveal>
