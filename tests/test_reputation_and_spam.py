@@ -106,7 +106,7 @@ def test_penalty_is_applied_only_when_admin_confirms_community_case(tmp_path) ->
     assert member.event_count == 2
 
 
-def test_reputation_leaderboard_excludes_bots_and_demo_records(tmp_path) -> None:
+def test_reputation_leaderboard_includes_telegram_and_excludes_bots_and_demo_records(tmp_path) -> None:
     store = OperationsStore(_settings(tmp_path))
     human = _message("human-1", "Xin chào", author_id="human-1")
     bot = _message("bot-1", "Phản hồi tự động", author_id="bot-1").model_copy(
@@ -135,10 +135,11 @@ def test_reputation_leaderboard_excludes_bots_and_demo_records(tmp_path) -> None
     store.save_message(second_guild, safe, None)
     store.award_helpful_reputation(human, 3)
     members = store.list_member_reputation()
-    assert [member.platform_user_id for member in members] == ["human-1"]
+    assert [member.platform_user_id for member in members] == ["human-1", "telegram-user"]
     assert members[0].display_name == "Tên mới nhất"
     assert members[0].reputation_score == 5
     assert members[0].event_count == 1
+    assert members[1].platform == "telegram"
 
 
 def test_rejected_link_is_blocked_but_penalty_waits_for_admin(tmp_path) -> None:

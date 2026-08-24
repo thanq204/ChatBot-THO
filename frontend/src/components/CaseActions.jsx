@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChatCircleText, Trash, Clock, SignOut, Prohibit, WarningCircle, CheckCircle } from "@phosphor-icons/react";
 import { ops } from "../api/client.js";
+import { useAuth } from "../auth/AuthProvider.jsx";
 
 /**
  * Manual moderation against one case. Every action here is irreversible on the
@@ -61,6 +62,7 @@ const DURATIONS = [
 const SUPPORTED_PLATFORMS = new Set(["discord", "telegram"]);
 
 export default function CaseActions({ incident, messages, onDone }) {
+  const { user } = useAuth();
   const [actionKey, setActionKey] = useState("dm");
   const [messageId, setMessageId] = useState("");
   const [text, setText] = useState("");
@@ -74,11 +76,22 @@ export default function CaseActions({ incident, messages, onDone }) {
     return root?.message_id ?? "";
   }, [messages]);
 
+  const availableActions = useMemo(
+    () => (incident.platform === "telegram" ? ACTIONS.filter((item) => item.key !== "ban") : ACTIONS),
+    [incident.platform],
+  );
+
   useEffect(() => {
     setMessageId(rootId);
   }, [rootId]);
 
-  const action = ACTIONS.find((item) => item.key === actionKey) ?? ACTIONS[0];
+  useEffect(() => {
+    if (!availableActions.some((item) => item.key === actionKey)) {
+      setActionKey("dm");
+    }
+  }, [actionKey, availableActions]);
+
+  const action = availableActions.find((item) => item.key === actionKey) ?? availableActions[0];
   const target = messages.find((item) => item.message_id === messageId) ?? null;
   const supported = SUPPORTED_PLATFORMS.has(incident.platform);
 
@@ -102,6 +115,7 @@ export default function CaseActions({ incident, messages, onDone }) {
         message_id: messageId,
         message: text,
         duration_minutes: action.needs === "duration" ? Number(duration) : null,
+        actor: user?.display_name || user?.email || "Admin",
         confirmed: true,
       });
       setResult({
@@ -128,7 +142,7 @@ export default function CaseActions({ incident, messages, onDone }) {
   return (
     <div className="actions">
       <div className="actions__picker" role="radiogroup" aria-label="Chọn hành động">
-        {ACTIONS.map((item) => {
+        {availableActions.map((item) => {
           const Icon = item.icon;
           const active = item.key === actionKey;
           return (

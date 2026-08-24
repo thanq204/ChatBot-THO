@@ -27,7 +27,7 @@ class TelegramAlertSender:
         return bool(
             self.settings.telegram_alerts_enabled
             and self.settings.telegram_bot_token.strip()
-            and self.settings.telegram_default_chat_id.strip()
+            and self.settings.telegram_admin_chat_id.strip()
         )
 
     @staticmethod
@@ -44,7 +44,7 @@ class TelegramAlertSender:
         if not self.configured:
             logger.debug(
                 "Telegram alert skipped: disabled or TELEGRAM_BOT_TOKEN/"
-                "TELEGRAM_DEFAULT_CHAT_ID is missing."
+                "TELEGRAM_ADMIN_CHAT_ID is missing."
             )
             return False
 
@@ -81,7 +81,7 @@ class TelegramAlertSender:
             response = requests.post(
                 endpoint,
                 json={
-                    "chat_id": self.settings.telegram_default_chat_id,
+                    "chat_id": self.settings.telegram_admin_chat_id,
                     "text": text,
                     "disable_web_page_preview": True,
                 },

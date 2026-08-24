@@ -54,6 +54,7 @@ from backend.models.operations import (
 )
 from backend.services.admin_announcements import AdminAnnouncementSender
 from backend.services.discord.bot import notify_commands_changed as notify_discord_commands_changed
+from backend.services.telegram.bot import notify_commands_changed as notify_telegram_commands_changed
 from backend.services.knowledge_importer import KnowledgeImporter, KnowledgeImportError
 from backend.services.operations_demo import seed_operations_demo
 from backend.services.operations_pipeline import OperationsPipeline
@@ -117,6 +118,11 @@ def pull_platform(platform: str, limit: int = Query(default=100, ge=1, le=500), 
         messages = get_connectors().pull(platform, limit, channel_id)
     except ConnectorError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    # Telegram's getUpdates queue is normally empty while the realtime
+    # listener is running. Treat that as a successful zero-result scan rather
+    # than passing an empty list to the ingest model (which requires >=1 item).
+    if not messages:
+        return {"received": 0, "analyzed": 0, "items": []}
     return ingest_messages(MessageIngestRequest(messages=messages, analyze=True))
 
 
@@ -296,7 +302,11 @@ def dismiss_faq_suggestion(
 
 
 @router.post("/incidents/{incident_id}/actions", response_model=AdminPlatformActionResponse)
-def execute_incident_action(incident_id: str, payload: AdminPlatformActionRequest) -> AdminPlatformActionResponse:
+def execute_incident_action(
+    incident_id: str,
+    payload: AdminPlatformActionRequest,
+    reviewer: UserPublic = Depends(require_roles("admin", "mod")),
+) -> AdminPlatformActionResponse:
     """Run one Admin-confirmed platform action; never called automatically."""
     if not payload.confirmed:
         raise HTTPException(status_code=400, detail="Set confirmed=true after reviewing the case.")
@@ -307,12 +317,17 @@ def execute_incident_action(incident_id: str, payload: AdminPlatformActionReques
     message = store.get_incident_message(incident_id, payload.message_id)
     if not message:
         raise HTTPException(status_code=404, detail="Message not found in this incident.")
-    raw = json.loads(message.get("raw_json") or "{}")
+    raw_value = message.get("raw_json")
+    # SQLite stores JSON as text, while psycopg2 decodes the PostgreSQL JSONB
+    # column into a dict.  Accept both so platform actions can reach the
+    # provider API instead of failing with a 500 before execution.
+    raw = raw_value if isinstance(raw_value, dict) else json.loads(raw_value or "{}")
     target_message_id = message["message_id"]
     if incident.platform == "telegram":
         target_message_id = str((raw.get("message") or {}).get("message_id") or target_message_id.rsplit("-", 1)[-1])
     try:
-        result = PlatformModerationService().execute(
+        moderation_service = PlatformModerationService()
+        result = moderation_service.execute(
             platform=incident.platform,
             community_id=incident.community_id,
             channel_id=incident.channel_id,
@@ -324,15 +339,35 @@ def execute_incident_action(incident_id: str, payload: AdminPlatformActionReques
         )
     except PlatformModerationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    actor = reviewer.display_name or reviewer.email
+    if result.completed and incident.platform == "telegram" and payload.action != "dm":
+        # Telegram listener stores a message payload directly, while manually
+        # pulled updates may still wrap it in ``message``.  Support both so
+        # group notices show the member's display name rather than their ID.
+        source_author = raw.get("from") or (raw.get("message") or {}).get("from") or {}
+        target_name = " ".join(
+            part for part in (source_author.get("first_name"), source_author.get("last_name")) if part
+        ) or str(message["author_id"])
+        notice = moderation_service.send_telegram_action_notice(
+            chat_id=incident.channel_id,
+            user_id=str(message["author_id"]),
+            target_name=target_name,
+            action=payload.action,
+            duration_minutes=payload.duration_minutes,
+            actor_name=actor,
+            actor_role=reviewer.role,
+        )
+        if notice:
+            result = result.model_copy(update={"detail": f"{result.detail} {notice}"})
     store.add_audit(
         incident_id,
         message["message_id"],
         "admin_platform_action",
-        payload.actor,
-        {"action": payload.action, "completed": result.completed, "detail": result.detail, "target_user_id": message["author_id"], "duration_minutes": payload.duration_minutes},
+        actor,
+        {"action": payload.action, "completed": result.completed, "detail": result.detail, "target_user_id": message["author_id"], "duration_minutes": payload.duration_minutes, "actor_role": reviewer.role},
     )
     if result.completed:
-        store.remember_incident(incident_id, payload.actor, payload.message or f"Admin action: {payload.action}")
+        store.remember_incident(incident_id, actor, payload.message or f"Admin action: {payload.action}")
     return result
 
 
@@ -369,6 +404,7 @@ def upsert_command_content(command: str, payload: CommandContentRequest) -> Comm
     # Push a real Discord "/" slash command live (not just the mention
     # fallback) if the currently running listener has one to update.
     notify_discord_commands_changed()
+    notify_telegram_commands_changed()
     return result
 
 
@@ -380,6 +416,7 @@ def delete_command_content(command: str) -> dict[str, object]:
     if not get_operations_store().delete_command_content(key):
         raise HTTPException(status_code=404, detail="Không tìm thấy lệnh để xoá.")
     notify_discord_commands_changed()
+    notify_telegram_commands_changed()
     return {"deleted": True, "command": key}
 
 

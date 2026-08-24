@@ -66,13 +66,16 @@ class OperationsPipeline:
         gate2 = self.gate2(message, nearby, gate1)
         gate3, memory_match = self.gate3(message, gate2)
         decision, severity, confidence = self._decision(gate2)
-        needs_incident = decision != "allow" and not memory_match.matched
+        # A reviewed-case match suppresses repeat notifications, not the case
+        # itself.  Persisting the message in a fresh/open incident keeps the
+        # moderator dashboard complete and lets a recurrence be reviewed.
+        needs_incident = decision != "allow"
         duplicate_incident_id = (
             self.store.find_recent_equivalent_incident_id(message, gate2.category)
             if needs_incident
             else None
         )
-        if duplicate_incident_id:
+        if duplicate_incident_id and not memory_match.matched:
             gate3 = gate3.model_copy(
                 update={
                     "passed": True,
@@ -81,7 +84,7 @@ class OperationsPipeline:
                 }
             )
         gates = [gate1, gate2, gate3]
-        send_to_admin = needs_incident and not duplicate_incident_id
+        send_to_admin = needs_incident and not duplicate_incident_id and not memory_match.matched
         result = MessageDecision(
             decision=decision,
             category=gate2.category,
@@ -417,6 +420,12 @@ class OperationsPipeline:
             )
 
         match = self.store.match_reviewed_case(message.text, gate2.category)
+        if match.matched and message.platform == "telegram" and match.mark:
+            reviewed_message = self.store.get_message(match.mark.message_id)
+            # A reviewed case can guide moderation, but it must not silence the
+            # alert for a different Telegram member who sends the same content.
+            if reviewed_message and reviewed_message.author_id != message.author_id:
+                match = ModerationMemoryMatch(False, 0.0, True, False)
         if match.matched:
             explanation = match.banner or "Case tương tự đã được Admin/Mod xử lý."
             label = "approved_case_match"
