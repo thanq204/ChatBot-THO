@@ -1486,8 +1486,8 @@ class OperationsStore:
 
         with self._connect() as db:
             db.execute(
-                "UPDATE operations_incidents SET status='resolved', updated_at=? WHERE incident_id=?",
-                (_now(), incident_id),
+                "UPDATE operations_incidents SET status='resolved', assigned_to=?, updated_at=? WHERE incident_id=?",
+                (actor, _now(), incident_id),
             )
         self.add_audit(
             incident_id,
@@ -1505,13 +1505,18 @@ class OperationsStore:
             self.remember_incident(incident_id, actor, note or "Admin/Mod xác nhận vi phạm.")
         return outcome, affected_members, points_applied
 
-    def update_incident(self, incident_id: str, status: str | None, assigned_to: str | None, note: str) -> Incident | None:
+    def update_incident(self, incident_id: str, status: str | None, assigned_to: str | None, note: str, actor: str | None = None) -> Incident | None:
+        """General-purpose status/assignee edit, used both by the manual
+        dropdown (open/monitoring/snoozed — the API route blocks "resolved"
+        there, see operations_routes.update_incident) and internally by the
+        pipeline/tests to seed a resolved case for gate3 memory matching."""
+        effective_assignee = assigned_to or actor
         with self._connect() as db:
-            db.execute("UPDATE operations_incidents SET status=COALESCE(?,status), assigned_to=COALESCE(?,assigned_to), updated_at=? WHERE incident_id=?", (status, assigned_to, _now(), incident_id))
+            db.execute("UPDATE operations_incidents SET status=COALESCE(?,status), assigned_to=COALESCE(?,assigned_to), updated_at=? WHERE incident_id=?", (status, effective_assignee, _now(), incident_id))
         if note or status:
-            self.add_audit(incident_id, None, "incident_updated", assigned_to or "Admin", {"status": status, "note": note})
+            self.add_audit(incident_id, None, "incident_updated", actor or effective_assignee or "Admin", {"status": status, "note": note})
         if status == "resolved":
-            self.remember_incident(incident_id, assigned_to or "Admin", note)
+            self.remember_incident(incident_id, effective_assignee or "Admin", note)
         return self.get_incident(incident_id)
 
     def add_audit(self, incident_id: str | None, message_id: str | None, event_type: str, actor: str, payload: dict[str, Any]) -> None:
