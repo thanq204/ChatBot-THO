@@ -25,7 +25,8 @@ const NotificationPage = lazy(() => import("./pages/NotificationPage.jsx"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage.jsx"));
 const BotCommandsPage = lazy(() => import("./pages/BotCommandsPage.jsx"));
 const FaqManagementPage = lazy(() => import("./pages/FaqManagementPage.jsx"));
-const ReputationPage = lazy(() => import("./pages/ReputationPage.jsx"));
+const ExperiencePage = lazy(() => import("./pages/ExperiencePage.jsx"));
+const SellerTrustPage = lazy(() => import("./pages/SellerTrustPage.jsx"));
 
 /** Shown only while a route's chunk is in flight, which is once per route. */
 function RouteFallback() {
@@ -55,8 +56,10 @@ export default function App() {
               <Route path="/nhat-ky" element={<ModerationLogPage />} />
               <Route path="/quan-ly-mod" element={<ModManagementPage />} />
               <Route path="/quan-ly-faq" element={<FaqManagementPage />} />
-              <Route path="/bang-uy-tin" element={<ReputationPage />} />
+              <Route path="/bang-exp" element={<ExperiencePage />} />
+              <Route path="/bang-uy-tin" element={<Navigate to="/bang-exp" replace />} />
             </Route>
+            <Route path="/nguoi-ban" element={<SellerTrustPage />} />
             <Route path="/khu-thu-nghiem-ai" element={<AiSandboxPage />} />
             <Route path="/thong-bao" element={<NotificationPage />} />
             <Route path="/quan-ly-noi-dung" element={<SettingsPage />} />

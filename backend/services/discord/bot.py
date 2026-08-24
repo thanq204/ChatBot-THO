@@ -18,19 +18,19 @@ from typing import Any
 from backend.config import Settings, get_settings
 from backend.models.operations import RESERVED_BOT_COMMANDS, CommonMessage
 from backend.services.chat_orchestrator import ChatOrchestrator
+from backend.services.link_safety import extract_urls
 from backend.services.operations_pipeline import OperationsPipeline
 from backend.services.operations_store import OperationsStore
-from backend.services.question_intent import is_reusable_faq_question
-from backend.services.link_safety import extract_urls
-from backend.services.telegram.alerts import TelegramAlertSender
 from backend.services.platform_moderation import PlatformModerationService
+from backend.services.question_intent import is_reusable_faq_question
+from backend.services.telegram.alerts import TelegramAlertSender
 
 logger = logging.getLogger(__name__)
 
 # The one Discord listener running in this process, if any. The admin API
 # uses this to ask a live bot to re-register slash commands right after an
 # Admin adds/edits/deletes one, instead of waiting for the next restart.
-_active_bot: "DiscordRagBot | None" = None
+_active_bot: DiscordRagBot | None = None
 
 
 def notify_commands_changed() -> None:
@@ -294,6 +294,132 @@ class DiscordRagBot:
         async def settings_command(interaction: Any, kind: str, enabled: bool) -> None:
             await run_command(interaction, "settings", f"{kind} {'on' if enabled else 'off'}")
 
+        async def require_trade_channel(interaction: Any) -> bool:
+            configured = self.settings.discord_trade_channel_id.strip()
+            current = str(getattr(getattr(interaction, "channel", None), "id", ""))
+            if not configured:
+                await interaction.response.send_message(
+                    "Admin chưa cấu hình DISCORD_TRADE_CHANNEL_ID nên luồng giao dịch đang khóa.",
+                    ephemeral=True,
+                )
+                return False
+            if current != configured:
+                await interaction.response.send_message(
+                    f"Lệnh giao dịch chỉ dùng trong kênh <#{configured}> để giữ bằng chứng đúng ngữ cảnh.",
+                    ephemeral=True,
+                )
+                return False
+            return True
+
+        async def trade_open_command(interaction: Any, seller: Any, item_summary: str) -> None:
+            if not await require_trade_channel(interaction):
+                return
+            try:
+                trade = await asyncio.to_thread(
+                    self.store.create_trade_case,
+                    platform="discord",
+                    community_id=str(interaction.guild.id),
+                    channel_id=str(interaction.channel.id),
+                    buyer_id=str(interaction.user.id),
+                    buyer_name=getattr(interaction.user, "display_name", None),
+                    seller_id=str(seller.id),
+                    seller_name=getattr(seller, "display_name", None),
+                    item_summary=item_summary,
+                    created_by=str(interaction.user.id),
+                    evidence_urls=[],
+                )
+            except ValueError as exc:
+                await interaction.response.send_message(str(exc), ephemeral=True)
+                return
+            await interaction.response.send_message(
+                f"Đã mở giao dịch `{trade.trade_id}` giữa <@{trade.buyer_id}> và <@{trade.seller_id}>. "
+                "Hai bên dùng `/trade_confirm` sau khi giao dịch hoàn tất. Không gửi OTP, mật khẩu hoặc thông tin thẻ vào Discord."
+            )
+
+        # discord.py resolves deferred annotations through module globals, while
+        # discord is intentionally imported locally so the HTTP API can run without it.
+        trade_open_command.__annotations__["seller"] = discord.Member
+        tree.command(name="trade_open", description="Mở giao dịch giữa người mua và người bán")(trade_open_command)
+
+        @tree.command(name="trade_confirm", description="Xác nhận một giao dịch đã hoàn tất")
+        async def trade_confirm_command(interaction: Any, trade_id: str) -> None:
+            if not await require_trade_channel(interaction):
+                return
+            try:
+                trade = await asyncio.to_thread(
+                    self.store.confirm_trade_case,
+                    trade_id.strip().upper(),
+                    str(interaction.user.id),
+                )
+            except (ValueError, PermissionError) as exc:
+                await interaction.response.send_message(str(exc), ephemeral=True)
+                return
+            if not trade:
+                await interaction.response.send_message("Không tìm thấy mã giao dịch.", ephemeral=True)
+                return
+            message = (
+                "Hai bên đã xác nhận. Người mua có thể dùng `/trade_review`."
+                if trade.status == "completed"
+                else "Đã ghi nhận xác nhận của bạn; đang chờ bên còn lại."
+            )
+            await interaction.response.send_message(f"Giao dịch `{trade.trade_id}`: {message}")
+
+        @tree.command(name="trade_review", description="Đánh giá người bán sau giao dịch đã xác nhận")
+        async def trade_review_command(
+            interaction: Any,
+            trade_id: str,
+            overall_rating: int,
+            item_accuracy: int,
+            communication: int,
+            fulfillment: int,
+            would_trade_again: bool,
+            comment: str = "",
+        ) -> None:
+            if not await require_trade_channel(interaction):
+                return
+            try:
+                review = await asyncio.to_thread(
+                    self.store.add_seller_review,
+                    trade_id.strip().upper(),
+                    buyer_id=str(interaction.user.id),
+                    overall_rating=overall_rating,
+                    item_accuracy=item_accuracy,
+                    communication=communication,
+                    fulfillment=fulfillment,
+                    would_trade_again=would_trade_again,
+                    comment=comment,
+                )
+            except (LookupError, ValueError, PermissionError) as exc:
+                await interaction.response.send_message(str(exc), ephemeral=True)
+                return
+            await interaction.response.send_message(
+                f"Đã lưu đánh giá `{review.review_id}` dưới nhãn giao dịch xác thực. "
+                "Đánh giá này là trải nghiệm của người mua, không phải bảo đảm an toàn từ bot."
+            )
+
+        async def seller_check_command(interaction: Any, seller: Any, reason: str = "") -> None:
+            if not await require_trade_channel(interaction):
+                return
+            await interaction.response.defer(ephemeral=True)
+            assessment = await asyncio.to_thread(
+                self.store.create_seller_assessment,
+                platform="discord",
+                community_id=str(interaction.guild.id),
+                requester_id=str(interaction.user.id),
+                seller_id=str(seller.id),
+                reason=reason or "Thành viên yêu cầu kiểm tra thông tin người bán.",
+            )
+            await interaction.followup.send(
+                f"Đã gửi yêu cầu `{assessment.assessment_id}` cho Admin/Mod. "
+                "Bot không tự kết luận người bán an toàn hoặc lừa đảo.",
+                ephemeral=True,
+            )
+
+        seller_check_command.__annotations__["seller"] = discord.Member
+        tree.command(name="seller_check", description="Gửi yêu cầu Admin/Mod kiểm tra một người bán")(
+            seller_check_command
+        )
+
         # Anything an Admin created from the dashboard beyond the fixed set
         # above (e.g. /gioithieu), scoped to Discord in its platform list.
         self._dynamic_command_names = self._register_dynamic_commands()
@@ -479,7 +605,7 @@ class DiscordRagBot:
                 reaction_count = len(reactor_ids)
                 common_message = self._common_message(message)
                 if emoji == "✅" and reaction_count >= self.settings.reputation_helpful_reaction_threshold:
-                    await asyncio.to_thread(self.store.award_helpful_reputation, common_message, reaction_count)
+                    await asyncio.to_thread(self.store.award_helpful_experience, common_message, reaction_count)
                 elif emoji == "❌" and reaction_count >= self.settings.reputation_block_link_reaction_threshold:
                     urls = extract_urls(common_message.text)
                     if urls:
@@ -491,7 +617,7 @@ class DiscordRagBot:
                         )
             except Exception:
                 logger.exception(
-                    "Discord reaction reputation processing failed for message %s",
+                    "Discord reaction EXP/link processing failed for message %s",
                     getattr(payload, "message_id", "unknown"),
                 )
 

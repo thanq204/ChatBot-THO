@@ -14,47 +14,52 @@ import sqlite3
 import threading
 import unicodedata
 import uuid
-import urllib.request
 from collections import OrderedDict
-import psycopg2
-import psycopg2.extras
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import psycopg2
+import psycopg2.extras
+
 from backend.config import Settings, get_settings
-from backend.services.database import json_value, postgres_connection, timestamp_value
-from backend.services.question_intent import is_reusable_faq_question
-from backend.services.link_safety import canonicalize_url, extract_urls, url_hash
 from backend.models.operations import (
     FAQ,
+    ActivityTimeline,
     CommandContent,
     CommandContentRequest,
     CommonMessage,
-    ActivityTimeline,
     CommunityHealth,
     FAQSuggestion,
     FAQTopic,
     FAQUpsertRequest,
+    FlaggedLink,
     Incident,
     KnowledgeDocument,
     KnowledgeDocumentRequest,
     KnowledgeImportRecord,
     KnowledgeImportResponse,
+    MemberExperience,
     MemberReport,
     MemberReputation,
     MessageDecision,
     OperationsSummary,
     Policy,
     PolicyUpsertRequest,
-    FlaggedLink,
     ReputationRule,
+    SellerAssessment,
+    SellerReview,
+    SellerTrustSummary,
     TimelineBucket,
+    TradeCase,
 )
+from backend.services.database import json_value, postgres_connection, timestamp_value
+from backend.services.link_safety import canonicalize_url, extract_urls, url_hash
+from backend.services.question_intent import is_reusable_faq_question
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _json(value: Any) -> str:
@@ -387,6 +392,38 @@ class OperationsStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_flagged_links_status
                     ON operations_flagged_links(status, last_seen_at DESC);
+                CREATE TABLE IF NOT EXISTS operations_trade_cases (
+                    trade_id TEXT PRIMARY KEY, platform TEXT NOT NULL, community_id TEXT NOT NULL,
+                    channel_id TEXT NOT NULL, buyer_id TEXT NOT NULL, buyer_name TEXT,
+                    seller_id TEXT NOT NULL, seller_name TEXT, item_summary TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'opened', buyer_confirmed INTEGER NOT NULL DEFAULT 0,
+                    seller_confirmed INTEGER NOT NULL DEFAULT 0, evidence_urls TEXT NOT NULL DEFAULT '[]',
+                    created_by TEXT NOT NULL, completed_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                    CHECK (buyer_id <> seller_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_trade_cases_seller
+                    ON operations_trade_cases(community_id, seller_id, updated_at DESC);
+                CREATE TABLE IF NOT EXISTS operations_seller_reviews (
+                    review_id TEXT PRIMARY KEY, trade_id TEXT NOT NULL UNIQUE, buyer_id TEXT NOT NULL,
+                    seller_id TEXT NOT NULL, overall_rating INTEGER NOT NULL,
+                    item_accuracy INTEGER NOT NULL, communication INTEGER NOT NULL,
+                    fulfillment INTEGER NOT NULL, would_trade_again INTEGER NOT NULL,
+                    comment TEXT NOT NULL DEFAULT '', verification_status TEXT NOT NULL DEFAULT 'verified_transaction',
+                    metadata TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL,
+                    FOREIGN KEY(trade_id) REFERENCES operations_trade_cases(trade_id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS idx_seller_reviews_seller
+                    ON operations_seller_reviews(seller_id, created_at DESC);
+                CREATE TABLE IF NOT EXISTS operations_seller_assessments (
+                    assessment_id TEXT PRIMARY KEY, platform TEXT NOT NULL, community_id TEXT NOT NULL,
+                    requester_id TEXT NOT NULL, seller_id TEXT NOT NULL, reason TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'open', ai_summary TEXT NOT NULL, model_used TEXT NOT NULL,
+                    evidence_json TEXT NOT NULL DEFAULT '{}', final_decision TEXT NOT NULL DEFAULT 'pending',
+                    admin_note TEXT NOT NULL DEFAULT '', reviewed_by TEXT, reviewed_at TEXT,
+                    created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_seller_assessments_queue
+                    ON operations_seller_assessments(status, created_at DESC);
                 CREATE TABLE IF NOT EXISTS operations_gate_runs (
                     run_id TEXT PRIMARY KEY, message_id TEXT NOT NULL, gate TEXT NOT NULL, passed INTEGER NOT NULL,
                     label TEXT NOT NULL, category TEXT NOT NULL, risk_score REAL NOT NULL, evidence_json TEXT NOT NULL,
@@ -693,7 +730,7 @@ class OperationsStore:
             return False
         member_id = self._upsert_member(message)
         event_id = "REP-" + hashlib.sha256(
-            f"{message.platform}\0{message.community_id}\0{message.author_id}\0{event_key}".encode("utf-8")
+            f"{message.platform}\0{message.community_id}\0{message.author_id}\0{event_key}".encode()
         ).hexdigest()[:32]
         now = _now()
         with self._connect() as db:
@@ -755,6 +792,10 @@ class OperationsStore:
             reaction_emoji="✅",
             metadata={"distinct_reactors": reaction_count},
         )
+
+    def award_helpful_experience(self, message: CommonMessage, reaction_count: int) -> bool:
+        """Backward-compatible ledger write whose product meaning is EXP, not trust."""
+        return self.award_helpful_reputation(message, reaction_count)
 
     def flag_links_from_reactions(
         self,
@@ -845,6 +886,10 @@ class OperationsStore:
             )
             for row in rows
         ]
+
+    def list_experience_rules(self) -> list[ReputationRule]:
+        """Return contribution missions only; moderation penalties are not EXP rules."""
+        return [rule for rule in self.list_reputation_rules() if rule.points > 0]
 
     def get_reputation_rule(self, rule_id: str) -> ReputationRule | None:
         return next((rule for rule in self.list_reputation_rules() if rule.rule_id == rule_id), None)
@@ -949,12 +994,535 @@ class OperationsStore:
         output.sort(key=lambda item: (item.reputation_score, item.last_seen_at), reverse=True)
         return output
 
+    def list_member_experience(self) -> list[MemberExperience]:
+        """Rank real Discord members by positive contribution events only."""
+        with self._connect() as db:
+            rows = db.execute(
+                """SELECT m.*,
+                COALESCE(SUM(CASE WHEN e.delta > 0 THEN e.delta ELSE 0 END), 0) AS exp_score,
+                COALESCE(SUM(CASE WHEN e.delta > 0 THEN 1 ELSE 0 END), 0) AS event_count,
+                MAX(CASE WHEN e.delta > 0 THEN e.created_at ELSE NULL END) AS last_event_at
+                FROM community_members m
+                LEFT JOIN member_reputation_events e ON e.member_id=m.member_id
+                    AND e.event_type NOT IN ('unapproved_penalty_reversed')
+                WHERE m.is_bot=FALSE AND m.platform='discord'
+                GROUP BY m.member_id, m.platform, m.community_id, m.platform_user_id, m.display_name,
+                         m.is_bot, m.reputation_score, m.first_seen_at, m.last_seen_at, m.metadata
+                ORDER BY m.last_seen_at DESC"""
+            ).fetchall()
+
+        grouped: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            user_id = str(row["platform_user_id"])
+            last_seen = timestamp_value(row["last_seen_at"])
+            last_event = timestamp_value(row["last_event_at"]) if row["last_event_at"] else None
+            current = grouped.get(user_id)
+            if current is None:
+                grouped[user_id] = {
+                    "member_id": str(row["member_id"]),
+                    "community_id": str(row["community_id"]),
+                    "display_name": row["display_name"],
+                    "exp_score": int(row["exp_score"] or 0),
+                    "event_count": int(row["event_count"] or 0),
+                    "last_event_at": last_event,
+                    "last_seen_at": last_seen,
+                }
+                continue
+            current["exp_score"] += int(row["exp_score"] or 0)
+            current["event_count"] += int(row["event_count"] or 0)
+            if last_seen > current["last_seen_at"]:
+                current["last_seen_at"] = last_seen
+                current["community_id"] = str(row["community_id"])
+                if row["display_name"]:
+                    current["display_name"] = row["display_name"]
+            if last_event and (current["last_event_at"] is None or last_event > current["last_event_at"]):
+                current["last_event_at"] = last_event
+
+        output: list[MemberExperience] = []
+        for user_id, member in grouped.items():
+            exp_score = member["exp_score"]
+            level = "veteran" if exp_score >= 100 else "contributor" if exp_score >= 30 else "active" if exp_score >= 5 else "new"
+            output.append(
+                MemberExperience(
+                    member_id=member["member_id"],
+                    platform="discord",
+                    community_id=member["community_id"],
+                    platform_user_id=user_id,
+                    display_name=member["display_name"],
+                    exp_score=exp_score,
+                    event_count=member["event_count"],
+                    last_event_at=member["last_event_at"],
+                    last_seen_at=member["last_seen_at"],
+                    level=level,
+                )
+            )
+        output.sort(key=lambda item: (item.exp_score, item.last_seen_at), reverse=True)
+        return output
+
     def list_flagged_links(self) -> list[FlaggedLink]:
         with self._connect() as db:
             rows = db.execute(
                 "SELECT * FROM operations_flagged_links ORDER BY status ASC, last_seen_at DESC"
             ).fetchall()
         return [self._flagged_link_from_row(row) for row in rows]
+
+    def create_trade_case(
+        self,
+        *,
+        platform: str,
+        community_id: str,
+        channel_id: str,
+        buyer_id: str,
+        buyer_name: str | None,
+        seller_id: str,
+        seller_name: str | None,
+        item_summary: str,
+        created_by: str,
+        evidence_urls: list[str] | None = None,
+    ) -> TradeCase:
+        if platform != "discord":
+            raise ValueError("Giao dịch xác thực hiện chỉ hỗ trợ Discord.")
+        if buyer_id == seller_id:
+            raise ValueError("Người mua và người bán phải là hai tài khoản khác nhau.")
+        trade_id = f"TRD-{uuid.uuid4().hex[:12].upper()}"
+        now = _now()
+        with self._connect() as db:
+            db.execute(
+                """INSERT INTO operations_trade_cases
+                (trade_id, platform, community_id, channel_id, buyer_id, buyer_name,
+                 seller_id, seller_name, item_summary, status, buyer_confirmed, seller_confirmed,
+                 evidence_urls, created_by, completed_at, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'opened', FALSE, FALSE, ?, ?, NULL, ?, ?)""",
+                (
+                    trade_id,
+                    platform,
+                    community_id,
+                    channel_id,
+                    buyer_id,
+                    buyer_name,
+                    seller_id,
+                    seller_name,
+                    item_summary.strip(),
+                    _json(evidence_urls or []),
+                    created_by,
+                    now,
+                    now,
+                ),
+            )
+        return self.get_trade_case(trade_id)  # type: ignore[return-value]
+
+    def get_trade_case(self, trade_id: str) -> TradeCase | None:
+        with self._connect(readonly=True) as db:
+            row = db.execute(
+                "SELECT * FROM operations_trade_cases WHERE trade_id=?",
+                (trade_id,),
+            ).fetchone()
+        return self._trade_case_from_row(row) if row else None
+
+    def confirm_trade_case(self, trade_id: str, participant_id: str) -> TradeCase | None:
+        trade = self.get_trade_case(trade_id)
+        if not trade:
+            return None
+        if trade.status in {"cancelled", "disputed"}:
+            raise ValueError("Giao dịch đã đóng hoặc đang tranh chấp.")
+        if participant_id not in {trade.buyer_id, trade.seller_id}:
+            raise PermissionError("Chỉ người mua hoặc người bán của giao dịch mới được xác nhận.")
+
+        buyer_confirmed = trade.buyer_confirmed or participant_id == trade.buyer_id
+        seller_confirmed = trade.seller_confirmed or participant_id == trade.seller_id
+        completed = buyer_confirmed and seller_confirmed
+        status = "completed" if completed else "partially_confirmed"
+        now = _now()
+        with self._connect() as db:
+            db.execute(
+                """UPDATE operations_trade_cases
+                SET buyer_confirmed=?, seller_confirmed=?, status=?,
+                    completed_at=CASE WHEN ? THEN COALESCE(completed_at, ?) ELSE completed_at END,
+                    updated_at=? WHERE trade_id=?""",
+                (buyer_confirmed, seller_confirmed, status, completed, now, now, trade_id),
+            )
+        return self.get_trade_case(trade_id)
+
+    def set_trade_status(self, trade_id: str, status: str, actor: str) -> TradeCase | None:
+        if status not in {"cancelled", "disputed"}:
+            raise ValueError("Chỉ được hủy giao dịch hoặc chuyển sang tranh chấp.")
+        if not self.get_trade_case(trade_id):
+            return None
+        with self._connect() as db:
+            db.execute(
+                "UPDATE operations_trade_cases SET status=?, updated_at=? WHERE trade_id=?",
+                (status, _now(), trade_id),
+            )
+        self.add_audit(None, None, "trade_status_changed", actor, {"trade_id": trade_id, "status": status})
+        return self.get_trade_case(trade_id)
+
+    def list_trade_cases(self, status: str | None = None) -> list[TradeCase]:
+        with self._connect(readonly=True) as db:
+            rows = db.execute(
+                """SELECT * FROM operations_trade_cases
+                WHERE (? IS NULL OR status=?) ORDER BY updated_at DESC""",
+                (status, status),
+            ).fetchall()
+        return [self._trade_case_from_row(row) for row in rows]
+
+    @staticmethod
+    def _trade_case_from_row(row: Any) -> TradeCase:
+        return TradeCase(
+            trade_id=str(row["trade_id"]),
+            platform=row["platform"],
+            community_id=str(row["community_id"]),
+            channel_id=str(row["channel_id"]),
+            buyer_id=str(row["buyer_id"]),
+            buyer_name=row["buyer_name"],
+            seller_id=str(row["seller_id"]),
+            seller_name=row["seller_name"],
+            item_summary=str(row["item_summary"]),
+            status=row["status"],
+            buyer_confirmed=bool(row["buyer_confirmed"]),
+            seller_confirmed=bool(row["seller_confirmed"]),
+            evidence_urls=json_value(row["evidence_urls"], []),
+            created_by=str(row["created_by"]),
+            completed_at=timestamp_value(row["completed_at"]) if row["completed_at"] else None,
+            created_at=timestamp_value(row["created_at"]),
+            updated_at=timestamp_value(row["updated_at"]),
+        )
+
+    def add_seller_review(
+        self,
+        trade_id: str,
+        *,
+        buyer_id: str,
+        overall_rating: int,
+        item_accuracy: int,
+        communication: int,
+        fulfillment: int,
+        would_trade_again: bool,
+        comment: str,
+    ) -> SellerReview:
+        trade = self.get_trade_case(trade_id)
+        if not trade:
+            raise LookupError("Không tìm thấy giao dịch.")
+        if trade.status != "completed" or not (trade.buyer_confirmed and trade.seller_confirmed):
+            raise ValueError("Chỉ giao dịch được cả hai bên xác nhận mới được đánh giá.")
+        if buyer_id != trade.buyer_id:
+            raise PermissionError("Chỉ người mua của giao dịch mới được đánh giá người bán.")
+        review_id = f"SRV-{uuid.uuid4().hex[:12].upper()}"
+        now = _now()
+        try:
+            with self._connect() as db:
+                db.execute(
+                    """INSERT INTO operations_seller_reviews
+                    (review_id, trade_id, buyer_id, seller_id, overall_rating, item_accuracy,
+                     communication, fulfillment, would_trade_again, comment,
+                     verification_status, metadata, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'verified_transaction', ?, ?)""",
+                    (
+                        review_id,
+                        trade_id,
+                        buyer_id,
+                        trade.seller_id,
+                        overall_rating,
+                        item_accuracy,
+                        communication,
+                        fulfillment,
+                        would_trade_again,
+                        comment.strip(),
+                        _json({"verification": "buyer_and_seller_confirmed"}),
+                        now,
+                    ),
+                )
+        except (sqlite3.IntegrityError, psycopg2.IntegrityError) as exc:
+            raise ValueError("Mỗi giao dịch chỉ được gửi một đánh giá.") from exc
+        return self.get_seller_review(review_id)  # type: ignore[return-value]
+
+    def get_seller_review(self, review_id: str) -> SellerReview | None:
+        with self._connect(readonly=True) as db:
+            row = db.execute(
+                "SELECT * FROM operations_seller_reviews WHERE review_id=?",
+                (review_id,),
+            ).fetchone()
+        return self._seller_review_from_row(row) if row else None
+
+    def list_seller_reviews(self, seller_id: str | None = None) -> list[SellerReview]:
+        with self._connect(readonly=True) as db:
+            rows = db.execute(
+                """SELECT * FROM operations_seller_reviews
+                WHERE (? IS NULL OR seller_id=?) ORDER BY created_at DESC""",
+                (seller_id, seller_id),
+            ).fetchall()
+        return [self._seller_review_from_row(row) for row in rows]
+
+    @staticmethod
+    def _seller_review_from_row(row: Any) -> SellerReview:
+        return SellerReview(
+            review_id=str(row["review_id"]),
+            trade_id=str(row["trade_id"]),
+            buyer_id=str(row["buyer_id"]),
+            seller_id=str(row["seller_id"]),
+            overall_rating=int(row["overall_rating"]),
+            item_accuracy=int(row["item_accuracy"]),
+            communication=int(row["communication"]),
+            fulfillment=int(row["fulfillment"]),
+            would_trade_again=bool(row["would_trade_again"]),
+            comment=str(row["comment"] or ""),
+            verification_status=row["verification_status"],
+            created_at=timestamp_value(row["created_at"]),
+        )
+
+    def list_seller_summaries(self) -> list[SellerTrustSummary]:
+        trades = self.list_trade_cases()
+        reviews = self.list_seller_reviews()
+        with self._connect(readonly=True) as db:
+            reviewed_incidents = db.execute(
+                """SELECT DISTINCT m.community_id, m.author_id, m.incident_id, a.payload_json
+                FROM operations_messages m
+                JOIN operations_audit a ON a.incident_id=m.incident_id
+                WHERE m.category='spam' AND a.event_type='incident_reputation_decision'"""
+            ).fetchall()
+        keys = {(trade.community_id, trade.seller_id) for trade in trades}
+        output: list[SellerTrustSummary] = []
+        for community_id, seller_id in keys:
+            seller_trades = [trade for trade in trades if trade.community_id == community_id and trade.seller_id == seller_id]
+            completed = [trade for trade in seller_trades if trade.status == "completed"]
+            seller_reviews = [
+                review for review in reviews
+                if review.seller_id == seller_id
+                and review.verification_status == "verified_transaction"
+                and any(trade.trade_id == review.trade_id for trade in seller_trades)
+            ]
+            unique_buyers = len({review.buyer_id for review in seller_reviews})
+            open_disputes = sum(trade.status == "disputed" for trade in seller_trades)
+            confirmed_spam_incidents = len(
+                {
+                    str(row["incident_id"])
+                    for row in reviewed_incidents
+                    if str(row["community_id"]) == community_id
+                    and str(row["author_id"]) == seller_id
+                    and json_value(row["payload_json"], {}).get("outcome") == "confirmed"
+                }
+            )
+            anomaly_flags: list[str] = []
+            if len(seller_reviews) >= 3 and unique_buyers / len(seller_reviews) < 0.5:
+                anomaly_flags.append("buyer_concentration")
+            review_times = sorted(review.created_at for review in seller_reviews)
+            burst_size = self.settings.seller_review_burst_threshold
+            if any(
+                review_times[index] - review_times[index - burst_size + 1]
+                <= timedelta(hours=self.settings.seller_review_burst_window_hours)
+                for index in range(burst_size - 1, len(review_times))
+            ):
+                anomaly_flags.append(
+                    f"review_burst_{self.settings.seller_review_burst_window_hours}h"
+                )
+            reviewer_ids = {review.buyer_id for review in seller_reviews}
+            reciprocal_buyers = {
+                trade.seller_id
+                for trade in trades
+                if trade.community_id == community_id
+                and trade.buyer_id == seller_id
+                and trade.seller_id in reviewer_ids
+            }
+            if len(reciprocal_buyers) >= 2:
+                anomaly_flags.append("reciprocal_trade_pattern")
+            enough_data = (
+                len(completed) >= self.settings.seller_min_verified_transactions
+                and unique_buyers >= self.settings.seller_min_unique_buyers
+            )
+            data_status = (
+                "admin_review_required"
+                if open_disputes or confirmed_spam_incidents or anomaly_flags
+                else "transaction_history_available"
+                if enough_data
+                else "insufficient_data"
+            )
+            notes = [
+                f"{len(completed)} giao dịch được hai bên xác nhận.",
+                f"{len(seller_reviews)} đánh giá từ {unique_buyers} người mua khác nhau.",
+            ]
+            if open_disputes:
+                notes.append(f"{open_disputes} giao dịch đang tranh chấp, cần Admin/Mod xem bằng chứng.")
+            if confirmed_spam_incidents:
+                notes.append(
+                    f"{confirmed_spam_incidents} incident spam của tài khoản đã được Admin/Mod xác nhận."
+                )
+            if anomaly_flags:
+                notes.append("Tín hiệu cần kiểm tra: " + ", ".join(anomaly_flags) + ".")
+            elif not enough_data:
+                notes.append("Chưa đủ mẫu để suy luận về độ tin cậy của người bán.")
+            latest = max((trade.updated_at for trade in seller_trades), default=None)
+            seller_name = next((trade.seller_name for trade in seller_trades if trade.seller_name), None)
+            output.append(
+                SellerTrustSummary(
+                    community_id=community_id,
+                    seller_id=seller_id,
+                    seller_name=seller_name,
+                    completed_trades=len(completed),
+                    verified_reviews=len(seller_reviews),
+                    unique_buyers=unique_buyers,
+                    average_rating=self._average(review.overall_rating for review in seller_reviews),
+                    item_accuracy=self._average(review.item_accuracy for review in seller_reviews),
+                    communication=self._average(review.communication for review in seller_reviews),
+                    fulfillment=self._average(review.fulfillment for review in seller_reviews),
+                    would_trade_again_rate=self._average(
+                        100.0 if review.would_trade_again else 0.0 for review in seller_reviews
+                    ),
+                    open_disputes=open_disputes,
+                    confirmed_spam_incidents=confirmed_spam_incidents,
+                    anomaly_flags=anomaly_flags,
+                    data_status=data_status,
+                    evidence_notes=notes,
+                    updated_at=latest,
+                )
+            )
+        output.sort(key=lambda item: (item.verified_reviews, item.completed_trades), reverse=True)
+        return output
+
+    @staticmethod
+    def _average(values: Any) -> float | None:
+        items = list(values)
+        return round(sum(items) / len(items), 2) if items else None
+
+    def create_seller_assessment(
+        self,
+        *,
+        platform: str,
+        community_id: str,
+        requester_id: str,
+        seller_id: str,
+        reason: str,
+    ) -> SellerAssessment:
+        summary = next(
+            (
+                item for item in self.list_seller_summaries()
+                if item.community_id == community_id and item.seller_id == seller_id
+            ),
+            SellerTrustSummary(
+                community_id=community_id,
+                seller_id=seller_id,
+                data_status="insufficient_data",
+                evidence_notes=["Chưa có giao dịch được xác nhận trong hệ thống."],
+            ),
+        )
+        evidence = summary.model_dump(mode="json")
+        ai_summary, model_used = self._seller_advisory(evidence)
+        assessment_id = f"SAS-{uuid.uuid4().hex[:12].upper()}"
+        now = _now()
+        with self._connect() as db:
+            db.execute(
+                """INSERT INTO operations_seller_assessments
+                (assessment_id, platform, community_id, requester_id, seller_id, reason,
+                 status, ai_summary, model_used, evidence_json, final_decision, admin_note,
+                 reviewed_by, reviewed_at, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, 'pending', '', NULL, NULL, ?, ?)""",
+                (
+                    assessment_id,
+                    platform,
+                    community_id,
+                    requester_id,
+                    seller_id,
+                    reason.strip(),
+                    ai_summary,
+                    model_used,
+                    _json(evidence),
+                    now,
+                    now,
+                ),
+            )
+        return self.get_seller_assessment(assessment_id)  # type: ignore[return-value]
+
+    def _seller_advisory(self, evidence: dict[str, Any]) -> tuple[str, str]:
+        fallback = (
+            "Hệ thống chỉ tổng hợp dữ liệu giao dịch đã xác thực; đây không phải kết luận người bán an toàn. "
+            + " ".join(str(item) for item in evidence.get("evidence_notes", []))
+            + " Admin/Mod cần xem bằng chứng và bối cảnh trước khi phản hồi thành viên."
+        )
+        if not self.settings.openai_api_key:
+            return fallback, "evidence-summary-v1"
+        try:
+            model_evidence = {
+                key: value
+                for key, value in evidence.items()
+                if key not in {"seller_id", "seller_name", "community_id", "platform"}
+            }
+            response = self._openai().chat.completions.create(
+                model=self.settings.seller_assessment_model,
+                temperature=0.1,
+                max_tokens=220,
+                timeout=8,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "Bạn hỗ trợ Admin/Mod xem hồ sơ giao dịch. Chỉ mô tả dữ kiện được cung cấp, "
+                            "nêu rõ dữ liệu thiếu và tranh chấp. Không kết luận người bán an toàn, lừa đảo, "
+                            "có tội hoặc đáng tin. Không đưa lời khuyên pháp lý hay tài chính. Viết tối đa 4 câu tiếng Việt."
+                        ),
+                    },
+                    {"role": "user", "content": _json(model_evidence)},
+                ],
+            )
+            content = (response.choices[0].message.content or "").strip()
+            return (content or fallback), self.settings.seller_assessment_model
+        except Exception:
+            logger.exception("Seller advisory LLM failed; using evidence-only summary.")
+            return fallback, "evidence-summary-v1"
+
+    def get_seller_assessment(self, assessment_id: str) -> SellerAssessment | None:
+        with self._connect(readonly=True) as db:
+            row = db.execute(
+                "SELECT * FROM operations_seller_assessments WHERE assessment_id=?",
+                (assessment_id,),
+            ).fetchone()
+        return self._seller_assessment_from_row(row) if row else None
+
+    def list_seller_assessments(self, status: str | None = None) -> list[SellerAssessment]:
+        with self._connect(readonly=True) as db:
+            rows = db.execute(
+                """SELECT * FROM operations_seller_assessments
+                WHERE (? IS NULL OR status=?) ORDER BY created_at DESC""",
+                (status, status),
+            ).fetchall()
+        return [self._seller_assessment_from_row(row) for row in rows]
+
+    def decide_seller_assessment(
+        self,
+        assessment_id: str,
+        decision: str,
+        admin_note: str,
+        reviewed_by: str,
+    ) -> SellerAssessment | None:
+        if not self.get_seller_assessment(assessment_id):
+            return None
+        now = _now()
+        with self._connect() as db:
+            db.execute(
+                """UPDATE operations_seller_assessments
+                SET status='resolved', final_decision=?, admin_note=?, reviewed_by=?,
+                    reviewed_at=?, updated_at=? WHERE assessment_id=?""",
+                (decision, admin_note.strip(), reviewed_by, now, now, assessment_id),
+            )
+        return self.get_seller_assessment(assessment_id)
+
+    @staticmethod
+    def _seller_assessment_from_row(row: Any) -> SellerAssessment:
+        return SellerAssessment(
+            assessment_id=str(row["assessment_id"]),
+            platform=row["platform"],
+            community_id=str(row["community_id"]),
+            requester_id=str(row["requester_id"]),
+            seller_id=str(row["seller_id"]),
+            reason=str(row["reason"]),
+            status=row["status"],
+            ai_summary=str(row["ai_summary"]),
+            model_used=str(row["model_used"]),
+            evidence=json_value(row["evidence_json"], {}),
+            final_decision=row["final_decision"],
+            admin_note=str(row["admin_note"] or ""),
+            reviewed_by=row["reviewed_by"],
+            reviewed_at=timestamp_value(row["reviewed_at"]) if row["reviewed_at"] else None,
+            created_at=timestamp_value(row["created_at"]),
+            updated_at=timestamp_value(row["updated_at"]),
+        )
 
     @staticmethod
     def _flagged_link_from_row(row: Any) -> FlaggedLink:
@@ -1436,53 +2004,17 @@ class OperationsStore:
         affected_members = 0
         points_applied = 0
         if outcome == "confirmed":
-            selected: dict[str, tuple[int, dict[str, Any]]] = {}
-            for row in self.list_incident_messages(incident_id):
-                raw = json_value(row.get("raw_json"), {})
-                if bool(raw.get("author_is_bot", False)) or row.get("decision") == "allow":
-                    continue
-                delta = self._reviewed_penalty(
-                    str(row.get("category") or "other"),
-                    str(row.get("severity") or incident.severity),
-                )
-                if delta >= 0:
-                    continue
-                author_id = str(row["author_id"])
-                current = selected.get(author_id)
-                if current is None or delta < current[0]:
-                    selected[author_id] = (delta, row)
-
-            for author_id, (delta, row) in selected.items():
-                raw = json_value(row.get("raw_json"), {})
-                message = CommonMessage(
-                    message_id=str(row["message_id"]),
-                    platform=row["platform"],
-                    community_id=str(row["community_id"]),
-                    channel_id=str(row["channel_id"]),
-                    thread_key=row.get("thread_key"),
-                    parent_message_id=row.get("parent_message_id"),
-                    author_id=author_id,
-                    text=str(row["text"]),
-                    timestamp=timestamp_value(row["timestamp"]),
-                    source_url=row.get("source_url"),
-                    raw=raw,
-                )
-                applied = self.add_reputation_event(
-                    message,
-                    delta=delta,
-                    event_type="admin_confirmed_penalty",
-                    event_key=f"confirmed-incident:{incident_id}:{author_id}",
-                    metadata={
-                        "incident_id": incident_id,
-                        "category": row.get("category"),
-                        "severity": row.get("severity"),
-                        "reviewed_by": actor,
-                        "review_note": note,
-                    },
-                )
-                if applied:
-                    affected_members += 1
-                    points_applied += delta
+            # A moderation decision belongs to the audit trail, not to EXP.
+            # Count real affected users for the review summary without changing
+            # their community participation score.
+            affected_members = len(
+                {
+                    str(row["author_id"])
+                    for row in self.list_incident_messages(incident_id)
+                    if not bool(json_value(row.get("raw_json"), {}).get("author_is_bot", False))
+                    and row.get("decision") != "allow"
+                }
+            )
 
         with self._connect() as db:
             db.execute(
@@ -1644,7 +2176,7 @@ class OperationsStore:
             tags=raw_tags if isinstance(raw_tags, list) else [],
             dataset=values.get("dataset") or "general",
             active=bool(values.get("active", True)),
-            updated_at=values.get("updated_at") or datetime.now(timezone.utc),
+            updated_at=values.get("updated_at") or datetime.now(UTC),
         )
 
     def list_knowledge(self, dataset: str | None = None) -> list[KnowledgeDocument]:
@@ -1690,10 +2222,9 @@ class OperationsStore:
         import_id: str | None = None,
         source_file: str | None = None,
     ) -> KnowledgeDocument:
-        import psycopg2
-        
+
         now = _now()
-        
+
         # 1. Chunking
         chunks = []
         text = request.title + "\n\n" + request.body
@@ -1712,7 +2243,7 @@ class OperationsStore:
             chunks.append(current_chunk.strip())
         if not chunks:
             chunks = [text[:1500]]
-            
+
         # 2. Embeddings are explicit. Documents and chunks are still stored
         # when the provider is disabled so lexical retrieval remains usable.
         embeddings: list[list[float] | None] = [None] * len(chunks)
@@ -1725,7 +2256,7 @@ class OperationsStore:
                 request["dimensions"] = self.settings.openai_embedding_dimensions
             response = self._openai().embeddings.create(**request)
             embeddings = [list(item.embedding) for item in response.data]
-        
+
         # 3. Upsert into PostgreSQL
         try:
             conn = self._connect_pg()
@@ -1735,8 +2266,8 @@ class OperationsStore:
                     (document_id, title, body, tags, dataset, active, import_id, source_file,
                      content_hash, normalization_version, pipeline_version, updated_at, created_at)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 1, 'supabase-v1', %s, %s)
-                    ON CONFLICT(document_id) DO UPDATE SET 
-                        title=EXCLUDED.title, body=EXCLUDED.body, tags=EXCLUDED.tags, 
+                    ON CONFLICT(document_id) DO UPDATE SET
+                        title=EXCLUDED.title, body=EXCLUDED.body, tags=EXCLUDED.tags,
                         dataset=EXCLUDED.dataset, active=EXCLUDED.active,
                         import_id=COALESCE(EXCLUDED.import_id, knowledge_documents.import_id),
                         source_file=COALESCE(EXCLUDED.source_file, knowledge_documents.source_file),
@@ -1744,16 +2275,16 @@ class OperationsStore:
                         updated_at=EXCLUDED.updated_at
                 """, (document_id, request.title, request.body, json.dumps(request.tags), request.dataset,
                         bool(request.active), import_id, source_file, self._embedding_hash(request.body), now, now))
-                
+
                 cur.execute("DELETE FROM knowledge_sections WHERE document_id=%s", (document_id,))
-                
+
                 for i, (chunk_text, embedding) in enumerate(zip(chunks, embeddings)):
                     chunk_id = f"{document_id}-{i}"
                     cur.execute("""
                         INSERT INTO knowledge_sections (chunk_id, document_id, chunk_index, content, created_at)
                         VALUES (%s, %s, %s, %s, %s)
                     """, (chunk_id, document_id, i, chunk_text, now))
-                    
+
                     if embedding is not None:
                         vector_str = "[" + ",".join(str(f) for f in embedding) + "]"
                         cur.execute("""
@@ -1773,7 +2304,7 @@ class OperationsStore:
         except Exception:
             logger.error("Failed to upsert knowledge to PostgreSQL", exc_info=True)
             raise
-            
+
         return next(item for item in self.list_knowledge() if item.document_id == document_id)
 
     def delete_knowledge(self, document_id: str) -> bool:
@@ -2446,7 +2977,7 @@ class OperationsStore:
             with self._connect() as db:
                 query = """
                     WITH ranked_chunks AS (
-                        SELECT 
+                        SELECT
                             s.document_id,
                             1 - (e.embedding <=> ?::vector) AS similarity_score
                         FROM knowledge_section_embeddings e
@@ -2462,7 +2993,7 @@ class OperationsStore:
                         ORDER BY max_score DESC
                         LIMIT ?
                     )
-                    SELECT 
+                    SELECT
                         d.document_id, d.title, d.body, d.tags, d.dataset, d.active, d.updated_at,
                         b.max_score AS similarity_score
                     FROM best_per_doc b
@@ -2480,7 +3011,7 @@ class OperationsStore:
                         limit,
                     ),
                 ).fetchall()
-            
+
             scored = []
             for row in rows:
                 score = row["similarity_score"]
@@ -2496,13 +3027,13 @@ class OperationsStore:
                     updated_at=row["updated_at"]
                 )
                 scored.append((score, doc))
-                
+
             if not scored:
                 return []
-            
+
             relevance_floor = max(self.settings.knowledge_embedding_min_score, scored[0][0] - 0.08)
             return [(score, document) for score, document in scored if score >= relevance_floor]
-            
+
         except Exception:
             logger.warning("PostgreSQL pgvector retrieval unavailable; using deterministic fallback.", exc_info=True)
             return None
