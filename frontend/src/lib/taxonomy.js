@@ -53,11 +53,14 @@ export const STATUS_LABELS = {
   snoozed: "Tạm hoãn",
 };
 
+// Deliberately a different hue family from SEVERITY_COLORS (red/amber/green
+// heat scale): status is a workflow stage, not an urgency level, and sharing
+// hues made a critical+open case render as three near-identical red badges.
 export const STATUS_COLORS = {
-  open: "var(--sev-high)",
-  monitoring: "var(--accent-solid)",
-  resolved: "var(--sev-low)",
-  snoozed: "var(--text-muted)",
+  open: "var(--status-open)",
+  monitoring: "var(--status-monitoring)",
+  resolved: "var(--status-resolved)",
+  snoozed: "var(--status-snoozed)",
 };
 
 /** event_type values written by OperationsStore.add_audit and the admin routes. */

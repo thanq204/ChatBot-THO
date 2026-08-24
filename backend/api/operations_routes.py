@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import base64
 import binascii
-import json
 import re
 import uuid
 from datetime import UTC, datetime
@@ -57,11 +56,12 @@ from backend.services.discord.bot import notify_commands_changed as notify_disco
 from backend.services.knowledge_importer import KnowledgeImporter, KnowledgeImportError
 from backend.services.operations_demo import seed_operations_demo
 from backend.services.operations_pipeline import OperationsPipeline
+from backend.services.database import json_value
 from backend.services.operations_store import OperationsStore
 from backend.services.platform_connectors import ConnectorError, PlatformConnectors
 from backend.services.platform_moderation import PlatformModerationError, PlatformModerationService
 from backend.models.auth import UserPublic
-from backend.services.auth_service import require_roles
+from backend.services.auth_service import current_user, require_roles
 
 router = APIRouter(tags=["community-operations"])
 _store: OperationsStore | None = None
@@ -153,8 +153,15 @@ def incident_detail(incident_id: str) -> dict[str, object]:
 
 
 @router.patch("/incidents/{incident_id}", response_model=Incident)
-def update_incident(incident_id: str, payload: IncidentUpdateRequest) -> Incident:
-    result = get_operations_store().update_incident(incident_id, payload.status, payload.assigned_to, payload.note)
+def update_incident(incident_id: str, payload: IncidentUpdateRequest, reviewer: UserPublic = Depends(current_user)) -> Incident:
+    # "resolved" is only reachable through the reputation-decision endpoint,
+    # so a resolved case always carries who reviewed it.
+    if payload.status == "resolved":
+        raise HTTPException(status_code=409, detail="Dùng nút Xác nhận vi phạm / Không vi phạm để đóng case, không đổi trạng thái trực tiếp.")
+    result = get_operations_store().update_incident(
+        incident_id, payload.status, payload.assigned_to, payload.note,
+        actor=reviewer.display_name or reviewer.email,
+    )
     if not result:
         raise HTTPException(status_code=404, detail="Incident not found.")
     return result
@@ -307,10 +314,15 @@ def execute_incident_action(incident_id: str, payload: AdminPlatformActionReques
     message = store.get_incident_message(incident_id, payload.message_id)
     if not message:
         raise HTTPException(status_code=404, detail="Message not found in this incident.")
-    raw = json.loads(message.get("raw_json") or "{}")
+    raw = json_value(message.get("raw_json"), {})
     target_message_id = message["message_id"]
     if incident.platform == "telegram":
         target_message_id = str((raw.get("message") or {}).get("message_id") or target_message_id.rsplit("-", 1)[-1])
+    elif incident.platform == "discord" and target_message_id.startswith("discord-"):
+        # Legacy rows ingested by the live bot before it stopped prefixing IDs
+        # (see discord/bot.py) still carry "discord-"; Discord's API rejects
+        # anything that isn't a bare snowflake.
+        target_message_id = target_message_id.removeprefix("discord-")
     try:
         result = PlatformModerationService().execute(
             platform=incident.platform,
