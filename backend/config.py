@@ -78,6 +78,11 @@ class Settings(BaseSettings):
     spam_repeat_message_threshold: int = Field(default=3, ge=2, le=20)
     reputation_helpful_reaction_threshold: int = Field(default=3, ge=1, le=50)
     reputation_block_link_reaction_threshold: int = Field(default=3, ge=1, le=50)
+    seller_assessment_model: str = "gpt-4o-mini"
+    seller_min_verified_transactions: int = Field(default=3, ge=1, le=100)
+    seller_min_unique_buyers: int = Field(default=3, ge=1, le=100)
+    seller_review_burst_threshold: int = Field(default=5, ge=3, le=100)
+    seller_review_burst_window_hours: int = Field(default=24, ge=1, le=168)
 
     # FAQ analytics: every safe tagged question is embedded and clustered.
     faq_semantic_clustering_enabled: bool = True
@@ -117,11 +122,11 @@ class Settings(BaseSettings):
     faq_pg_db: str = "faq_rag"
     faq_pg_user: str = "faq_user"
     faq_pg_password: str = "faq_pass_dev"
-    # Opened eagerly at startup. A dashboard page load fans out into several
-    # concurrent queries, and against a remote database creating a connection
-    # on demand costs ~500ms, so the pool starts wide enough to absorb one.
-    postgres_pool_min_size: int = Field(default=5, ge=1, le=10)
-    postgres_pool_max_size: int = Field(default=8, ge=1, le=32)
+    # Supabase session-mode poolers often cap connections per project. Keep
+    # startup to one connection and grow only when concurrent requests need it;
+    # restart the backend after changing any database or Discord .env setting.
+    postgres_pool_min_size: int = Field(default=1, ge=1, le=10)
+    postgres_pool_max_size: int = Field(default=5, ge=1, le=32)
 
     # Vector Store
     chroma_persist_dir: str = "./data/chroma"
@@ -129,6 +134,8 @@ class Settings(BaseSettings):
     # Community Operations Copilot connectors
     discord_bot_token: str = ""
     discord_default_channel_id: str = ""
+    # Seller feedback is accepted only for trades opened in this dedicated channel.
+    discord_trade_channel_id: str = ""
     discord_listener_enabled: bool = False
     discord_reply_max_chars: int = Field(default=1800, ge=500, le=2000)
     discord_rag_llm_enabled: bool = True

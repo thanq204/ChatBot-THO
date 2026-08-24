@@ -10,6 +10,7 @@ import {
   Robot,
   ChatCircleDots,
   Trophy,
+  Storefront,
 } from "@phosphor-icons/react";
 import { useAuth } from "../auth/AuthProvider.jsx";
 
@@ -20,7 +21,8 @@ const NAV_ITEMS = [
   { to: "/khu-thu-nghiem-ai", label: "Khu thử nghiệm AI", icon: Flask },
   { to: "/quan-ly-mod", label: "Quản lý Mod", icon: ShieldStar },
   { to: "/quan-ly-faq", label: "Quản lý FAQ", icon: ChatCircleDots },
-  { to: "/bang-uy-tin", label: "Bảng uy tín", icon: Trophy },
+  { to: "/bang-exp", label: "Bảng EXP", icon: Trophy },
+  { to: "/nguoi-ban", label: "Người bán", icon: Storefront },
   { to: "/thong-bao", label: "Thông báo", icon: Megaphone },
   { to: "/quan-ly-noi-dung", label: "Quản lý nội dung", icon: Books },
   { to: "/lenh-bot", label: "Nội dung lệnh bot", icon: Robot },
@@ -36,7 +38,7 @@ export default function Sidebar({ open, onNavigate }) {
       </div>
 
       <nav className="sidebar__nav" aria-label="Điều hướng chính">
-        {NAV_ITEMS.filter((item) => !["/nhat-ky", "/quan-ly-mod", "/quan-ly-faq", "/bang-uy-tin"].includes(item.to) || user?.role === "admin").map(({ to, label, icon: Icon, end }) => (
+        {NAV_ITEMS.filter((item) => !["/nhat-ky", "/quan-ly-mod", "/quan-ly-faq", "/bang-exp"].includes(item.to) || user?.role === "admin").map(({ to, label, icon: Icon, end }) => (
           <NavLink
             key={to}
             to={to}

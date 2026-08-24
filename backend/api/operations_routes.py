@@ -2,34 +2,35 @@ from __future__ import annotations
 
 import base64
 import binascii
-import json
 import re
 import uuid
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from backend.models.auth import UserPublic
 from backend.models.operations import (
+    CORE_BOT_COMMANDS,
     FAQ,
+    RESERVED_BOT_COMMANDS,
+    ActivityTimeline,
     AdminPlatformActionRequest,
     AdminPlatformActionResponse,
     AnalyzeMessageRequest,
     AnalyzeMessageResponse,
     AnnouncementRequest,
     AnnouncementResponse,
-    CORE_BOT_COMMANDS,
-    RESERVED_BOT_COMMANDS,
     CommandContent,
     CommandContentRequest,
     CommonMessage,
-    ActivityTimeline,
     CommunityHealth,
     DiscordChannelOption,
     FAQSuggestion,
-    FAQTopic,
     FAQSuggestionApproveRequest,
+    FAQTopic,
     FAQUpsertRequest,
     FAQWriteResponse,
+    FlaggedLink,
     Incident,
     IncidentReputationDecisionRequest,
     IncidentReputationDecisionResponse,
@@ -39,10 +40,10 @@ from backend.models.operations import (
     KnowledgeImportRecord,
     KnowledgeImportRequest,
     KnowledgeImportResponse,
+    MemberExperience,
     MemberReport,
     MemberReportUpdateRequest,
     MemberReputation,
-    ReputationRule,
     MessageIngestRequest,
     OperationsSummary,
     PlatformStatus,
@@ -50,19 +51,30 @@ from backend.models.operations import (
     PolicyUpsertRequest,
     RagRequest,
     RagResponse,
-    FlaggedLink,
+    ReputationRule,
+    SellerAssessment,
+    SellerAssessmentCreateRequest,
+    SellerAssessmentDecisionRequest,
+    SellerReview,
+    SellerReviewCreateRequest,
+    SellerTrustSummary,
+    TradeCase,
+    TradeCaseCreateRequest,
+    TradeConfirmRequest,
+    TradeStatusUpdateRequest,
 )
 from backend.services.admin_announcements import AdminAnnouncementSender
+from backend.services.auth_service import require_roles
 from backend.services.discord.bot import notify_commands_changed as notify_discord_commands_changed
 from backend.services.telegram.bot import notify_commands_changed as notify_telegram_commands_changed
 from backend.services.knowledge_importer import KnowledgeImporter, KnowledgeImportError
 from backend.services.operations_demo import seed_operations_demo
 from backend.services.operations_pipeline import OperationsPipeline
+from backend.services.database import json_value
 from backend.services.operations_store import OperationsStore
 from backend.services.platform_connectors import ConnectorError, PlatformConnectors
 from backend.services.platform_moderation import PlatformModerationError, PlatformModerationService
-from backend.models.auth import UserPublic
-from backend.services.auth_service import require_roles
+from backend.services.auth_service import current_user
 
 router = APIRouter(tags=["community-operations"])
 _store: OperationsStore | None = None
@@ -159,8 +171,15 @@ def incident_detail(incident_id: str) -> dict[str, object]:
 
 
 @router.patch("/incidents/{incident_id}", response_model=Incident)
-def update_incident(incident_id: str, payload: IncidentUpdateRequest) -> Incident:
-    result = get_operations_store().update_incident(incident_id, payload.status, payload.assigned_to, payload.note)
+def update_incident(incident_id: str, payload: IncidentUpdateRequest, reviewer: UserPublic = Depends(current_user)) -> Incident:
+    # "resolved" is only reachable through the reputation-decision endpoint,
+    # so a resolved case always carries who reviewed it.
+    if payload.status == "resolved":
+        raise HTTPException(status_code=409, detail="Dùng nút Xác nhận vi phạm / Không vi phạm để đóng case, không đổi trạng thái trực tiếp.")
+    result = get_operations_store().update_incident(
+        incident_id, payload.status, payload.assigned_to, payload.note,
+        actor=reviewer.display_name or reviewer.email,
+    )
     if not result:
         raise HTTPException(status_code=404, detail="Incident not found.")
     return result
@@ -317,14 +336,15 @@ def execute_incident_action(
     message = store.get_incident_message(incident_id, payload.message_id)
     if not message:
         raise HTTPException(status_code=404, detail="Message not found in this incident.")
-    raw_value = message.get("raw_json")
-    # SQLite stores JSON as text, while psycopg2 decodes the PostgreSQL JSONB
-    # column into a dict.  Accept both so platform actions can reach the
-    # provider API instead of failing with a 500 before execution.
-    raw = raw_value if isinstance(raw_value, dict) else json.loads(raw_value or "{}")
+    raw = json_value(message.get("raw_json"), {})
     target_message_id = message["message_id"]
     if incident.platform == "telegram":
         target_message_id = str((raw.get("message") or {}).get("message_id") or target_message_id.rsplit("-", 1)[-1])
+    elif incident.platform == "discord" and target_message_id.startswith("discord-"):
+        # Legacy rows ingested by the live bot before it stopped prefixing IDs
+        # (see discord/bot.py) still carry "discord-"; Discord's API rejects
+        # anything that isn't a bare snowflake.
+        target_message_id = target_message_id.removeprefix("discord-")
     try:
         moderation_service = PlatformModerationService()
         result = moderation_service.execute(
@@ -472,6 +492,146 @@ def reputation_rules(
     _: UserPublic = Depends(require_roles("admin", "mod")),
 ) -> list[ReputationRule]:
     return get_operations_store().list_reputation_rules()
+
+
+@router.get("/admin/experience", response_model=list[MemberExperience])
+def member_experience(
+    _: UserPublic = Depends(require_roles("admin", "mod")),
+) -> list[MemberExperience]:
+    return get_operations_store().list_member_experience()
+
+
+@router.get("/admin/experience-rules", response_model=list[ReputationRule])
+def experience_rules(
+    _: UserPublic = Depends(require_roles("admin", "mod")),
+) -> list[ReputationRule]:
+    return get_operations_store().list_experience_rules()
+
+
+@router.get("/admin/trades", response_model=list[TradeCase])
+def trade_cases(
+    trade_status: str | None = Query(default=None, alias="status"),
+    _: UserPublic = Depends(require_roles("admin", "mod")),
+) -> list[TradeCase]:
+    return get_operations_store().list_trade_cases(trade_status)
+
+
+@router.post("/admin/trades", response_model=TradeCase, status_code=status.HTTP_201_CREATED)
+def create_trade_case(
+    payload: TradeCaseCreateRequest,
+    reviewer: UserPublic = Depends(require_roles("admin", "mod")),
+) -> TradeCase:
+    try:
+        return get_operations_store().create_trade_case(
+            **payload.model_dump(),
+            created_by=reviewer.display_name or reviewer.email,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/admin/trades/{trade_id}/confirm", response_model=TradeCase)
+def confirm_trade_case(
+    trade_id: str,
+    payload: TradeConfirmRequest,
+    _: UserPublic = Depends(require_roles("admin", "mod")),
+) -> TradeCase:
+    try:
+        result = get_operations_store().confirm_trade_case(trade_id, payload.participant_id)
+    except (ValueError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not result:
+        raise HTTPException(status_code=404, detail="Không tìm thấy giao dịch.")
+    return result
+
+
+@router.patch("/admin/trades/{trade_id}/status", response_model=TradeCase)
+def update_trade_status(
+    trade_id: str,
+    payload: TradeStatusUpdateRequest,
+    reviewer: UserPublic = Depends(require_roles("admin", "mod")),
+) -> TradeCase:
+    try:
+        result = get_operations_store().set_trade_status(
+            trade_id,
+            payload.status,
+            reviewer.display_name or reviewer.email,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not result:
+        raise HTTPException(status_code=404, detail="Không tìm thấy giao dịch.")
+    return result
+
+
+@router.get("/admin/seller-reviews", response_model=list[SellerReview])
+def seller_reviews(
+    seller_id: str | None = None,
+    _: UserPublic = Depends(require_roles("admin", "mod")),
+) -> list[SellerReview]:
+    return get_operations_store().list_seller_reviews(seller_id)
+
+
+@router.post(
+    "/admin/trades/{trade_id}/reviews",
+    response_model=SellerReview,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_seller_review(
+    trade_id: str,
+    payload: SellerReviewCreateRequest,
+    _: UserPublic = Depends(require_roles("admin", "mod")),
+) -> SellerReview:
+    try:
+        return get_operations_store().add_seller_review(trade_id, **payload.model_dump())
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (ValueError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/admin/sellers", response_model=list[SellerTrustSummary])
+def seller_summaries(
+    _: UserPublic = Depends(require_roles("admin", "mod")),
+) -> list[SellerTrustSummary]:
+    return get_operations_store().list_seller_summaries()
+
+
+@router.get("/admin/seller-assessments", response_model=list[SellerAssessment])
+def seller_assessments(
+    assessment_status: str | None = Query(default=None, alias="status"),
+    _: UserPublic = Depends(require_roles("admin", "mod")),
+) -> list[SellerAssessment]:
+    return get_operations_store().list_seller_assessments(assessment_status)
+
+
+@router.post(
+    "/admin/seller-assessments",
+    response_model=SellerAssessment,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_seller_assessment(
+    payload: SellerAssessmentCreateRequest,
+    _: UserPublic = Depends(require_roles("admin", "mod")),
+) -> SellerAssessment:
+    return get_operations_store().create_seller_assessment(**payload.model_dump())
+
+
+@router.post("/admin/seller-assessments/{assessment_id}/decision", response_model=SellerAssessment)
+def decide_seller_assessment(
+    assessment_id: str,
+    payload: SellerAssessmentDecisionRequest,
+    reviewer: UserPublic = Depends(require_roles("admin", "mod")),
+) -> SellerAssessment:
+    result = get_operations_store().decide_seller_assessment(
+        assessment_id,
+        payload.decision,
+        payload.admin_note,
+        reviewer.display_name or reviewer.email,
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Không tìm thấy yêu cầu kiểm tra người bán.")
+    return result
 
 
 @router.get("/admin/flagged-links", response_model=list[FlaggedLink])

@@ -53,11 +53,14 @@ export const STATUS_LABELS = {
   snoozed: "Tạm hoãn",
 };
 
+// Deliberately a different hue family from SEVERITY_COLORS (red/amber/green
+// heat scale): status is a workflow stage, not an urgency level, and sharing
+// hues made a critical+open case render as three near-identical red badges.
 export const STATUS_COLORS = {
-  open: "var(--sev-high)",
-  monitoring: "var(--accent-solid)",
-  resolved: "var(--sev-low)",
-  snoozed: "var(--text-muted)",
+  open: "var(--status-open)",
+  monitoring: "var(--status-monitoring)",
+  resolved: "var(--status-resolved)",
+  snoozed: "var(--status-snoozed)",
 };
 
 /** event_type values written by OperationsStore.add_audit and the admin routes. */
@@ -74,7 +77,7 @@ export const AUDIT_EVENT_LABELS = {
   moderation_memory_updated: "Lưu case làm mẫu tham chiếu",
   duplicate_admin_notification_suppressed: "Bỏ qua thông báo trùng lặp",
   recent_duplicate_notification_suppressed: "Bỏ qua thông báo trùng lặp gần đây",
-  incident_reputation_decision: "Admin/Mod duyệt vi phạm và điểm uy tín",
+  incident_reputation_decision: "Admin/Mod duyệt vi phạm",
 };
 
 /** Discord/Telegram action values on an admin_platform_action audit entry. */

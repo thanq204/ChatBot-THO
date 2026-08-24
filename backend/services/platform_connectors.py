@@ -123,13 +123,36 @@ class PlatformConnectors:
         fetches messages posted after this one, instead of re-fetching (and
         re-running full AI moderation on) the same recent window every click."""
         since = self.store.get_platform_sync_cursor("discord", channel_id) if self.store else None
-        messages, newest_seen_id = self._discord(limit, channel_id, since_message_id=since)
+        guild_id = self._guild_id_for_channel(channel_id)
+        messages, newest_seen_id = self._discord(limit, channel_id, since_message_id=since, guild_id=guild_id)
         if self.store and newest_seen_id:
             self.store.set_platform_sync_cursor("discord", channel_id, newest_seen_id)
         return messages
 
+    def _guild_id_for_channel(self, channel_id: str) -> str:
+        """Discord's message-list REST endpoint never includes `guild_id` on
+        its items (only Gateway events carry that), so it has to be resolved
+        separately. Without a real guild id, `community_id` on every ingested
+        message falls back to the literal string "discord" — which then makes
+        every moderation action that targets a guild (timeout/kick/ban) call
+        Discord with an invalid guild id and fail 100% of the time."""
+        for option in self.list_discord_channels():
+            if option.channel_id == channel_id:
+                return option.guild_id
+        if not self.settings.discord_bot_token:
+            return "discord"
+        response = requests.get(
+            f"https://discord.com/api/v10/channels/{channel_id}",
+            headers={"Authorization": f"Bot {self.settings.discord_bot_token}"}, timeout=20,
+        )
+        if response.status_code < 400:
+            guild_id = response.json().get("guild_id")
+            if guild_id:
+                return str(guild_id)
+        return "discord"
+
     def _discord(
-        self, limit: int, channel_id: str, since_message_id: str | None = None
+        self, limit: int, channel_id: str, since_message_id: str | None = None, guild_id: str = "discord"
     ) -> tuple[list[CommonMessage], str | None]:
         """Fetch messages newer than `since_message_id`, or the newest `limit`
         on a first-ever scan of this channel. Also returns the highest raw
@@ -171,7 +194,7 @@ class PlatformConnectors:
             before = items[-1].get("id")
             if len(items) < params["limit"]:
                 break
-        messages = [CommonMessage(message_id=item["id"], platform="discord", community_id=str(item.get("guild_id") or "discord"), channel_id=channel_id, thread_key=str(item.get("message_reference", {}).get("message_id") or item["id"]), parent_message_id=(item.get("message_reference") or {}).get("message_id"), author_id=str((item.get("author") or {}).get("id") or "anonymous"), author_name=(item.get("author") or {}).get("global_name") or (item.get("author") or {}).get("username"), text=item.get("content") or "[non-text message]", timestamp=self._date(item.get("timestamp")), source_url=f"https://discord.com/channels/{item.get('guild_id','@me')}/{channel_id}/{item['id']}", raw=item) for item in collected if item.get("content")]
+        messages = [CommonMessage(message_id=item["id"], platform="discord", community_id=guild_id, channel_id=channel_id, thread_key=str(item.get("message_reference", {}).get("message_id") or item["id"]), parent_message_id=(item.get("message_reference") or {}).get("message_id"), author_id=str((item.get("author") or {}).get("id") or "anonymous"), author_name=(item.get("author") or {}).get("global_name") or (item.get("author") or {}).get("username"), text=item.get("content") or "[non-text message]", timestamp=self._date(item.get("timestamp")), source_url=f"https://discord.com/channels/{guild_id}/{channel_id}/{item['id']}", raw=item) for item in collected if item.get("content")]
         return messages, newest_seen_id
 
     def _telegram(self, limit: int) -> list[CommonMessage]:

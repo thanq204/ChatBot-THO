@@ -469,6 +469,67 @@ CREATE TABLE IF NOT EXISTS public.operations_platform_sync (
     PRIMARY KEY (platform, channel_id)
 );
 
+-- EXP is intentionally derived from positive community contribution events.
+-- Moderation history remains in incidents/audit and is never mixed into EXP.
+CREATE TABLE IF NOT EXISTS public.operations_trade_cases (
+    trade_id VARCHAR(200) PRIMARY KEY,
+    platform VARCHAR(20) NOT NULL CHECK (platform = 'discord'),
+    community_id VARCHAR(200) NOT NULL,
+    channel_id VARCHAR(200) NOT NULL,
+    buyer_id VARCHAR(200) NOT NULL,
+    buyer_name VARCHAR(200),
+    seller_id VARCHAR(200) NOT NULL,
+    seller_name VARCHAR(200),
+    item_summary VARCHAR(500) NOT NULL,
+    status VARCHAR(30) NOT NULL DEFAULT 'opened'
+        CHECK (status IN ('opened','partially_confirmed','completed','cancelled','disputed')),
+    buyer_confirmed BOOLEAN NOT NULL DEFAULT FALSE,
+    seller_confirmed BOOLEAN NOT NULL DEFAULT FALSE,
+    evidence_urls JSONB NOT NULL DEFAULT '[]'::jsonb,
+    created_by VARCHAR(200) NOT NULL,
+    completed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CHECK (buyer_id <> seller_id)
+);
+
+CREATE TABLE IF NOT EXISTS public.operations_seller_reviews (
+    review_id VARCHAR(200) PRIMARY KEY,
+    trade_id VARCHAR(200) NOT NULL UNIQUE REFERENCES public.operations_trade_cases(trade_id) ON DELETE CASCADE,
+    buyer_id VARCHAR(200) NOT NULL,
+    seller_id VARCHAR(200) NOT NULL,
+    overall_rating SMALLINT NOT NULL CHECK (overall_rating BETWEEN 1 AND 5),
+    item_accuracy SMALLINT NOT NULL CHECK (item_accuracy BETWEEN 1 AND 5),
+    communication SMALLINT NOT NULL CHECK (communication BETWEEN 1 AND 5),
+    fulfillment SMALLINT NOT NULL CHECK (fulfillment BETWEEN 1 AND 5),
+    would_trade_again BOOLEAN NOT NULL,
+    comment TEXT NOT NULL DEFAULT '',
+    verification_status VARCHAR(30) NOT NULL DEFAULT 'verified_transaction'
+        CHECK (verification_status IN ('verified_transaction','under_review','excluded')),
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.operations_seller_assessments (
+    assessment_id VARCHAR(200) PRIMARY KEY,
+    platform VARCHAR(20) NOT NULL CHECK (platform = 'discord'),
+    community_id VARCHAR(200) NOT NULL,
+    requester_id VARCHAR(200) NOT NULL,
+    seller_id VARCHAR(200) NOT NULL,
+    reason TEXT NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'open' CHECK (status IN ('open','resolved')),
+    ai_summary TEXT NOT NULL,
+    model_used VARCHAR(200) NOT NULL,
+    evidence_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    final_decision VARCHAR(30) NOT NULL DEFAULT 'pending'
+        CHECK (final_decision IN ('pending','insufficient_data','no_confirmed_issue','review_required','restricted')),
+    admin_note TEXT NOT NULL DEFAULT '',
+    reviewed_by VARCHAR(200),
+    reviewed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE INDEX IF NOT EXISTS idx_operations_messages_context
     ON public.operations_messages(platform, community_id, channel_id, timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_operations_messages_incident ON public.operations_messages(incident_id);
@@ -480,6 +541,10 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_sections_document ON public.knowledge_s
 CREATE INDEX IF NOT EXISTS idx_member_reputation_rank ON public.community_members(community_id, reputation_score DESC);
 CREATE INDEX IF NOT EXISTS idx_member_reputation_events_member ON public.member_reputation_events(member_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_flagged_links_status ON public.operations_flagged_links(status, last_seen_at DESC);
+CREATE INDEX IF NOT EXISTS idx_trade_cases_seller ON public.operations_trade_cases(community_id, seller_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_trade_cases_buyer ON public.operations_trade_cases(community_id, buyer_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_seller_reviews_seller ON public.operations_seller_reviews(seller_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_seller_assessments_queue ON public.operations_seller_assessments(status, created_at DESC);
 
 DO $$ BEGIN
     ALTER TABLE public.operations_messages ADD CONSTRAINT fk_operations_messages_incident

@@ -15,23 +15,32 @@ FROM python:3.11-slim AS builder
 
 WORKDIR /app
 
+ENV VIRTUAL_ENV=/opt/venv
+ENV PATH=$VIRTUAL_ENV/bin:$PATH
+
+# Keep Python executables outside /root so the unprivileged runtime user can
+# execute uvicorn and every installed dependency.
+RUN python -m venv $VIRTUAL_ENV
+
 COPY requirements.txt .
-RUN pip install --no-cache-dir --user -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # ---- Stage 3: Production ----
 FROM python:3.11-slim
 
 WORKDIR /app
 
-# Copy installed packages from builder
-COPY --from=builder /root/.local /root/.local
-ENV PATH=/root/.local/bin:$PATH
+# Copy the runtime virtual environment from builder.
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH=/opt/venv/bin:$PATH
 
 # Security: run as non-root user
 RUN useradd -m appuser
 
-# Backend and model-only pipeline, then the compiled SPA served by FastAPI.
+# Backend, database migrations and model-only pipeline, then the compiled SPA
+# served by FastAPI.
 COPY backend/ ./backend/
+COPY supabase/ ./supabase/
 COPY src/ai_models/ ./src/ai_models/
 COPY --from=frontend /frontend/dist ./frontend/dist
 
@@ -43,6 +52,8 @@ USER appuser
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
+    CMD python -c "import os, urllib.request; urllib.request.urlopen('http://localhost:' + os.getenv('PORT', '8000') + '/health')" || exit 1
 
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Railway and similar platforms inject PORT at runtime. Keep 8000 as the
+# local Docker default while binding the public server to the assigned port.
+CMD ["sh", "-c", "uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

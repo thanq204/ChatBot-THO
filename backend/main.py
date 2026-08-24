@@ -23,34 +23,42 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
-    warm_postgres_pool(
-        settings.faq_pg_dsn,
-        settings.postgres_pool_min_size,
-        settings.postgres_pool_max_size,
-    )
-    get_auth_store()
-    get_review_store()
-    operations_pipeline = get_operations_pipeline()
-    if settings.operations_startup_maintenance_enabled:
-        if settings.operations_demo_mode:
-            try:
-                operations_pipeline.store.purge_demo_data()
-            except Exception:
-                logger.exception("Demo-data cleanup failed; continuing application startup.")
-        try:
-            operations_pipeline.store.deduplicate_open_incidents()
-        except Exception:
-            logger.exception("Incident deduplication failed; continuing application startup.")
-    discord_rag_bot = DiscordRagBot(operations_pipeline.store, settings, pipeline=operations_pipeline)
-    telegram_rag_bot = TelegramRagBot(operations_pipeline.store, settings, pipeline=operations_pipeline)
-    discord_rag_bot.start()
-    telegram_rag_bot.start()
-    print(f"Starting {settings.app_name} in {settings.app_env} mode")
+    discord_rag_bot: DiscordRagBot | None = None
+    telegram_rag_bot: TelegramRagBot | None = None
+    # Everything that can open a pooled PostgreSQL connection lives inside this
+    # try, so a partial startup failure (e.g. Supabase's session-pooler client
+    # cap) still reaches `close_postgres_pools()` in finally instead of leaking
+    # connections that then compound across every `--reload` restart.
     try:
+        warm_postgres_pool(
+            settings.faq_pg_dsn,
+            settings.postgres_pool_min_size,
+            settings.postgres_pool_max_size,
+        )
+        get_auth_store()
+        get_review_store()
+        operations_pipeline = get_operations_pipeline()
+        if settings.operations_startup_maintenance_enabled:
+            if settings.operations_demo_mode:
+                try:
+                    operations_pipeline.store.purge_demo_data()
+                except Exception:
+                    logger.exception("Demo-data cleanup failed; continuing application startup.")
+            try:
+                operations_pipeline.store.deduplicate_open_incidents()
+            except Exception:
+                logger.exception("Incident deduplication failed; continuing application startup.")
+        discord_rag_bot = DiscordRagBot(operations_pipeline.store, settings, pipeline=operations_pipeline)
+        telegram_rag_bot = TelegramRagBot(operations_pipeline.store, settings, pipeline=operations_pipeline)
+        discord_rag_bot.start()
+        telegram_rag_bot.start()
+        print(f"Starting {settings.app_name} in {settings.app_env} mode")
         yield
     finally:
-        discord_rag_bot.stop()
-        telegram_rag_bot.stop()
+        if discord_rag_bot:
+            discord_rag_bot.stop()
+        if telegram_rag_bot:
+            telegram_rag_bot.stop()
         close_postgres_pools()
         print("Shutting down...")
 

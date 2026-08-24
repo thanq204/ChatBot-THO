@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowSquareOut } from "@phosphor-icons/react";
+import { ArrowSquareOut, CheckCircle } from "@phosphor-icons/react";
 import Badge from "./Badge.jsx";
 import CaseActions from "./CaseActions.jsx";
 import Modal from "./Modal.jsx";
@@ -24,7 +24,10 @@ import {
 import { primaryCategory } from "../lib/incidents.js";
 import { relativeTime, percent } from "../lib/format.js";
 
-const STATUS_OPTIONS = ["open", "monitoring", "resolved", "snoozed"];
+// "resolved" is deliberately excluded here: it's only reachable through the
+// Xác nhận vi phạm/Không vi phạm buttons below, which record who reviewed the
+// case. That keeps "Phụ trách" accurate instead of a manually-typed guess.
+const STATUS_OPTIONS = ["open", "monitoring", "snoozed"];
 
 /**
  * Case detail as a dialog, shared by the community list and the overview feed.
@@ -177,39 +180,49 @@ function DetailBody({ detail, onStatusChange, savingStatus, onReputationDecision
         </div>
       )}
 
-      <div className="field-row">
-        <label className="field">
-          Đổi trạng thái
-          <select value={incident.status} disabled={savingStatus} onChange={(event) => onStatusChange(event.target.value)}>
-            {STATUS_OPTIONS.map((status) => (
-              <option key={status} value={status}>
-                {statusLabel(status)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          Phụ trách
-          <span className="muted small">{incident.assigned_to || "Chưa gán"}</span>
-        </label>
-      </div>
+      {incident.status === "resolved" ? (
+        <div className="case-resolved-banner">
+          <CheckCircle size={20} weight="fill" />
+          <span className="case-resolved-banner__text">
+            <strong>Đã xử lý</strong>
+            {incident.assigned_to ? ` bởi ${incident.assigned_to}` : ""} · {relativeTime(incident.updated_at)}
+          </span>
+        </div>
+      ) : (
+        <div className="field-row">
+          <label className="field">
+            Đổi trạng thái
+            <select value={incident.status} disabled={savingStatus} onChange={(event) => onStatusChange(event.target.value)}>
+              {STATUS_OPTIONS.map((status) => (
+                <option key={status} value={status}>
+                  {statusLabel(status)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            Phụ trách
+            <span className="muted small">{incident.assigned_to || "Chưa gán · tự ghi nhận khi xử lý"}</span>
+          </label>
+        </div>
+      )}
 
       <div className="case-reputation-review">
         <div>
-          <span className="section-heading">Duyệt vi phạm và điểm uy tín</span>
+          <span className="section-heading">Duyệt vi phạm</span>
           {reputationDecision ? (
             <p className="muted small">
               {reputationPayload.outcome === "confirmed"
-                ? `Đã xác nhận vi phạm: ${reputationPayload.affected_members || 0} thành viên, ${reputationPayload.points_applied || 0} điểm.`
-                : "Đã xác nhận case không vi phạm, không trừ điểm thành viên."}
+                ? `Đã xác nhận vi phạm của ${reputationPayload.affected_members || 0} thành viên. Quyết định được lưu vào audit và không làm thay đổi EXP.`
+                : "Đã xác nhận case không vi phạm. Không có thay đổi EXP."}
             </p>
           ) : (
             <p className="muted small">
-              AI chỉ cung cấp bằng chứng. Chỉ thao tác tại đây mới được phép trừ điểm, tối đa một lần cho mỗi User ID trong case.
+              AI chỉ cung cấp bằng chứng. Admin/Mod quyết định case; kết quả được lưu riêng và không trộn với EXP hoạt động cộng đồng.
             </p>
           )}
         </div>
-        {!reputationDecision && (
+        {!reputationDecision && incident.status !== "resolved" && (
           <div className="case-reputation-review__actions">
             <button
               type="button"

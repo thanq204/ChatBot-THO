@@ -160,7 +160,8 @@ class PlatformModerationService:
             else:
                 raise PlatformModerationError("Hành động không hợp lệ.")
             if response.status_code >= 400:
-                return self._result(action, "discord", user_id, message_id, False, f"Discord API trả HTTP {response.status_code}.")
+                hint = " Bot có thể thiếu quyền (Manage Messages/Timeout Members/Kick Members/Ban Members)." if response.status_code == 403 else ""
+                return self._result(action, "discord", user_id, message_id, False, f"Discord API trả HTTP {response.status_code}: {response.text[:200]}{hint}")
             return self._result(action, "discord", user_id, message_id, True, "Đã thực hiện hành động trên Discord.")
         except requests.RequestException as exc:
             return self._result(action, "discord", user_id, message_id, False, f"Không thể gọi Discord ({type(exc).__name__}).")
@@ -199,7 +200,7 @@ class PlatformModerationService:
                     user_id,
                     message_id,
                     False,
-                    f"Telegram API HTTP {response.status_code}: {description}",
+                    f"Telegram API từ chối hành động ({response.status_code}): {description}. Kiểm tra bot có phải Admin của nhóm với đủ quyền không.",
                 )
             return self._result(action, "telegram", user_id, message_id, True, "Đã thực hiện hành động trên Telegram.")
         except requests.RequestException as exc:

@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowSquareOut } from "@phosphor-icons/react";
 import Card from "../components/Card.jsx";
+import Badge from "../components/Badge.jsx";
 import MemberReportInbox from "../components/MemberReportInbox.jsx";
 import IncidentDetailModal from "../components/IncidentDetailModal.jsx";
 import { SkeletonBlock, SkeletonLine } from "../components/Skeleton.jsx";
@@ -274,11 +275,12 @@ const CaseRow = memo(function CaseRow({ incident, channelName, onOpen }) {
       }}
     >
       <span className="case-row__title">{categoryLabel(primaryCategory(incident))}</span>
-      <span className="case-row__status" style={{ color: STATUS_COLORS[incident.status] }}>
-        {statusLabel(incident.status)}
+      <span className="case-row__badges">
+        <Badge tone={SEVERITY_COLORS[incident.severity]}>{severityLabel(incident.severity)}</Badge>
+        <Badge tone={STATUS_COLORS[incident.status]}>{statusLabel(incident.status)}</Badge>
       </span>
       <span className="case-row__meta">
-        <span className="case-row__severity">{severityLabel(incident.severity)}</span>
+        {incident.assigned_to && <span>Phụ trách: {incident.assigned_to}</span>}
         {actor && <span>{actor}</span>}
         <span>{platformLabel(incident.platform)}</span>
         {channelName && <span>#{channelName}</span>}
