@@ -18,6 +18,7 @@ import { TransitionLink } from "../transitions/PageTransition.jsx";
 import { useAuth } from "../auth/AuthProvider.jsx";
 import { useTheme } from "../theme/ThemeProvider.jsx";
 import "../landing.css";
+import { BRAND } from "../lib/brand.js";
 
 const REPO_URL = "https://github.com/AI20K-Build-Phase-Cohort-3/P-232";
 
@@ -126,7 +127,7 @@ export default function LandingPage() {
             <span className="sk-mark" aria-hidden="true">
               ✦
             </span>
-            AI Community Manager
+            {BRAND.name}
           </a>
 
           <nav className="lnav__links" aria-label="Nội dung trang">
@@ -181,7 +182,7 @@ export default function LandingPage() {
                 <span className="sk-mark" aria-hidden="true">
                   ✦
                 </span>
-                AI Community Manager
+                {BRAND.name} · {BRAND.tagline}
               </motion.span>
 
               <motion.h1
@@ -404,7 +405,7 @@ export default function LandingPage() {
             <span className="sk-mark" aria-hidden="true">
               ✦
             </span>
-            AI Community Manager
+            {BRAND.name}
           </a>
           <nav className="lfooter__links" aria-label="Liên kết chân trang">
             <a href="#features">Features</a>

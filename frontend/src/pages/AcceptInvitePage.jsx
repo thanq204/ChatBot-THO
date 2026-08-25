@@ -7,6 +7,7 @@ import { useAuth } from "../auth/AuthProvider.jsx";
 import { auth } from "../api/client.js";
 import { TransitionLink, usePageTransition } from "../transitions/PageTransition.jsx";
 import "../login.css";
+import { BRAND } from "../lib/brand.js";
 
 export default function AcceptInvitePage() {
   const [searchParams] = useSearchParams();
@@ -49,7 +50,7 @@ export default function AcceptInvitePage() {
     <div className="auth__card"><TransitionLink to="/" className="auth__back"><ArrowLeft size={15} weight="bold" />Quay lại trang chủ</TransitionLink>
       <div className="auth__head">
         <Mascot size={62} variant="auth" className="auth__mascot" />
-        <span className="auth__brand">AI Community Manager</span>
+        <span className="auth__brand">{BRAND.name} · {BRAND.tagline}</span>
         <h1 className="auth__title">Nhận lời mời làm Mod</h1>
         <p className="auth__subtitle">Hoàn tất đăng ký để tham gia đội kiểm duyệt.</p>
       </div>

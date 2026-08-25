@@ -11,11 +11,16 @@ import {
 } from "@phosphor-icons/react";
 import Badge from "../components/Badge.jsx";
 import Card from "../components/Card.jsx";
+import Pagination, { usePagination } from "../components/Pagination.jsx";
+import LoadMore, { useLoadMore } from "../components/LoadMore.jsx";
 import { EmptyState, ErrorState } from "../components/StatePanels.jsx";
 import { SkeletonBlock } from "../components/Skeleton.jsx";
 import { ops } from "../api/client.js";
 import { queryKeys } from "../lib/queryClient.js";
 import { formatNumber, relativeTime } from "../lib/format.js";
+
+const MEMBER_PAGE_SIZE = 20;
+const BLOCKED_LINK_STEP = 8;
 
 const LEVEL_META = {
   new: ["Mới", "var(--text-muted)"],
@@ -69,6 +74,11 @@ export default function ExperiencePage() {
   const totalExp = members.reduce((total, member) => total + member.exp_score, 0);
   const contributors = members.filter((member) => ["contributor", "veteran"].includes(member.level)).length;
 
+  // Reset to page one whenever the search or level filter changes, so narrowing
+  // the list does not leave the operator on a page that no longer exists.
+  const memberPage = usePagination(visibleMembers, MEMBER_PAGE_SIZE, `${needle}|${level}`);
+  const linkFeed = useLoadMore(blockedLinks, BLOCKED_LINK_STEP);
+
   return (
     <div className="page-grid reputation-page">
       <div className="page-grid__row">
@@ -110,7 +120,7 @@ export default function ExperiencePage() {
                 <table className="reputation-table">
                   <thead><tr><th>Hạng</th><th>Thành viên</th><th>EXP</th><th>Cấp</th><th>Sự kiện ghi nhận</th><th>Cập nhật</th></tr></thead>
                   <tbody>
-                    {visibleMembers.map((member) => {
+                    {memberPage.slice.map((member) => {
                       const rank = members.findIndex((item) => item.platform_user_id === member.platform_user_id) + 1;
                       const [label, tone] = LEVEL_META[member.level] || LEVEL_META.new;
                       return (
@@ -127,6 +137,17 @@ export default function ExperiencePage() {
                   </tbody>
                 </table>
               </div>
+            )}
+            {!loading && visibleMembers.length > 0 && (
+              <Pagination
+                page={memberPage.page}
+                pageCount={memberPage.pageCount}
+                onPageChange={memberPage.setPage}
+                from={memberPage.from}
+                to={memberPage.to}
+                total={memberPage.total}
+                unit="thành viên"
+              />
             )}
           </Card>
         </div>
@@ -169,13 +190,23 @@ export default function ExperiencePage() {
             <p className="muted small">Blocklist là lớp bảo vệ realtime riêng. Phản hồi ❌ không trừ EXP và không phải kết luận người gửi thiếu uy tín.</p>
             {loading && <SkeletonBlock height={160} />}
             {!loading && blockedLinks.length === 0 && <EmptyState message="Chưa có link nào trong blocklist." />}
-            {!loading && blockedLinks.map((link) => (
+            {!loading && linkFeed.visible.map((link) => (
               <article className="flagged-link-row" key={link.link_id}>
                 <LinkBreak size={20} weight="duotone" />
                 <div><strong>{link.domain}</strong><code>{link.canonical_url}</code></div>
                 <div><Badge tone="var(--sev-critical)">Đang chặn</Badge><small>{formatNumber(link.flag_count)} lần gắn cờ · {relativeTime(link.last_seen_at)}</small></div>
               </article>
             ))}
+            {!loading && (
+              <LoadMore
+                remaining={linkFeed.remaining}
+                step={BLOCKED_LINK_STEP}
+                unit="link"
+                onMore={linkFeed.showMore}
+                canCollapse={linkFeed.canCollapse}
+                onCollapse={linkFeed.collapse}
+              />
+            )}
           </Card>
         </div>
       )}

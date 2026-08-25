@@ -1,12 +1,15 @@
 import { useCallback, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle, Flag } from "@phosphor-icons/react";
+import LoadMore, { useLoadMore } from "./LoadMore.jsx";
 import { SkeletonBlock } from "./Skeleton.jsx";
 import { ErrorState, EmptyState } from "./StatePanels.jsx";
 import { ops } from "../api/client.js";
 import { queryKeys } from "../lib/queryClient.js";
 import { platformLabel } from "../lib/taxonomy.js";
 import { relativeTime } from "../lib/format.js";
+
+const REPORT_STEP = 8;
 
 /**
  * Inbox for /report submissions. These come from members rather than from the
@@ -44,12 +47,15 @@ export default function MemberReportInbox() {
 
   const error = actionError || reportsQuery.error?.message || "";
 
-  if (reportsQuery.isPending) return <SkeletonBlock height={180} />;
-  if (error) return <ErrorState message={error} onRetry={load} />;
-
+  // Derived before the early returns below: hooks cannot sit after a
+  // conditional return, and useLoadMore needs the filtered list.
   const all = reportsQuery.data ?? [];
   const open = all.filter((item) => item.status === "open");
   const visible = showHandled ? all : open;
+  const feed = useLoadMore(visible, REPORT_STEP, String(showHandled));
+
+  if (reportsQuery.isPending) return <SkeletonBlock height={180} />;
+  if (error) return <ErrorState message={error} onRetry={load} />;
 
   if (all.length === 0) {
     return <EmptyState message="Chưa có thành viên nào gửi /report." />;
@@ -75,7 +81,7 @@ export default function MemberReportInbox() {
         <EmptyState message="Không còn báo cáo nào chờ xử lý." />
       ) : (
         <div className="list">
-          {visible.map((report) => (
+          {feed.visible.map((report) => (
             <div className="list-row" key={report.report_id}>
               <div className="list-row__head">
                 <span className="list-row__title">
@@ -116,6 +122,14 @@ export default function MemberReportInbox() {
               </div>
             </div>
           ))}
+          <LoadMore
+            remaining={feed.remaining}
+            step={REPORT_STEP}
+            unit="báo cáo"
+            onMore={feed.showMore}
+            canCollapse={feed.canCollapse}
+            onCollapse={feed.collapse}
+          />
         </div>
       )}
     </div>

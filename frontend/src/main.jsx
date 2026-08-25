@@ -5,6 +5,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import App from "./App.jsx";
 import { AuthProvider } from "./auth/AuthProvider.jsx";
 import { ThemeProvider } from "./theme/ThemeProvider.jsx";
+import { ToastProvider } from "./components/ToastProvider.jsx";
 import { PageTransitionProvider } from "./transitions/PageTransition.jsx";
 import { queryClient } from "./lib/queryClient.js";
 import "./styles.css";
@@ -15,14 +16,17 @@ createRoot(document.getElementById("root")).render(
     {/* Outermost: the cache has to outlive every route that reads from it. */}
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
-        <BrowserRouter>
-          <AuthProvider>
-            {/* Inside the router: the provider drives navigation itself. */}
-            <PageTransitionProvider>
-              <App />
-            </PageTransitionProvider>
-          </AuthProvider>
-        </BrowserRouter>
+        {/* Above the router so a toast survives the navigation that raised it. */}
+        <ToastProvider>
+          <BrowserRouter>
+            <AuthProvider>
+              {/* Inside the router: the provider drives navigation itself. */}
+              <PageTransitionProvider>
+                <App />
+              </PageTransitionProvider>
+            </AuthProvider>
+          </BrowserRouter>
+        </ToastProvider>
       </ThemeProvider>
     </QueryClientProvider>
   </React.StrictMode>,

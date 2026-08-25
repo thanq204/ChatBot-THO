@@ -6,6 +6,7 @@ import SakuraField from "../components/landing/SakuraField.jsx";
 import { useAuth } from "../auth/AuthProvider.jsx";
 import { TransitionLink, usePageTransition } from "../transitions/PageTransition.jsx";
 import "../login.css";
+import { BRAND } from "../lib/brand.js";
 
 const REGISTER_BLANK = { email: "", display_name: "", password: "" };
 const DEMO_PASSWORD = "12345678";
@@ -37,7 +38,7 @@ export default function LoginPage() {
     <div className="auth__card"><TransitionLink to="/" className="auth__back"><ArrowLeft size={15} weight="bold" />Quay lại trang chủ</TransitionLink>
       <div className="auth__head">
         <Mascot size={62} variant="auth" className="auth__mascot" />
-        <span className="auth__brand">AI Community Manager</span>
+        <span className="auth__brand">{BRAND.name} · {BRAND.tagline}</span>
         <h1 className="auth__title">{tab === "register" ? "Tạo tài khoản" : "Chào mừng trở lại"}</h1>
         <p className="auth__subtitle">{tab === "register" ? "Tạo tài khoản Admin để bắt đầu quản lý cộng đồng." : "Đăng nhập để tiếp tục quản lý cộng đồng."}</p>
       </div>

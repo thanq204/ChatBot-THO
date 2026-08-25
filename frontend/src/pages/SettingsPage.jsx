@@ -3,6 +3,8 @@ import { useQueries, useQueryClient } from "@tanstack/react-query";
 import { MagnifyingGlass, PencilSimple, Trash, FloppyDisk, Plus, UploadSimple, PaperPlaneRight, CaretRight, CaretDown } from "@phosphor-icons/react";
 import Card from "../components/Card.jsx";
 import Modal from "../components/Modal.jsx";
+import Pagination, { usePagination } from "../components/Pagination.jsx";
+import LoadMore, { useLoadMore } from "../components/LoadMore.jsx";
 import { SkeletonBlock, SkeletonLine } from "../components/Skeleton.jsx";
 import { ErrorState, EmptyState } from "../components/StatePanels.jsx";
 import { ops, fileToBase64 } from "../api/client.js";
@@ -10,6 +12,8 @@ import { queryKeys } from "../lib/queryClient.js";
 import { relativeTime } from "../lib/format.js";
 
 const BLANK = { title: "", dataset: "", body: "", tags: "" };
+const DOC_PAGE_SIZE_OPTIONS = [10, 25, 50];
+const IMPORT_STEP = 5;
 
 function matches(item, query) {
   return [item.title, item.body, item.dataset, (item.tags || []).join(" ")].join(" ").toLowerCase().includes(query);
@@ -27,6 +31,7 @@ export default function SettingsPage() {
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [expandedIds, setExpandedIds] = useState(() => new Set());
+  const [pageSize, setPageSize] = useState(10);
   // Import history + RAG ask are secondary tools, not needed on every visit,
   // so they live behind a tab instead of pushing the document list down.
   const [activeTab, setActiveTab] = useState("documents");
@@ -67,7 +72,12 @@ export default function SettingsPage() {
     return needle ? knowledge.filter((item) => matches(item, needle)) : knowledge;
   }, [knowledge, query]);
 
-  const allVisibleSelected = visible.length > 0 && visible.every((item) => selectedIds.has(item.document_id));
+  const paged = usePagination(visible, pageSize, query);
+
+  // Scoped to the current page on purpose: a checkbox that silently selects 300
+  // documents across pages, then hands them to a delete button, is a trap.
+  const pageRows = paged.slice;
+  const allPageSelected = pageRows.length > 0 && pageRows.every((item) => selectedIds.has(item.document_id));
 
   function toggleSelect(id) {
     setSelectedIds((prev) => {
@@ -89,13 +99,11 @@ export default function SettingsPage() {
 
   function toggleSelectAll() {
     setSelectedIds((prev) => {
-      if (allVisibleSelected) {
-        const next = new Set(prev);
-        for (const item of visible) next.delete(item.document_id);
-        return next;
-      }
       const next = new Set(prev);
-      for (const item of visible) next.add(item.document_id);
+      for (const item of pageRows) {
+        if (allPageSelected) next.delete(item.document_id);
+        else next.add(item.document_id);
+      }
       return next;
     });
   }
@@ -279,12 +287,13 @@ export default function SettingsPage() {
           )}
           {!loading && visible.length > 0 && (
             <>
-              <label className="list-row__meta" style={{ display: "flex", alignItems: "center", gap: 6, margin: "2px 0 8px" }}>
-                <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAll} />
-                Chọn tất cả ({visible.length})
+              <label className="select-all">
+                <input type="checkbox" checked={allPageSelected} onChange={toggleSelectAll} />
+                Chọn cả trang ({pageRows.length})
+                {selectedIds.size > 0 && <span className="select-all__count">đã chọn {selectedIds.size}</span>}
               </label>
               <div className="list">
-                {visible.map((item) => {
+                {pageRows.map((item) => {
                   const expanded = expandedIds.has(item.document_id);
                   return (
                     <div className="list-row" key={item.document_id}>
@@ -323,6 +332,19 @@ export default function SettingsPage() {
                   );
                 })}
               </div>
+
+              <Pagination
+                page={paged.page}
+                pageCount={paged.pageCount}
+                onPageChange={paged.setPage}
+                from={paged.from}
+                to={paged.to}
+                total={paged.total}
+                unit="tài liệu"
+                pageSize={pageSize}
+                pageSizeOptions={DOC_PAGE_SIZE_OPTIONS}
+                onPageSizeChange={setPageSize}
+              />
             </>
           )}
         </Card>
@@ -441,6 +463,8 @@ export default function SettingsPage() {
 }
 
 function ImportHistoryCard({ imports, loading }) {
+  const feed = useLoadMore(imports, IMPORT_STEP);
+
   return (
     <Card title="Lịch sử import" className="span-5">
       {loading && <SkeletonLine width="80%" />}
@@ -448,19 +472,29 @@ function ImportHistoryCard({ imports, loading }) {
         <EmptyState message="Chưa import lần nào. Dùng “Thêm tài liệu → Tải file lên” để nạp hàng loạt." />
       )}
       {!loading && imports && imports.length > 0 && (
-        <div className="list">
-          {imports.map((item) => (
-            <div className="list-row" key={item.import_id}>
-              <div className="list-row__head">
-                <span className="list-row__title">{item.filename}</span>
-                <span className="list-row__meta">{relativeTime(item.created_at)}</span>
+        <>
+          <div className="list">
+            {feed.visible.map((item) => (
+              <div className="list-row" key={item.import_id}>
+                <div className="list-row__head">
+                  <span className="list-row__title">{item.filename}</span>
+                  <span className="list-row__meta">{relativeTime(item.created_at)}</span>
+                </div>
+                <span className="list-row__meta">
+                  {item.format} → {item.target} · {item.normalized_count} bản ghi · bỏ qua {item.skipped_count}
+                </span>
               </div>
-              <span className="list-row__meta">
-                {item.format} → {item.target} · {item.normalized_count} bản ghi · bỏ qua {item.skipped_count}
-              </span>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+          <LoadMore
+            remaining={feed.remaining}
+            step={IMPORT_STEP}
+            unit="lần import"
+            onMore={feed.showMore}
+            canCollapse={feed.canCollapse}
+            onCollapse={feed.collapse}
+          />
+        </>
       )}
     </Card>
   );

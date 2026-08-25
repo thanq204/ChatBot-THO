@@ -13,9 +13,12 @@ function getInitialTheme() {
 export function ThemeProvider({ children }) {
   const [theme, setTheme] = useState(getInitialTheme);
 
+  // Reflect the theme on the document, but do NOT write to storage here.
+  // Writing on mount would stamp a key for everyone, and the media listener
+  // below reads that key to decide whether the user has made an explicit
+  // choice — so an unconditional write silently disabled following the OS.
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
-    window.localStorage.setItem(STORAGE_KEY, theme);
   }, [theme]);
 
   useEffect(() => {
@@ -31,7 +34,14 @@ export function ThemeProvider({ children }) {
   const value = useMemo(
     () => ({
       theme,
-      toggleTheme: () => setTheme((current) => (current === "dark" ? "light" : "dark")),
+      // Storage is written only by an explicit toggle. That write is what opts
+      // the session out of following the OS from then on.
+      toggleTheme: () =>
+        setTheme((current) => {
+          const next = current === "dark" ? "light" : "dark";
+          try { window.localStorage.setItem(STORAGE_KEY, next); } catch { /* ignore */ }
+          return next;
+        }),
     }),
     [theme],
   );

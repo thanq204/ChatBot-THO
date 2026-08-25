@@ -3,6 +3,7 @@ import { useQueries, useQueryClient } from "@tanstack/react-query";
 import Card from "../components/Card.jsx";
 import StatTile from "../components/StatTile.jsx";
 import Badge from "../components/Badge.jsx";
+import LoadMore, { useLoadMore } from "../components/LoadMore.jsx";
 import { SkeletonBlock } from "../components/Skeleton.jsx";
 import { ErrorState, EmptyState } from "../components/StatePanels.jsx";
 import { moderation, ops } from "../api/client.js";
@@ -17,6 +18,10 @@ import {
   auditToneFor,
 } from "../lib/taxonomy.js";
 import { relativeTime, percent } from "../lib/format.js";
+
+// An audit log only grows. Rendering every entry pushes the second card off the
+// bottom of a long page, so each list opens on its most recent slice.
+const LOG_STEP = 10;
 
 export default function ModerationLogPage() {
   const queryClient = useQueryClient();
@@ -41,6 +46,9 @@ export default function ModerationLogPage() {
     queryClient.invalidateQueries({ queryKey: queryKeys.moderationAuditLogs });
     queryClient.invalidateQueries({ queryKey: queryKeys.audit() });
   }, [queryClient]);
+
+  const adminFeed = useLoadMore(adminActions, LOG_STEP);
+  const auditFeed = useLoadMore(audit, LOG_STEP);
 
   if (error) {
     return (
@@ -67,21 +75,31 @@ export default function ModerationLogPage() {
           {loading && <SkeletonBlock height={260} />}
           {!loading && adminActions.length === 0 && <EmptyState message="Chưa có hành động Admin nào được ghi nhận." />}
           {!loading && adminActions.length > 0 && (
-            <div className="list">
-              {adminActions.map((item) => (
-                <div className="list-row" key={item.audit_id}>
-                  <div className="list-row__head">
-                    <span className="list-row__title">{item.actor}</span>
-                    <Badge tone={auditToneFor(item)}>{auditEventLabel(item.event_type)}</Badge>
+            <>
+              <div className="list">
+                {adminFeed.visible.map((item) => (
+                  <div className="list-row" key={item.audit_id}>
+                    <div className="list-row__head">
+                      <span className="list-row__title">{item.actor}</span>
+                      <Badge tone={auditToneFor(item)}>{auditEventLabel(item.event_type)}</Badge>
+                    </div>
+                    <p className="list-row__body">{describeAuditEntry(item)}</p>
+                    <span className="list-row__meta">
+                      {item.incident_id ? `${item.incident_id} · ` : ""}
+                      {relativeTime(item.created_at)}
+                    </span>
                   </div>
-                  <p className="list-row__body">{describeAuditEntry(item)}</p>
-                  <span className="list-row__meta">
-                    {item.incident_id ? `${item.incident_id} · ` : ""}
-                    {relativeTime(item.created_at)}
-                  </span>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+              <LoadMore
+                remaining={adminFeed.remaining}
+                step={LOG_STEP}
+                unit="hành động"
+                onMore={adminFeed.showMore}
+                canCollapse={adminFeed.canCollapse}
+                onCollapse={adminFeed.collapse}
+              />
+            </>
           )}
         </Card>
       </div>
@@ -95,21 +113,31 @@ export default function ModerationLogPage() {
           {loading && <SkeletonBlock height={160} />}
           {!loading && audit.length === 0 && <EmptyState message="Chưa có quyết định thử nghiệm nào." />}
           {!loading && audit.length > 0 && (
-            <div className="list">
-              {audit.map((item) => (
-                <div className="list-row" key={item.audit_id}>
-                  <div className="list-row__head">
-                    <span className="list-row__title">{item.user_id}</span>
-                    <Badge tone={MODERATION_ACTION_COLORS[item.admin_action]}>{moderationActionLabel(item.admin_action)}</Badge>
+            <>
+              <div className="list">
+                {auditFeed.visible.map((item) => (
+                  <div className="list-row" key={item.audit_id}>
+                    <div className="list-row__head">
+                      <span className="list-row__title">{item.user_id}</span>
+                      <Badge tone={MODERATION_ACTION_COLORS[item.admin_action]}>{moderationActionLabel(item.admin_action)}</Badge>
+                    </div>
+                    <span className="list-row__meta">
+                      {moderationCategoryLabel(item.model_category)} ({percent(item.model_confidence)}) → {item.reviewer} ·{" "}
+                      {relativeTime(item.reviewed_at)}
+                    </span>
+                    {item.admin_note && <p className="list-row__body">{item.admin_note}</p>}
                   </div>
-                  <span className="list-row__meta">
-                    {moderationCategoryLabel(item.model_category)} ({percent(item.model_confidence)}) → {item.reviewer} ·{" "}
-                    {relativeTime(item.reviewed_at)}
-                  </span>
-                  {item.admin_note && <p className="list-row__body">{item.admin_note}</p>}
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+              <LoadMore
+                remaining={auditFeed.remaining}
+                step={LOG_STEP}
+                unit="quyết định"
+                onMore={auditFeed.showMore}
+                canCollapse={auditFeed.canCollapse}
+                onCollapse={auditFeed.collapse}
+              />
+            </>
           )}
         </Card>
       </div>

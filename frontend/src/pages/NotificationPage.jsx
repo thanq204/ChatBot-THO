@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { PaperPlaneTilt } from "@phosphor-icons/react";
 import Card from "../components/Card.jsx";
+import LoadMore, { useLoadMore } from "../components/LoadMore.jsx";
 import { SkeletonBlock } from "../components/Skeleton.jsx";
 import { ErrorState, EmptyState } from "../components/StatePanels.jsx";
 import { ops } from "../api/client.js";
@@ -14,6 +15,10 @@ const NOTIFY_PLATFORM_OPTIONS = [
   { value: "telegram", label: "Telegram" },
   { value: "discord", label: "Discord" },
 ];
+
+// The history card sits beside the compose form, so it should stay about as
+// tall as the form rather than stretching the row to the length of the archive.
+const HISTORY_STEP = 5;
 
 export default function NotificationPage() {
   const { user } = useAuth();
@@ -42,6 +47,8 @@ export default function NotificationPage() {
   const loadHistory = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: queryKeys.audit() });
   }, [queryClient]);
+
+  const historyFeed = useLoadMore(history, HISTORY_STEP);
 
   const togglePlatform = (value) => {
     setSelectedPlatforms((prev) => (prev.includes(value) ? prev.filter((item) => item !== value) : [...prev, value]));
@@ -139,24 +146,34 @@ export default function NotificationPage() {
             <EmptyState message="Chưa có thông báo nào được gửi." />
           )}
           {!historyLoading && !historyError && history && history.length > 0 && (
-            <div className="list">
-              {history.map((item) => (
-                <div className="list-row" key={item.audit_id}>
-                  <div className="list-row__head">
-                    <span className="list-row__title">{item.payload.announcement_id}</span>
-                    <span className="list-row__meta">{relativeTime(item.created_at)}</span>
+            <>
+              <div className="list">
+                {historyFeed.visible.map((item) => (
+                  <div className="list-row" key={item.audit_id}>
+                    <div className="list-row__head">
+                      <span className="list-row__title">{item.payload.announcement_id}</span>
+                      <span className="list-row__meta">{relativeTime(item.created_at)}</span>
+                    </div>
+                    <div className="chip-row">
+                      {(item.payload.delivered || []).map((delivery, index) => (
+                        <span key={`${delivery.platform}-${index}`} className="chip">
+                          {platformLabel(delivery.platform)}: {delivery.delivered ? "OK" : "Lỗi"}
+                        </span>
+                      ))}
+                    </div>
+                    <span className="list-row__meta">{item.actor}</span>
                   </div>
-                  <div className="chip-row">
-                    {(item.payload.delivered || []).map((delivery, index) => (
-                      <span key={`${delivery.platform}-${index}`} className="chip">
-                        {platformLabel(delivery.platform)}: {delivery.delivered ? "OK" : "Lỗi"}
-                      </span>
-                    ))}
-                  </div>
-                  <span className="list-row__meta">{item.actor}</span>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+              <LoadMore
+                remaining={historyFeed.remaining}
+                step={HISTORY_STEP}
+                unit="thông báo"
+                onMore={historyFeed.showMore}
+                canCollapse={historyFeed.canCollapse}
+                onCollapse={historyFeed.collapse}
+              />
+            </>
           )}
         </Card> : <Card title="Thông báo dành cho Mod" className="span-6" delay={0.05}>
           <div className="list">
