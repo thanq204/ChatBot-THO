@@ -11,11 +11,16 @@ import {
 import Card from "../components/Card.jsx";
 import Modal from "../components/Modal.jsx";
 import Badge from "../components/Badge.jsx";
+import Pagination, { usePagination } from "../components/Pagination.jsx";
+import LoadMore, { useLoadMore } from "../components/LoadMore.jsx";
 import { SkeletonBlock } from "../components/Skeleton.jsx";
 import { EmptyState, ErrorState } from "../components/StatePanels.jsx";
 import { ops } from "../api/client.js";
 import { queryKeys } from "../lib/queryClient.js";
 import { formatNumber, relativeTime } from "../lib/format.js";
+
+const TOPIC_STEP = 5;
+const FAQ_PAGE_SIZE = 10;
 
 const EMPTY_FORM = {
   mode: "approve",
@@ -274,13 +279,15 @@ export default function FaqManagementPage() {
 }
 
 function TopTopics({ topics, onAnswer }) {
+  const feed = useLoadMore(topics, TOPIC_STEP);
+
   if (topics.length === 0) {
     return <EmptyState message="Chưa có topic nào đang chờ. Các câu hỏi mới đủ điều kiện sẽ tự xuất hiện tại đây." />;
   }
 
   return (
     <div className="faq-topic-list">
-      {topics.map((topic, index) => (
+      {feed.visible.map((topic, index) => (
         <article className="faq-topic" key={topic.cluster_id}>
           <div className="faq-rank" aria-label={`Hạng ${index + 1}`}>{index + 1}</div>
           <div className="faq-topic__content">
@@ -310,11 +317,21 @@ function TopTopics({ topics, onAnswer }) {
           </div>
         </article>
       ))}
+      <LoadMore
+        remaining={feed.remaining}
+        step={TOPIC_STEP}
+        unit="chủ đề"
+        onMore={feed.showMore}
+        canCollapse={feed.canCollapse}
+        onCollapse={feed.collapse}
+      />
     </div>
   );
 }
 
 function FaqHistory({ faqs, total, query, onQueryChange, onEdit }) {
+  const page = usePagination(faqs, FAQ_PAGE_SIZE, query);
+
   return (
     <>
       <div className="search-box">
@@ -332,7 +349,7 @@ function FaqHistory({ faqs, total, query, onQueryChange, onEdit }) {
       )}
       {faqs.length > 0 && (
         <div className="list faq-history-list">
-          {faqs.map((faq) => (
+          {page.slice.map((faq) => (
             <article className="list-row" key={faq.faq_id}>
               <div className="list-row__head">
                 <div>
@@ -359,6 +376,17 @@ function FaqHistory({ faqs, total, query, onQueryChange, onEdit }) {
             </article>
           ))}
         </div>
+      )}
+      {faqs.length > 0 && (
+        <Pagination
+          page={page.page}
+          pageCount={page.pageCount}
+          onPageChange={page.setPage}
+          from={page.from}
+          to={page.to}
+          total={page.total}
+          unit="FAQ"
+        />
       )}
     </>
   );

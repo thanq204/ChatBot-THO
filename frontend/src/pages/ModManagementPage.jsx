@@ -5,6 +5,7 @@ import Card from "../components/Card.jsx";
 import Badge from "../components/Badge.jsx";
 import Pagination, { usePagination } from "../components/Pagination.jsx";
 import LoadMore, { useLoadMore } from "../components/LoadMore.jsx";
+import { useToast } from "../components/ToastProvider.jsx";
 import { EmptyState, ErrorState } from "../components/StatePanels.jsx";
 import { SkeletonBlock } from "../components/Skeleton.jsx";
 import { auth } from "../api/client.js";
@@ -33,6 +34,7 @@ function initials(name, email) {
 
 export default function ModManagementPage() {
   const queryClient = useQueryClient();
+  const toast = useToast();
   const [inviteEmail, setInviteEmail] = useState("");
   const [saving, setSaving] = useState(false);
   const [actionError, setActionError] = useState("");
@@ -88,8 +90,10 @@ export default function ModManagementPage() {
       patchInvites((items) => [pending, ...items.filter((item) => item.email !== pending.email)]);
       setInviteEmail("");
       setActionError("");
+      toast.success(pending.email_sent ? `Đã gửi lời mời tới ${pending.email}.` : `Đã tạo lời mời cho ${pending.email}. Hãy copy link và gửi thủ công.`);
     } catch (err) {
       setActionError(err.message);
+      toast.error(err.message);
     } finally {
       setSaving(false);
     }
@@ -101,8 +105,10 @@ export default function ModManagementPage() {
       const pending = await auth.inviteMod(email);
       patchInvites((items) => [pending, ...items.filter((item) => item.email !== pending.email)]);
       setActionError("");
+      toast.success(pending.email_sent ? `Đã gửi lại email tới ${pending.email}.` : `Chưa gửi được email tới ${pending.email}. Hãy copy link và gửi thủ công.`);
     } catch (err) {
       setActionError(err.message);
+      toast.error(err.message);
     } finally {
       setSaving(false);
     }
@@ -113,8 +119,10 @@ export default function ModManagementPage() {
     try {
       await auth.deleteModInvite(email);
       patchInvites((items) => items.filter((item) => item.email !== email));
+      toast.success(`Đã hủy lời mời tới ${email}.`);
     } catch (err) {
       setActionError(err.message);
+      toast.error(err.message);
     }
   };
 
@@ -133,8 +141,10 @@ export default function ModManagementPage() {
     try {
       const user = await auth.updateStatus(id, isActive);
       patchUsers((items) => items.map((item) => (item.user_id === id ? user : item)));
+      toast.success(isActive ? `Đã kích hoạt lại ${user.email}.` : `Đã khoá tài khoản ${user.email}.`);
     } catch (err) {
       setActionError(err.message);
+      toast.error(err.message);
     } finally {
       setBusyId("");
     }
@@ -146,8 +156,10 @@ export default function ModManagementPage() {
     try {
       await auth.deleteUser(user.user_id);
       patchUsers((items) => items.filter((item) => item.user_id !== user.user_id));
+      toast.success(`Đã xóa tài khoản ${user.email}.`);
     } catch (err) {
       setActionError(err.message);
+      toast.error(err.message);
     } finally {
       setBusyId("");
     }

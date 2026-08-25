@@ -10,11 +10,17 @@ import {
 } from "@phosphor-icons/react";
 import Badge from "../components/Badge.jsx";
 import Card from "../components/Card.jsx";
+import Pagination, { usePagination } from "../components/Pagination.jsx";
+import LoadMore, { useLoadMore } from "../components/LoadMore.jsx";
 import { EmptyState, ErrorState } from "../components/StatePanels.jsx";
 import { SkeletonBlock } from "../components/Skeleton.jsx";
 import { ops } from "../api/client.js";
 import { queryKeys } from "../lib/queryClient.js";
 import { formatNumber, relativeTime } from "../lib/format.js";
+
+const SELLER_PAGE_SIZE = 15;
+const TRADE_PAGE_SIZE = 15;
+const ASSESSMENT_STEP = 5;
 
 const DATA_STATUS = {
   insufficient_data: ["Chưa đủ dữ liệu", "var(--text-muted)"],
@@ -61,6 +67,13 @@ export default function SellerTrustPage() {
   const disputes = trades.filter((trade) => trade.status === "disputed").length;
   const openAssessments = assessments.filter((item) => item.status === "open");
 
+  const sellerPage = usePagination(sellers, SELLER_PAGE_SIZE);
+  // The trade table used to render trades.slice(0, 30) with nothing saying so:
+  // past 30 rows the data simply vanished, which is worse than a long list
+  // because an Admin reads the truncated table as the whole picture.
+  const tradePage = usePagination(trades, TRADE_PAGE_SIZE);
+  const assessmentFeed = useLoadMore(openAssessments, ASSESSMENT_STEP);
+
   return (
     <div className="page-grid seller-trust-page">
       <div className="page-grid__row">
@@ -95,7 +108,7 @@ export default function SellerTrustPage() {
                 <table className="reputation-table seller-table">
                   <thead><tr><th>Người bán</th><th>Hoàn tất</th><th>Review xác thực</th><th>Buyer khác nhau</th><th>Điểm TB</th><th>Tín hiệu cần xem</th><th>Trạng thái dữ liệu</th></tr></thead>
                   <tbody>
-                    {sellers.map((seller) => {
+                    {sellerPage.slice.map((seller) => {
                       const [label, tone] = DATA_STATUS[seller.data_status] || DATA_STATUS.insufficient_data;
                       return (
                         <tr key={`${seller.community_id}:${seller.seller_id}`}>
@@ -115,6 +128,17 @@ export default function SellerTrustPage() {
                 </table>
               </div>
             )}
+            {!loading && sellers.length > 0 && (
+              <Pagination
+                page={sellerPage.page}
+                pageCount={sellerPage.pageCount}
+                onPageChange={sellerPage.setPage}
+                from={sellerPage.from}
+                to={sellerPage.to}
+                total={sellerPage.total}
+                unit="người bán"
+              />
+            )}
           </Card>
         </div>
       )}
@@ -127,9 +151,19 @@ export default function SellerTrustPage() {
             </p>
             {loading && <SkeletonBlock height={220} />}
             {!loading && openAssessments.length === 0 && <EmptyState message="Không có yêu cầu kiểm tra đang chờ." />}
-            {!loading && openAssessments.map((assessment) => (
+            {!loading && assessmentFeed.visible.map((assessment) => (
               <AssessmentCard assessment={assessment} key={assessment.assessment_id} onSaved={refresh} />
             ))}
+            {!loading && (
+              <LoadMore
+                remaining={assessmentFeed.remaining}
+                step={ASSESSMENT_STEP}
+                unit="yêu cầu"
+                onMore={assessmentFeed.showMore}
+                canCollapse={assessmentFeed.canCollapse}
+                onCollapse={assessmentFeed.collapse}
+              />
+            )}
           </Card>
         </div>
       )}
@@ -147,7 +181,7 @@ export default function SellerTrustPage() {
                 <table className="reputation-table seller-table">
                   <thead><tr><th>Mã</th><th>Buyer</th><th>Seller</th><th>Nội dung</th><th>Xác nhận</th><th>Trạng thái</th><th>Cập nhật</th></tr></thead>
                   <tbody>
-                    {trades.slice(0, 30).map((trade) => {
+                    {tradePage.slice.map((trade) => {
                       const [label, tone] = TRADE_STATUS[trade.status] || TRADE_STATUS.opened;
                       return (
                         <tr key={trade.trade_id}>
@@ -164,6 +198,17 @@ export default function SellerTrustPage() {
                   </tbody>
                 </table>
               </div>
+            )}
+            {!loading && trades.length > 0 && (
+              <Pagination
+                page={tradePage.page}
+                pageCount={tradePage.pageCount}
+                onPageChange={tradePage.setPage}
+                from={tradePage.from}
+                to={tradePage.to}
+                total={tradePage.total}
+                unit="giao dịch"
+              />
             )}
           </Card>
         </div>
