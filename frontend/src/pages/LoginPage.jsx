@@ -8,11 +8,17 @@ import { TransitionLink, usePageTransition } from "../transitions/PageTransition
 import "../login.css";
 
 const REGISTER_BLANK = { email: "", display_name: "", password: "" };
+const DEMO_PASSWORD = "12345678";
+const DEMO_ACCOUNTS = [
+  { email: "admin@gmail.com", password: DEMO_PASSWORD, role: "Admin" },
+  { email: "thaitudev04@gmail.com", password: DEMO_PASSWORD, role: "Mod" },
+];
 
 export default function LoginPage() {
   const location = useLocation(); const { isAuthenticated, signIn, register } = useAuth(); const { transitionTo } = usePageTransition();
   const [tab, setTab] = useState("login"); const [values, setValues] = useState({ email: "", password: "" }); const [registerValues, setRegisterValues] = useState(REGISTER_BLANK); const [revealed, setRevealed] = useState(false); const [submitting, setSubmitting] = useState(false); const [formError, setFormError] = useState(""); const submitRef = useRef(null);
   const switchTab = (next) => { setTab(next); setFormError(""); };
+  const fillDemo = (account) => { setValues({ email: account.email, password: account.password }); setFormError(""); };
   const destination = location.state?.from && location.state.from !== "/login" ? location.state.from : "/tong-quan";
   const submit = async (event) => {
     event.preventDefault(); setFormError(""); setSubmitting(true);
@@ -53,6 +59,16 @@ export default function LoginPage() {
         {formError && <p className="auth__alert" role="alert"><WarningCircle size={16} weight="fill" />{formError}</p>}
         <button ref={submitRef} type="submit" className="auth__submit" disabled={submitting}>{submitting ? <><SpinnerGap size={17} className="spin-icon" />Đang đăng nhập</> : <>Đăng nhập</>}</button>
       </form>}
+
+      {tab === "login" && <div className="auth__demo">
+        <p className="auth__demo-lead">Tài khoản demo — bấm để điền nhanh (mật khẩu: {DEMO_PASSWORD})</p>
+        {DEMO_ACCOUNTS.map((account) => (
+          <button key={account.email} type="button" className="auth__demo-row" onClick={() => fillDemo(account)}>
+            <span className="auth__demo-email">{account.email}</span>
+            <span className="auth__demo-role">{account.role}</span>
+          </button>
+        ))}
+      </div>}
 
       {tab === "register" && <>
         <p className="auth__notice"><Info size={16} weight="fill" /><span>Tài khoản tạo ở đây có quyền <strong>Admin</strong>. Nếu bạn được mời làm Mod, hãy dùng link mời Admin đã gửi cho bạn thay vì đăng ký ở đây.</span></p>
