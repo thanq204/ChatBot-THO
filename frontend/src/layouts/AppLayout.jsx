@@ -2,21 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import Sidebar from "../components/Sidebar.jsx";
 import Topbar from "../components/Topbar.jsx";
-
-// Must stay in sync with NAV_ITEMS in components/Sidebar.jsx.
-const PAGE_TITLES = {
-  "/tong-quan": "Tổng quan",
-  "/cong-dong": "Cộng đồng",
-  "/nhat-ky": "Nhật ký kiểm duyệt",
-  "/khu-thu-nghiem-ai": "Khu thử nghiệm AI",
-  "/quan-ly-mod": "Quản lý Mod",
-  "/quan-ly-faq": "Quản lý FAQ",
-  "/bang-exp": "Bảng EXP",
-  "/nguoi-ban": "Độ tin cậy người bán",
-  "/thong-bao": "Thông báo",
-  "/quan-ly-noi-dung": "Quản lý nội dung",
-  "/lenh-bot": "Nội dung lệnh bot",
-};
+import { PAGE_TITLES } from "../lib/navigation.js";
 
 const SIDEBAR_COLLAPSED_KEY = "acm-sidebar-collapsed";
 // Below this, .sidebar switches to a fixed off-canvas drawer (see styles.css),
@@ -28,6 +14,10 @@ export default function AppLayout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try { return window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1"; } catch { return false; }
   });
+  // Both hidden states only clip the sidebar visually — width:0 on desktop, an
+  // off-canvas transform on mobile — so without `inert` its eleven links stay
+  // in the tab order and a keyboard user walks through invisible controls.
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth <= MOBILE_BREAKPOINT);
   const location = useLocation();
   const pageTitle = PAGE_TITLES[location.pathname] ?? "Tổng quan";
 
@@ -35,14 +25,25 @@ export default function AppLayout() {
     try { window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, sidebarCollapsed ? "1" : "0"); } catch { /* ignore */ }
   }, [sidebarCollapsed]);
 
+  useEffect(() => {
+    const media = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT}px)`);
+    const onChange = (event) => setIsMobile(event.matches);
+    setIsMobile(media.matches);
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+  }, []);
+
+  const sidebarHidden = isMobile ? !sidebarOpen : sidebarCollapsed;
+
   const toggleSidebar = () => {
-    if (window.innerWidth <= MOBILE_BREAKPOINT) setSidebarOpen((open) => !open);
+    if (isMobile) setSidebarOpen((open) => !open);
     else setSidebarCollapsed((collapsed) => !collapsed);
   };
 
   return (
     <div className={["app-shell", sidebarOpen && "app-shell--sidebar-open", sidebarCollapsed && "app-shell--sidebar-collapsed"].filter(Boolean).join(" ")}>
-      <Sidebar open={sidebarOpen} onNavigate={() => setSidebarOpen(false)} />
+      <a className="skip-link" href="#noi-dung-chinh">Bỏ qua điều hướng, tới nội dung chính</a>
+      <Sidebar open={sidebarOpen} hidden={sidebarHidden} onNavigate={() => setSidebarOpen(false)} />
       {sidebarOpen && (
         <button
           type="button"
@@ -63,7 +64,7 @@ export default function AppLayout() {
           onMenuClick={toggleSidebar}
           menuLabel={sidebarCollapsed ? "Mở rộng menu" : "Thu gọn menu"}
         />
-        <main className="app-shell__content">
+        <main className="app-shell__content" id="noi-dung-chinh" tabIndex={-1}>
           <Outlet />
         </main>
       </div>

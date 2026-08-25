@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   List,
   MagnifyingGlass,
-  ChatCircleDots,
   Bell,
   CaretDown,
   Moon,
@@ -14,6 +13,7 @@ import {
 } from "@phosphor-icons/react";
 import { useAuth } from "../auth/AuthProvider.jsx";
 import { useTheme } from "../theme/ThemeProvider.jsx";
+import { searchNav } from "../lib/navigation.js";
 import ProfileModal from "./ProfileModal.jsx";
 
 export default function Topbar({ breadcrumb, onMenuClick, menuLabel = "Mở menu" }) {
@@ -22,7 +22,13 @@ export default function Topbar({ breadcrumb, onMenuClick, menuLabel = "Mở menu
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [highlight, setHighlight] = useState(0);
   const menuRef = useRef(null);
+  const searchRef = useRef(null);
+
+  const results = useMemo(() => searchNav(query, user?.role), [query, user?.role]);
+  const searchOpen = query.trim().length > 0;
 
   const handleSignOut = () => {
     signOut();
@@ -38,6 +44,41 @@ export default function Topbar({ breadcrumb, onMenuClick, menuLabel = "Mở menu
     return () => { document.removeEventListener("mousedown", handleClick); document.removeEventListener("keydown", handleKeyDown); };
   }, [menuOpen]);
 
+  useEffect(() => { setHighlight(0); }, [query]);
+
+  useEffect(() => {
+    if (!searchOpen) return undefined;
+    const handleClick = (event) => { if (!searchRef.current?.contains(event.target)) setQuery(""); };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [searchOpen]);
+
+  // Ctrl/Cmd+K from anywhere. An operator on the case queue should not have to
+  // reach for the mouse to jump to the audit log.
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        searchRef.current?.querySelector("input")?.focus();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  const go = useCallback((to) => {
+    setQuery("");
+    navigate(to);
+  }, [navigate]);
+
+  const onSearchKeyDown = (event) => {
+    if (event.key === "Escape") { setQuery(""); event.currentTarget.blur(); return; }
+    if (results.length === 0) return;
+    if (event.key === "ArrowDown") { event.preventDefault(); setHighlight((i) => (i + 1) % results.length); }
+    else if (event.key === "ArrowUp") { event.preventDefault(); setHighlight((i) => (i - 1 + results.length) % results.length); }
+    else if (event.key === "Enter") { event.preventDefault(); go(results[highlight].to); }
+  };
+
   const openProfile = useCallback(() => { setMenuOpen(false); setProfileOpen(true); }, []);
 
   return (
@@ -47,10 +88,50 @@ export default function Topbar({ breadcrumb, onMenuClick, menuLabel = "Mở menu
           <List size={20} weight="bold" />
         </button>
 
-        <label className="search">
-          <MagnifyingGlass size={17} />
-          <input type="search" placeholder="Tìm kiếm..." aria-label="Tìm kiếm" />
-        </label>
+        <div className="search" ref={searchRef}>
+          <label className="search__field">
+            <MagnifyingGlass size={17} />
+            <input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={onSearchKeyDown}
+              placeholder="Tìm trang..."
+              aria-label="Tìm trang"
+              aria-expanded={searchOpen}
+              aria-controls="topbar-search-results"
+              role="combobox"
+              aria-autocomplete="list"
+            />
+            <kbd className="search__hint" aria-hidden="true">Ctrl K</kbd>
+          </label>
+
+          {searchOpen && (
+            <div className="search-results" id="topbar-search-results" role="listbox">
+              {results.length === 0 ? (
+                <p className="search-results__empty">Không có trang nào khớp “{query}”.</p>
+              ) : (
+                results.map((item, index) => {
+                  const Icon = item.icon;
+                  return (
+                    <button
+                      key={item.to}
+                      type="button"
+                      role="option"
+                      aria-selected={index === highlight}
+                      className={`search-results__item ${index === highlight ? "is-active" : ""}`.trim()}
+                      onMouseEnter={() => setHighlight(index)}
+                      onClick={() => go(item.to)}
+                    >
+                      <Icon size={16} />
+                      {item.label}
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="topbar__right">
@@ -66,10 +147,13 @@ export default function Topbar({ breadcrumb, onMenuClick, menuLabel = "Mở menu
           {theme === "dark" ? <Sun size={19} weight="bold" /> : <Moon size={19} weight="bold" />}
         </button>
 
-        <button type="button" className="icon-btn" aria-label="Tin nhắn">
-          <ChatCircleDots size={19} />
-        </button>
-        <button type="button" className="icon-btn" aria-label="Thông báo">
+        <button
+          type="button"
+          className="icon-btn"
+          onClick={() => navigate("/thong-bao")}
+          aria-label="Thông báo"
+          title="Thông báo"
+        >
           <Bell size={19} />
         </button>
 

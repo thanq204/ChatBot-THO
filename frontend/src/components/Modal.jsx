@@ -3,6 +3,9 @@ import { createPortal } from "react-dom";
 import { X } from "@phosphor-icons/react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 /**
  * Centered dialog rendered into document.body. The portal matters: cards in the
  * page animate with transforms, and a transformed ancestor would break the
@@ -11,19 +14,56 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 export default function Modal({ open, title, onClose, children }) {
   const panelRef = useRef(null);
   const reduceMotion = useReducedMotion();
+  // Whatever the operator was on when the dialog opened, so focus can go back
+  // there on close instead of resetting to the top of the document.
+  const returnFocusRef = useRef(null);
 
   useEffect(() => {
     if (!open) return undefined;
+    returnFocusRef.current = document.activeElement;
+
     const handleKeyDown = (event) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      // Keep Tab inside the dialog. Without this, tabbing walks out onto the
+      // page behind the scrim — invisible under the overlay, but still
+      // focusable and still actionable with Enter.
+      const items = [...(panelRef.current?.querySelectorAll(FOCUSABLE) ?? [])].filter(
+        (node) => node.offsetParent !== null || node === document.activeElement,
+      );
+      if (items.length === 0) {
+        event.preventDefault();
+        panelRef.current?.focus();
+        return;
+      }
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (event.shiftKey && (document.activeElement === first || document.activeElement === panelRef.current)) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     };
+
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     document.addEventListener("keydown", handleKeyDown);
     panelRef.current?.focus();
+
     return () => {
       document.body.style.overflow = previousOverflow;
       document.removeEventListener("keydown", handleKeyDown);
+      // Guard the call: the trigger may have been unmounted by the very action
+      // that closed the dialog (deleting the row you opened it from).
+      if (typeof returnFocusRef.current?.focus === "function" && document.contains(returnFocusRef.current)) {
+        returnFocusRef.current.focus();
+      }
     };
   }, [open, onClose]);
 
