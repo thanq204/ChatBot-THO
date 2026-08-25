@@ -5,6 +5,7 @@ import Card from "../components/Card.jsx";
 import Badge from "../components/Badge.jsx";
 import MemberReportInbox from "../components/MemberReportInbox.jsx";
 import IncidentDetailModal from "../components/IncidentDetailModal.jsx";
+import LoadMore from "../components/LoadMore.jsx";
 import { SkeletonBlock, SkeletonLine } from "../components/Skeleton.jsx";
 import { ErrorState, EmptyState } from "../components/StatePanels.jsx";
 import { ops } from "../api/client.js";
@@ -45,13 +46,25 @@ const TIME_RANGE_OPTIONS = [
 
 const TIME_RANGE_MS = { "1d": 86400000, "7d": 7 * 86400000, "30d": 30 * 86400000 };
 
+const SEVERITY_ORDER = ["critical", "high", "medium", "low"];
+
+// One screen of rows. 180 cases rendered flat is the problem being fixed here,
+// so the list starts small and grows on demand instead of dumping everything.
+const PAGE_SIZE = 20;
+
 export default function CommunityPage() {
   const queryClient = useQueryClient();
   const [platformFilter, setPlatformFilter] = useState("");
   const [channelFilter, setChannelFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
+  // Default to "open": this queue is titled "cases cần Admin xem" (cases that
+  // need attention), so an already-resolved case does not belong in the first
+  // view by default — it can only ever add noise. "Mọi trạng thái" is still one
+  // click away in the dropdown for anyone auditing history.
+  const [statusFilter, setStatusFilter] = useState("open");
+  const [severityFilter, setSeverityFilter] = useState("");
   const [sortMode, setSortMode] = useState("severity");
   const [timeRange, setTimeRange] = useState("");
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [openId, setOpenId] = useState(null);
 
   // Each filter combination is its own cache entry, so flipping back to one you
@@ -96,6 +109,12 @@ export default function CommunityPage() {
     setChannelFilter("");
   }, [platformFilter]);
 
+  // Any change to what's being asked for should re-show page one, not append
+  // onto whatever was already loaded under the previous filter.
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [platformFilter, channelFilter, statusFilter, severityFilter, timeRange, sortMode]);
+
   const closeDetail = useCallback(() => setOpenId(null), []);
 
   const channelNameById = useMemo(
@@ -103,7 +122,9 @@ export default function CommunityPage() {
     [discordChannels],
   );
 
-  const visibleIncidents = useMemo(() => {
+  // Everything that matches platform/channel/time/status — i.e. what the severity
+  // chips count against, independent of which severity chip (if any) is active.
+  const scopedIncidents = useMemo(() => {
     let rows = incidents ?? [];
     if (platformFilter === "discord" && channelFilter) {
       rows = rows.filter((item) => item.channel_id === channelFilter);
@@ -119,14 +140,21 @@ export default function CommunityPage() {
     return rows;
   }, [incidents, platformFilter, channelFilter, timeRange, sortMode]);
 
-  const counts = useMemo(
-    () => ({
-      total: visibleIncidents.length,
-      critical: visibleIncidents.filter((item) => item.severity === "critical").length,
-      waiting: visibleIncidents.filter((item) => item.status === "open").length,
-    }),
-    [visibleIncidents],
-  );
+  const severityCounts = useMemo(() => {
+    const counts = { critical: 0, high: 0, medium: 0, low: 0 };
+    for (const item of scopedIncidents) {
+      if (counts[item.severity] !== undefined) counts[item.severity] += 1;
+    }
+    return counts;
+  }, [scopedIncidents]);
+
+  const visibleIncidents = useMemo(() => {
+    if (!severityFilter) return scopedIncidents;
+    return scopedIncidents.filter((item) => item.severity === severityFilter);
+  }, [scopedIncidents, severityFilter]);
+
+  const pageRows = useMemo(() => visibleIncidents.slice(0, visibleCount), [visibleIncidents, visibleCount]);
+  const remainingCount = visibleIncidents.length - pageRows.length;
 
   const openIncident = useMemo(
     () => (incidents ?? []).find((item) => item.incident_id === openId) ?? null,
@@ -214,20 +242,48 @@ export default function CommunityPage() {
           )}
           {!loading && visibleIncidents.length > 0 && (
             <div className={refreshing ? "is-refreshing" : undefined}>
-              <p className="case-tally">
-                <strong>{counts.total}</strong> case
-                <span className="case-tally__sep">·</span>
-                <strong>{counts.critical}</strong> nghiêm trọng
-                <span className="case-tally__sep">·</span>
-                <strong>{counts.waiting}</strong> chưa ai xử lý
-                <span className="case-tally__sep">·</span>
-                bấm vào một case để xem chi tiết
-              </p>
+              <div className="case-tally">
+                <p className="case-tally__line">
+                  <strong>{visibleIncidents.length}</strong> / {scopedIncidents.length} case
+                  {severityFilter ? ` (đang lọc ${severityLabel(severityFilter).toLowerCase()})` : ""}
+                  <span className="case-tally__sep">·</span>
+                  bấm vào một case để xem chi tiết
+                </p>
+                {/* Ưu tiên: chip theo mức độ cho phép nhảy thẳng tới "cần xử lý
+                    trước" thay vì phải tự lướt qua toàn bộ danh sách. */}
+                <div className="case-chip-row" role="group" aria-label="Lọc theo mức độ">
+                  {SEVERITY_ORDER.filter((sev) => severityCounts[sev] > 0).map((sev) => (
+                    <button
+                      key={sev}
+                      type="button"
+                      className={`case-chip${severityFilter === sev ? " is-active" : ""}`}
+                      style={{ "--chip-accent": SEVERITY_COLORS[sev] }}
+                      onClick={() => setSeverityFilter((current) => (current === sev ? "" : sev))}
+                      aria-pressed={severityFilter === sev}
+                    >
+                      {severityLabel(sev)} <span className="case-chip__count">{severityCounts[sev]}</span>
+                    </button>
+                  ))}
+                  {severityFilter && (
+                    <button type="button" className="case-chip case-chip--reset" onClick={() => setSeverityFilter("")}>
+                      Bỏ lọc
+                    </button>
+                  )}
+                </div>
+              </div>
               <div className="case-list">
-                {visibleIncidents.map((item) => (
+                {pageRows.map((item) => (
                   <CaseRow key={item.incident_id} incident={item} channelName={channelNameById[item.channel_id]} onOpen={setOpenId} />
                 ))}
               </div>
+              <LoadMore
+                remaining={remainingCount}
+                step={PAGE_SIZE}
+                unit="case"
+                onMore={() => setVisibleCount((count) => count + PAGE_SIZE)}
+                canCollapse={visibleCount > PAGE_SIZE}
+                onCollapse={() => setVisibleCount(PAGE_SIZE)}
+              />
             </div>
           )}
         </Card>
@@ -257,6 +313,9 @@ export default function CommunityPage() {
  */
 const CaseRow = memo(function CaseRow({ incident, channelName, onOpen }) {
   const actor = actorFromTitle(incident.title);
+  // Resolved/snoozed cases don't need Admin attention anymore; recede them
+  // visually so the eye lands on open/monitoring rows first.
+  const isSettled = incident.status === "resolved" || incident.status === "snoozed";
 
   // A <button> can't legally contain the <a> jump-to-Discord/Telegram link
   // below, so the row itself is a keyboard-accessible div instead.
@@ -264,7 +323,7 @@ const CaseRow = memo(function CaseRow({ incident, channelName, onOpen }) {
     <div
       role="button"
       tabIndex={0}
-      className="case-row"
+      className={`case-row${isSettled ? " case-row--settled" : ""}`}
       style={{ "--case-accent": SEVERITY_COLORS[incident.severity] ?? "var(--text-muted)" }}
       onClick={() => onOpen(incident.incident_id)}
       onKeyDown={(event) => {

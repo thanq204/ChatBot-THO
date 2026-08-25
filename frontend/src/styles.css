@@ -1766,6 +1766,15 @@ button.list-row:hover {
 }
 
 .case-tally {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  margin-bottom: 10px;
+}
+
+.case-tally__line {
   font-size: 12.5px;
   color: var(--text-muted);
 }
@@ -1777,6 +1786,52 @@ button.list-row:hover {
 
 .case-tally__sep {
   margin: 0 6px;
+}
+
+/* Severity quick-filter chips: lets the operator jump straight to "critical
+   only" instead of scanning a flat list of 100+ cases to find them. */
+.case-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.case-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-alt);
+  border: 1px solid color-mix(in srgb, var(--chip-accent, var(--border)) 35%, var(--border));
+  color: var(--chip-accent, var(--text-secondary));
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s var(--ease-out), transform 0.15s var(--ease-out);
+}
+
+.case-chip:hover {
+  background: color-mix(in srgb, var(--chip-accent, var(--accent-solid)) 12%, var(--surface-alt));
+}
+
+.case-chip:active {
+  transform: scale(0.97);
+}
+
+.case-chip.is-active {
+  background: color-mix(in srgb, var(--chip-accent, var(--accent-solid)) 20%, var(--surface-alt));
+  border-color: var(--chip-accent, var(--accent-solid));
+}
+
+.case-chip__count {
+  font-family: var(--font-mono);
+  opacity: 0.85;
+}
+
+.case-chip--reset {
+  color: var(--text-muted);
+  border-color: var(--border);
 }
 
 .case-list {
@@ -1799,7 +1854,7 @@ button.list-row:hover {
   border-left: 3px solid var(--case-accent);
   border-radius: var(--radius-control);
   transition: border-color 0.15s var(--ease-out), background-color 0.15s var(--ease-out),
-    transform 0.15s var(--ease-out), box-shadow 0.15s var(--ease-out);
+    transform 0.15s var(--ease-out), box-shadow 0.15s var(--ease-out), opacity 0.15s var(--ease-out);
 }
 
 .case-row:hover {
@@ -1812,6 +1867,18 @@ button.list-row:hover {
 
 .case-row:active {
   transform: translateY(0);
+}
+
+/* Resolved/snoozed rows only ever show up when "Mọi trạng thái" is picked
+   explicitly; recede them so open/monitoring cases keep first claim on
+   attention instead of a settled critical case reading as urgent again. */
+.case-row--settled {
+  opacity: 0.55;
+  border-left-color: var(--border);
+}
+
+.case-row--settled:hover {
+  opacity: 0.9;
 }
 
 .case-row__title {
@@ -3272,5 +3339,515 @@ button.list-row:hover {
     width: 32px;
     height: 32px;
     border-radius: 10px;
+  }
+}
+
+/* ==========================================================================
+   Data table
+   The shared table shell: accounts today, anything else that is genuinely
+   tabular next. Header is sticky inside the scroll box so the column names
+   survive a long page, and the whole thing scrolls horizontally on its own
+   rather than pushing the layout sideways.
+   ========================================================================== */
+
+.data-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+}
+
+.data-table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: collapse;
+}
+
+.data-table th,
+.data-table td {
+  padding: 12px 16px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.data-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-alt);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.data-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.data-table tbody tr {
+  transition: background-color 0.15s var(--ease-out);
+}
+
+.data-table tbody tr:hover {
+  background: color-mix(in srgb, var(--accent-solid) 4%, transparent);
+}
+
+/* A locked account is still listed — it just stops competing for attention
+   with the accounts that can actually act. */
+.data-table__row--muted td {
+  opacity: 0.6;
+}
+
+.data-table__email {
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  word-break: break-all;
+}
+
+.data-table__actions-head,
+.data-table__actions {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.data-table__actions .row-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.data-table__actions .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
+/* Name cell: monogram + name, so rows are scannable by shape before they are
+   read. The avatar is decorative, hence aria-hidden in the markup. */
+.user-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.user-cell__avatar {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.user-cell__avatar.is-admin {
+  background: color-mix(in srgb, var(--accent-solid) 14%, transparent);
+  border-color: color-mix(in srgb, var(--accent-solid) 30%, transparent);
+  color: var(--accent-solid);
+}
+
+.user-cell__name {
+  font-weight: 600;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Status reads as a dot plus a word, not a third badge — three pill shapes in
+   one row and none of them means anything at a glance. */
+.status-dot {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.status-dot::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+.status-dot--on::before {
+  background: var(--sev-low);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--sev-low) 18%, transparent);
+}
+
+.status-dot--off::before {
+  background: var(--text-muted);
+}
+
+.icon-btn--danger:hover {
+  background: color-mix(in srgb, var(--sev-critical) 12%, transparent);
+  color: var(--sev-critical);
+}
+
+.icon-btn:disabled,
+.data-table__actions .btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Filter row above a table: segmented control on the left, search on the
+   right, collapsing to stacked full-width on narrow screens. */
+.table-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.table-toolbar .search-box {
+  flex: 1;
+  min-width: 200px;
+  max-width: 320px;
+}
+
+.account-tally {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.account-tally strong {
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.account-tally__sep {
+  color: var(--border);
+}
+
+/* ==========================================================================
+   Pagination
+   For lists you scan or audit — a table of accounts, a document library. A
+   chronological feed gets .load-more instead: nobody asks for "page 4" of an
+   audit log, they ask for more of it.
+   ========================================================================== */
+
+.pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  margin-top: 14px;
+}
+
+.pagination__summary {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.pagination__summary strong {
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.pagination__pages {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pagination__page,
+.pagination__step {
+  display: grid;
+  place-items: center;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  transition: background-color 0.15s var(--ease-out), color 0.15s var(--ease-out),
+    border-color 0.15s var(--ease-out);
+}
+
+.pagination__page:hover:not(.is-active),
+.pagination__step:hover:not(:disabled) {
+  background: var(--surface-alt);
+  color: var(--text-primary);
+}
+
+.pagination__page.is-active {
+  background: var(--accent-solid);
+  border-color: var(--accent-solid);
+  color: #ffffff;
+  cursor: default;
+}
+
+.pagination__step:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.pagination__gap {
+  padding: 0 2px;
+  color: var(--text-muted);
+  user-select: none;
+}
+
+.pagination__size {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.pagination__size select {
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+/* ==========================================================================
+   Load more
+   Progressive reveal for chronological feeds. Generalised from the case queue,
+   which now uses the same component.
+   ========================================================================== */
+
+.load-more-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.load-more {
+  display: flex;
+  flex: 1;
+  align-items: baseline;
+  justify-content: center;
+  gap: 8px;
+  padding: 9px 16px;
+  border-radius: var(--radius-control);
+  border: 1px dashed var(--border);
+  background: transparent;
+  color: var(--accent-solid);
+  font-size: 12.5px;
+  font-weight: 600;
+  transition: background-color 0.15s var(--ease-out), border-color 0.15s var(--ease-out);
+}
+
+.load-more:hover {
+  background: var(--surface-alt);
+  border-color: color-mix(in srgb, var(--accent-solid) 40%, var(--border));
+}
+
+.load-more__hint {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.load-more--collapse {
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+}
+
+/* ==========================================================================
+   Invite list (Quản lý Mod)
+   ========================================================================== */
+
+.invite-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.invite-form__field {
+  display: grid;
+  flex: 1;
+  min-width: 220px;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.invite-form__field input {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-alt);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.invite-form__warning {
+  margin-top: 8px;
+  font-size: 12.5px;
+  color: var(--sev-critical);
+}
+
+.card__divider-block {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.section-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.section-label__count {
+  display: grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--accent-solid) 14%, transparent);
+  color: var(--accent-solid);
+  font-size: 11px;
+  letter-spacing: 0;
+}
+
+.invite-list {
+  display: grid;
+  gap: 10px;
+}
+
+.invite-card {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-alt);
+}
+
+.invite-card__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.invite-card__email {
+  flex: 1;
+  min-width: 160px;
+  font-weight: 600;
+  font-size: 13px;
+  word-break: break-all;
+}
+
+.invite-card__link {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.invite-card__link input {
+  flex: 1;
+  min-width: 200px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+
+.invite-card__link .btn,
+.invite-card__head .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 12px;
+  font-size: 12px;
+}
+
+.select-all {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0 10px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.select-all__count {
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--accent-solid) 14%, transparent);
+  color: var(--accent-solid);
+  font-weight: 600;
+  font-size: 11.5px;
+}
+
+@media (max-width: 768px) {
+  .table-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .table-toolbar .search-box {
+    max-width: none;
+  }
+
+  .table-toolbar .segmented {
+    align-self: stretch;
+    justify-content: space-between;
+  }
+
+  .pagination {
+    justify-content: center;
+  }
+
+  .pagination__summary {
+    width: 100%;
+    text-align: center;
+  }
+
+  .invite-card__head .btn {
+    width: 100%;
+    justify-content: center;
   }
 }
