@@ -21,6 +21,7 @@ from backend.models.operations import (
 )
 from backend.services.operations_store import OperationsStore
 from backend.services.link_safety import assess_spam
+from backend.services.message_filter import message_is_automated
 from backend.services.policy_retrieval import PolicyRetriever
 
 logger = logging.getLogger(__name__)
@@ -56,6 +57,20 @@ class OperationsPipeline:
         self.policy_retriever = PolicyRetriever(self.settings, self.store)
 
     def analyze(self, message: CommonMessage, context: list[CommonMessage] | None = None) -> MessageDecision:
+        if message_is_automated(message):
+            return MessageDecision(
+                decision="allow",
+                category="safe",
+                severity="low",
+                risk_score=0.0,
+                confidence=1.0,
+                evidence=[],
+                explanation="Bỏ qua nội dung tự động; moderation chỉ xét tin nhắn của thành viên.",
+                model_used="human-message-filter",
+                gates=[],
+                send_to_admin=False,
+                send_to_member=False,
+            )
         gate1 = self.gate1(message)
         if context is not None:
             nearby = context

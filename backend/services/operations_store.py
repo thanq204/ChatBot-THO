@@ -55,6 +55,7 @@ from backend.models.operations import (
 )
 from backend.services.database import json_value, postgres_connection, timestamp_value
 from backend.services.link_safety import canonicalize_url, extract_urls, url_hash
+from backend.services.message_filter import message_is_automated
 from backend.services.question_intent import is_reusable_faq_question
 
 
@@ -280,6 +281,35 @@ class OperationsStore:
         self.seed_reputation_rules()
         if not self.is_postgres or self.settings.operations_seed_defaults:
             self.seed_defaults()
+
+    def _human_message_predicate(self, alias: str = "m") -> str:
+        """SQL predicate shared by dashboards, context and incident queues."""
+        known_bot = f"""NOT EXISTS (
+            SELECT 1 FROM community_members automated_member
+            WHERE automated_member.platform={alias}.platform
+              AND automated_member.community_id={alias}.community_id
+              AND automated_member.platform_user_id={alias}.author_id
+              AND automated_member.is_bot=TRUE
+        )"""
+        if self.is_postgres:
+            raw_checks = f"""
+                LOWER(COALESCE({alias}.raw_json->>'author_is_bot', 'false')) NOT IN ('true', '1')
+                AND LOWER(COALESCE({alias}.raw_json->'author'->>'bot', 'false')) NOT IN ('true', '1')
+                AND LOWER(COALESCE({alias}.raw_json->'message'->'from'->>'is_bot', 'false')) NOT IN ('true', '1')
+                AND LOWER(COALESCE({alias}.raw_json->'from'->>'is_bot', 'false')) NOT IN ('true', '1')
+                AND NULLIF({alias}.raw_json->>'webhook_id', '') IS NULL
+                AND NULLIF({alias}.raw_json->>'application_id', '') IS NULL
+            """
+        else:
+            raw_checks = f"""
+                COALESCE(json_extract({alias}.raw_json, '$.author_is_bot'), 0) NOT IN (1, 'true')
+                AND COALESCE(json_extract({alias}.raw_json, '$.author.bot'), 0) NOT IN (1, 'true')
+                AND COALESCE(json_extract({alias}.raw_json, '$.message.from.is_bot'), 0) NOT IN (1, 'true')
+                AND COALESCE(json_extract({alias}.raw_json, '$.from.is_bot'), 0) NOT IN (1, 'true')
+                AND NULLIF(json_extract({alias}.raw_json, '$.webhook_id'), '') IS NULL
+                AND NULLIF(json_extract({alias}.raw_json, '$.application_id'), '') IS NULL
+            """
+        return f"({known_bot} AND {raw_checks})"
 
     def _connect(self, readonly: bool = False):
         if self.is_postgres:
@@ -695,7 +725,7 @@ class OperationsStore:
                     message.community_id,
                     message.author_id,
                     message.author_name,
-                    bool(message.raw.get("author_is_bot", False)),
+                    message_is_automated(message),
                     0,
                     message.timestamp.isoformat(),
                     message.timestamp.isoformat(),
@@ -1282,12 +1312,14 @@ class OperationsStore:
     def list_seller_summaries(self) -> list[SellerTrustSummary]:
         trades = self.list_trade_cases()
         reviews = self.list_seller_reviews()
+        human_only = self._human_message_predicate("m")
         with self._connect(readonly=True) as db:
             reviewed_incidents = db.execute(
-                """SELECT DISTINCT m.community_id, m.author_id, m.incident_id, a.payload_json
+                f"""SELECT DISTINCT m.community_id, m.author_id, m.incident_id, a.payload_json
                 FROM operations_messages m
                 JOIN operations_audit a ON a.incident_id=m.incident_id
-                WHERE m.category='spam' AND a.event_type='incident_reputation_decision'"""
+                WHERE m.category='spam' AND a.event_type='incident_reputation_decision'
+                  AND {human_only}"""
             ).fetchall()
         keys = {(trade.community_id, trade.seller_id) for trade in trades}
         output: list[SellerTrustSummary] = []
@@ -1625,12 +1657,14 @@ class OperationsStore:
     def recent_context(self, message: CommonMessage) -> list[CommonMessage]:
         """Load nearby messages from the same live conversation for Gate 2."""
         since = message.timestamp - timedelta(minutes=self.settings.moderation_context_window_minutes)
+        human_only = self._human_message_predicate("m")
         with self._connect() as db:
             rows = db.execute(
-                """SELECT * FROM operations_messages
-                WHERE platform=? AND community_id=? AND channel_id=? AND message_id<>?
+                f"""SELECT m.* FROM operations_messages m
+                WHERE m.platform=? AND m.community_id=? AND m.channel_id=? AND m.message_id<>?
                   AND timestamp>=? AND timestamp<=?
                   AND (? IS NULL OR thread_key=? OR parent_message_id=?)
+                  AND {human_only}
                 ORDER BY timestamp DESC LIMIT ?""",
                 (
                     message.platform,
@@ -1676,7 +1710,7 @@ class OperationsStore:
         # A Telegram alert belongs to the member who sent it.  Identical text
         # from another member is a separate moderation event and must still be
         # delivered to Admin/Mod.
-        author_clause = " AND author_id=?" if message.platform == "telegram" else ""
+        author_clause = " AND m.author_id=?" if message.platform == "telegram" else ""
         params: list[Any] = [
             message.platform,
             message.community_id,
@@ -1686,13 +1720,15 @@ class OperationsStore:
         if message.platform == "telegram":
             params.append(message.author_id)
         params.extend([since.isoformat(), message.timestamp.isoformat()])
+        human_only = self._human_message_predicate("m")
         with self._connect() as db:
             rows = db.execute(
-                f"""SELECT text, incident_id FROM operations_messages
-                WHERE platform=? AND community_id=? AND channel_id=? AND category=?
+                f"""SELECT m.text, m.incident_id FROM operations_messages m
+                WHERE m.platform=? AND m.community_id=? AND m.channel_id=? AND m.category=?
                   {author_clause}
-                  AND incident_id IS NOT NULL AND timestamp>=? AND timestamp<=?
-                ORDER BY timestamp DESC LIMIT 30""",
+                  AND m.incident_id IS NOT NULL AND m.timestamp>=? AND m.timestamp<=?
+                  AND {human_only}
+                ORDER BY m.timestamp DESC LIMIT 30""",
                 tuple(params),
             ).fetchall()
         normalized = _fold_search_text(message.text)
@@ -1934,10 +1970,16 @@ class OperationsStore:
         return [float(item) for item in text.split(",") if item.strip()]
 
     def find_open_incident(self, message: CommonMessage) -> Incident | None:
+        human_only = self._human_message_predicate("human_message")
         with self._connect() as db:
             row = db.execute(
-                """SELECT * FROM operations_incidents WHERE platform=? AND community_id=? AND channel_id=?
+                f"""SELECT * FROM operations_incidents WHERE platform=? AND community_id=? AND channel_id=?
                 AND status IN ('open','monitoring') AND ((thread_key IS NULL AND ? IS NULL) OR thread_key=?)
+                AND EXISTS (
+                    SELECT 1 FROM operations_messages human_message
+                    WHERE human_message.incident_id=operations_incidents.incident_id
+                      AND {human_only}
+                )
                 ORDER BY updated_at DESC LIMIT 1""",
                 (message.platform, message.community_id, message.channel_id, message.thread_key, message.thread_key),
             ).fetchone()
@@ -1958,6 +2000,7 @@ class OperationsStore:
                     WHERE i.platform=? AND i.community_id=? AND i.channel_id=?
                       AND i.status IN ('open','monitoring')
                       {author_clause} AND lower(trim(m.text))=lower(trim(?))
+                      AND {self._human_message_predicate('m')}
                       AND i.last_seen >= ?
                     ORDER BY i.updated_at DESC LIMIT 1""",
                     tuple(params),
@@ -2001,7 +2044,14 @@ class OperationsStore:
         return self._with_incident_author_names([self._incident(row)])[0]
 
     def list_incidents(self, status: str | None = None, platform: str | None = None) -> list[Incident]:
-        clauses, values = [], []
+        human_only = self._human_message_predicate("human_message")
+        clauses, values = [
+            f"""EXISTS (
+                SELECT 1 FROM operations_messages human_message
+                WHERE human_message.incident_id=operations_incidents.incident_id
+                  AND {human_only}
+            )"""
+        ], []
         if status:
             clauses.append("status=?")
             values.append(status)
@@ -2019,10 +2069,12 @@ class OperationsStore:
         if not telegram_ids:
             return incidents
         placeholders = ",".join("?" for _ in telegram_ids)
+        human_only = self._human_message_predicate("m")
         with self._connect(readonly=True) as db:
             rows = db.execute(
-                f"""SELECT incident_id, author_id, raw_json FROM operations_messages
-                WHERE incident_id IN ({placeholders}) ORDER BY timestamp""",
+                f"""SELECT m.incident_id, m.author_id, m.raw_json FROM operations_messages m
+                WHERE m.incident_id IN ({placeholders}) AND {human_only}
+                ORDER BY m.timestamp""",
                 telegram_ids,
             ).fetchall()
         senders_by_incident: dict[str, list[tuple[str, str]]] = {}
@@ -2058,17 +2110,32 @@ class OperationsStore:
         return enriched
 
     def list_incident_messages(self, incident_id: str) -> list[dict[str, Any]]:
+        human_only = self._human_message_predicate("m")
         with self._connect() as db:
-            rows = db.execute("SELECT * FROM operations_messages WHERE incident_id=? ORDER BY timestamp", (incident_id,)).fetchall()
+            rows = db.execute(
+                f"""SELECT m.* FROM operations_messages m
+                WHERE m.incident_id=? AND {human_only} ORDER BY m.timestamp""",
+                (incident_id,),
+            ).fetchall()
         return [dict(row) for row in rows]
 
     def get_incident_message(self, incident_id: str, message_id: str | None = None) -> dict[str, Any] | None:
         """Get the explicitly selected message, or the latest case message."""
+        human_only = self._human_message_predicate("m")
         with self._connect(readonly=True) as db:
             if message_id:
-                row = db.execute("SELECT * FROM operations_messages WHERE incident_id=? AND message_id=?", (incident_id, message_id)).fetchone()
+                row = db.execute(
+                    f"""SELECT m.* FROM operations_messages m
+                    WHERE m.incident_id=? AND m.message_id=? AND {human_only}""",
+                    (incident_id, message_id),
+                ).fetchone()
             else:
-                row = db.execute("SELECT * FROM operations_messages WHERE incident_id=? ORDER BY timestamp DESC LIMIT 1", (incident_id,)).fetchone()
+                row = db.execute(
+                    f"""SELECT m.* FROM operations_messages m
+                    WHERE m.incident_id=? AND {human_only}
+                    ORDER BY m.timestamp DESC LIMIT 1""",
+                    (incident_id,),
+                ).fetchone()
         return dict(row) if row else None
 
     def decide_incident_reputation(
@@ -2901,9 +2968,17 @@ class OperationsStore:
 
     def community_health(self, window_hours: int = 24) -> CommunityHealth:
         since = (datetime.now(UTC) - timedelta(hours=window_hours)).isoformat()
+        human_only = self._human_message_predicate("m")
         with self._connect(readonly=True) as db:
-            rows = db.execute("SELECT text, category, decision, author_id FROM operations_messages WHERE timestamp>=?", (since,)).fetchall()
-            first_seen = db.execute("SELECT author_id, MIN(timestamp) first_seen FROM operations_messages GROUP BY author_id").fetchall()
+            rows = db.execute(
+                f"""SELECT m.text, m.category, m.decision, m.author_id
+                FROM operations_messages m WHERE m.timestamp>=? AND {human_only}""",
+                (since,),
+            ).fetchall()
+            first_seen = db.execute(
+                f"""SELECT m.author_id, MIN(m.timestamp) first_seen
+                FROM operations_messages m WHERE {human_only} GROUP BY m.author_id"""
+            ).fetchall()
             open_suggestions = int(db.execute("SELECT COUNT(*) FROM operations_faq_suggestions WHERE status='open'").fetchone()[0])
         categories = [str(row["category"] or "") for row in rows]
         terms: dict[str, int] = {}
@@ -2940,9 +3015,11 @@ class OperationsStore:
         newest -= timedelta(hours=newest.hour % bucket_hours)
         start = newest - bucket * (slots - 1)
 
+        human_only = self._human_message_predicate("m")
         with self._connect(readonly=True) as db:
             rows = db.execute(
-                "SELECT timestamp, COALESCE(decision,'allow') decision FROM operations_messages WHERE timestamp>=?",
+                f"""SELECT m.timestamp, COALESCE(m.decision,'allow') decision
+                FROM operations_messages m WHERE m.timestamp>=? AND {human_only}""",
                 (start.isoformat(),),
             ).fetchall()
 
@@ -3245,27 +3322,34 @@ class OperationsStore:
         # every weak query look like a perfect retrieval match.
         return [(min(0.95, score / (score + 2.0)), doc) for score, _semantic_hits, doc in selected]
 
-    # Six separate statements here used to cost six round-trips, which dominates
-    # the overview page against a remote database. The counts collapse into one
-    # scalar row and the three breakdowns into one tagged UNION.
-    _SUMMARY_COUNTS_SQL = """
-        SELECT
-            (SELECT COUNT(*) FROM operations_messages) total_messages,
-            (SELECT COUNT(*) FROM operations_incidents WHERE status IN ('open','monitoring')) open_incidents,
-            (SELECT COUNT(*) FROM operations_incidents WHERE severity='critical' AND status IN ('open','monitoring')) critical_incidents
-    """
-    _SUMMARY_BREAKDOWN_SQL = """
-        SELECT 'platform' dimension, platform label, COUNT(*) count FROM operations_messages GROUP BY platform
-        UNION ALL
-        SELECT 'decision', COALESCE(decision,'unknown'), COUNT(*) FROM operations_messages GROUP BY decision
-        UNION ALL
-        SELECT 'category', COALESCE(category,'unknown'), COUNT(*) FROM operations_messages GROUP BY category
-    """
-
     def summary(self) -> OperationsSummary:
+        human_only = self._human_message_predicate("m")
+        human_incident = f"""EXISTS (
+            SELECT 1 FROM operations_messages m
+            WHERE m.incident_id=i.incident_id AND {human_only}
+        )"""
+        counts_sql = f"""
+            SELECT
+                (SELECT COUNT(*) FROM operations_messages m WHERE {human_only}) total_messages,
+                (SELECT COUNT(*) FROM operations_incidents i
+                 WHERE i.status IN ('open','monitoring') AND {human_incident}) open_incidents,
+                (SELECT COUNT(*) FROM operations_incidents i
+                 WHERE i.severity='critical' AND i.status IN ('open','monitoring')
+                   AND {human_incident}) critical_incidents
+        """
+        breakdown_sql = f"""
+            SELECT 'platform' dimension, m.platform label, COUNT(*) count
+            FROM operations_messages m WHERE {human_only} GROUP BY m.platform
+            UNION ALL
+            SELECT 'decision', COALESCE(m.decision,'unknown'), COUNT(*)
+            FROM operations_messages m WHERE {human_only} GROUP BY m.decision
+            UNION ALL
+            SELECT 'category', COALESCE(m.category,'unknown'), COUNT(*)
+            FROM operations_messages m WHERE {human_only} GROUP BY m.category
+        """
         with self._connect(readonly=True) as db:
-            counts = db.execute(self._SUMMARY_COUNTS_SQL).fetchone()
-            breakdown_rows = db.execute(self._SUMMARY_BREAKDOWN_SQL).fetchall()
+            counts = db.execute(counts_sql).fetchone()
+            breakdown_rows = db.execute(breakdown_sql).fetchall()
 
         buckets: dict[str, dict[str, int]] = {"platform": {}, "decision": {}, "category": {}}
         for row in breakdown_rows:

@@ -15,6 +15,7 @@ import requests
 
 from backend.config import Settings, get_settings
 from backend.models.operations import CommonMessage, DiscordChannelOption, PlatformStatus
+from backend.services.message_filter import raw_message_is_automated
 from backend.services.operations_store import OperationsStore
 
 # Discord channel types that can hold readable text history via the REST API.
@@ -194,7 +195,24 @@ class PlatformConnectors:
             before = items[-1].get("id")
             if len(items) < params["limit"]:
                 break
-        messages = [CommonMessage(message_id=item["id"], platform="discord", community_id=guild_id, channel_id=channel_id, thread_key=str(item.get("message_reference", {}).get("message_id") or item["id"]), parent_message_id=(item.get("message_reference") or {}).get("message_id"), author_id=str((item.get("author") or {}).get("id") or "anonymous"), author_name=(item.get("author") or {}).get("global_name") or (item.get("author") or {}).get("username"), text=item.get("content") or "[non-text message]", timestamp=self._date(item.get("timestamp")), source_url=f"https://discord.com/channels/{guild_id}/{channel_id}/{item['id']}", raw=item) for item in collected if item.get("content")]
+        messages = [
+            CommonMessage(
+                message_id=item["id"],
+                platform="discord",
+                community_id=guild_id,
+                channel_id=channel_id,
+                thread_key=str(item.get("message_reference", {}).get("message_id") or item["id"]),
+                parent_message_id=(item.get("message_reference") or {}).get("message_id"),
+                author_id=str((item.get("author") or {}).get("id") or "anonymous"),
+                author_name=(item.get("author") or {}).get("global_name") or (item.get("author") or {}).get("username"),
+                text=item["content"],
+                timestamp=self._date(item.get("timestamp")),
+                source_url=f"https://discord.com/channels/{guild_id}/{channel_id}/{item['id']}",
+                raw=item,
+            )
+            for item in collected
+            if item.get("content") and not raw_message_is_automated("discord", item)
+        ]
         return messages, newest_seen_id
 
     def _telegram(self, limit: int) -> list[CommonMessage]:
@@ -210,6 +228,8 @@ class PlatformConnectors:
                 continue
             chat = item.get("chat") or {}
             sender = item.get("from") or {}
+            if sender.get("is_bot"):
+                continue
             display_name = sender.get("username") or " ".join(filter(None, [sender.get("first_name"), sender.get("last_name")])) or None
             messages.append(CommonMessage(message_id=f"tg-{item.get('chat', {}).get('id')}-{item.get('message_id')}", platform="telegram", community_id=str(chat.get("id") or "telegram"), channel_id=str(chat.get("id") or "general"), thread_key=str(item.get("reply_to_message", {}).get("message_id") or item.get("message_id")), parent_message_id=(item.get("reply_to_message") or {}).get("message_id"), author_id=str(sender.get("id") or "anonymous"), author_name=display_name, text=item["text"], timestamp=datetime.fromtimestamp(item.get("date", 0), UTC), source_url=self._telegram_message_link(chat, item.get("message_id")), raw=update))
         return messages
