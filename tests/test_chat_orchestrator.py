@@ -55,6 +55,43 @@ def test_community_health_counts_spam(tmp_path) -> None:
     assert health.risky_count == 1
 
 
+def test_community_views_exclude_bot_messages_and_bot_only_incidents(tmp_path) -> None:
+    settings = Settings(database_url=f"sqlite:///{tmp_path / 'app.db'}")
+    store = OperationsStore(settings)
+    decision = allowed().model_copy(update={"decision": "hide", "category": "spam", "risk_score": 0.9})
+    human = message("human-1", "member input").model_copy(
+        update={"platform": "discord", "community_id": "guild", "channel_id": "general", "thread_key": "human"}
+    )
+    bot = human.model_copy(
+        update={
+            "message_id": "bot-1",
+            "author_id": "bot-user",
+            "text": "bot output",
+            "thread_key": "bot",
+            "raw": {"type": 0, "author": {"id": "bot-user", "bot": True}},
+        }
+    )
+    store.save_message(bot, decision, None)
+    bot_incident = store.upsert_incident(bot, decision)
+    store.link_message_incident(bot.message_id, bot_incident.incident_id)
+    store.save_message(human, decision, None)
+    human_incident = store.upsert_incident(human, decision)
+    store.link_message_incident(human.message_id, human_incident.incident_id)
+
+    health = store.community_health()
+    summary = store.summary()
+    timeline = store.activity_timeline()
+    incidents = store.list_incidents()
+
+    assert health.messages_total == 1
+    assert health.unique_members == 1
+    assert summary.messages_analyzed == 1
+    assert summary.open_incidents == 1
+    assert timeline.scanned_total == 1
+    assert len(incidents) == 1
+    assert "member-1" in incidents[0].title
+
+
 def test_level_one_commands_bypass_moderation() -> None:
     store = Mock()
     store.list_command_content.return_value = [
