@@ -54,7 +54,7 @@
   --border: #e4e4e9;
   --text-primary: #18181b;
   --text-secondary: #52525b;
-  --text-muted: #8b8b93;
+  --text-muted: #6b6b74;
   --scrim: rgb(24 24 27 / 0.4);
 }
 
@@ -66,7 +66,7 @@
     --border: #29292f;
     --text-primary: #f4f4f5;
     --text-secondary: #b0b0b8;
-    --text-muted: #7a7a82;
+    --text-muted: #87878f;
     --shadow-card: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px rgb(0 0 0 / 0.35);
     --scrim: rgb(0 0 0 / 0.55);
   }
@@ -79,7 +79,7 @@
   --border: #29292f;
   --text-primary: #f4f4f5;
   --text-secondary: #b0b0b8;
-  --text-muted: #7a7a82;
+  --text-muted: #87878f;
   --shadow-card: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px rgb(0 0 0 / 0.35);
   --scrim: rgb(0 0 0 / 0.55);
 }
@@ -319,31 +319,9 @@ a {
   display: inline-flex;
 }
 
-.search {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: var(--surface-alt);
-  border: 1px solid transparent;
-  border-radius: var(--radius-pill);
-  padding: 8px 14px;
-  color: var(--text-muted);
-  width: 260px;
-  transition: border-color 0.18s var(--ease-out);
-}
-
-.search:focus-within {
-  border-color: var(--accent-solid);
-}
-
-.search input {
-  border: none;
-  background: none;
-  outline: none;
-  width: 100%;
-  color: var(--text-primary);
-}
-
+/* The topbar search is now a quick-nav combobox; its shell lives with the
+   search-results dropdown further down. Only the placeholder colour is
+   general enough to keep here. */
 .search input::placeholder {
   color: var(--text-muted);
 }
@@ -3849,5 +3827,254 @@ button.list-row:hover {
   .invite-card__head .btn {
     width: 100%;
     justify-content: center;
+  }
+}
+
+/* ==========================================================================
+   Skip link
+   Hidden until focused. Without it, every route change means tabbing through
+   eleven sidebar links before reaching the page itself.
+   ========================================================================== */
+
+.skip-link {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 100;
+  padding: 10px 18px;
+  border-radius: var(--radius-control);
+  background: var(--accent-solid);
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  box-shadow: var(--shadow-card);
+  transform: translateY(-150%);
+  transition: transform 0.18s var(--ease-out);
+}
+
+.skip-link:focus-visible {
+  transform: translateY(0);
+}
+
+/* The main region gets focus programmatically when the skip link is used, so
+   suppress the ring it would otherwise draw around the whole page. */
+.app-shell__content:focus {
+  outline: none;
+}
+
+/* ==========================================================================
+   Touch targets
+   The icon buttons stay 36px visually — 44px squares would look heavy in a
+   dense toolbar — but on a coarse pointer the hit area is expanded to the
+   recommended 44px with a pseudo-element, which costs nothing visually.
+   ========================================================================== */
+
+@media (pointer: coarse) {
+  .icon-btn,
+  .pagination__page,
+  .pagination__step {
+    position: relative;
+  }
+
+  .icon-btn::after,
+  .pagination__page::after,
+  .pagination__step::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: max(100%, 44px);
+    height: max(100%, 44px);
+    transform: translate(-50%, -50%);
+  }
+}
+
+/* ==========================================================================
+   Topbar search — quick navigation
+   ========================================================================== */
+
+.search {
+  position: relative;
+}
+
+.search__field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 260px;
+  max-width: 100%;
+  padding: 0 10px 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-alt);
+  color: var(--text-muted);
+  transition: border-color 0.15s var(--ease-out), background-color 0.15s var(--ease-out);
+}
+
+.search__field:focus-within {
+  border-color: color-mix(in srgb, var(--accent-solid) 50%, var(--border));
+  background: var(--surface);
+}
+
+.search__field input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 0;
+  border: none;
+  background: none;
+  color: var(--text-primary);
+  font-size: 13px;
+  outline: none;
+}
+
+/* The stock clear affordance would sit on top of the shortcut hint. */
+.search__field input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.search__hint {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.search__field:focus-within .search__hint {
+  opacity: 0;
+}
+
+.search-results {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  min-width: 260px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+.search-results__item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: var(--text-secondary);
+  font-size: 13px;
+  text-align: left;
+}
+
+.search-results__item.is-active {
+  background: var(--surface-alt);
+  color: var(--text-primary);
+}
+
+.search-results__empty {
+  padding: 10px;
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
+
+/* ==========================================================================
+   Toasts
+   Bottom-right so they never cover the topbar controls or a modal's header.
+   ========================================================================== */
+
+.toast-stack {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 90;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-end;
+  /* The stack itself must not swallow clicks on the page beneath it. */
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: min(360px, calc(100vw - 40px));
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--toast-accent, var(--text-muted));
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+  pointer-events: auto;
+}
+
+.toast--success { --toast-accent: var(--sev-low); }
+.toast--error { --toast-accent: var(--sev-critical); }
+.toast--info { --toast-accent: var(--status-open); }
+
+.toast__icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--toast-accent);
+}
+
+.toast__message {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.toast__close {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-muted);
+}
+
+.toast__close:hover {
+  background: var(--surface-alt);
+  color: var(--text-primary);
+}
+
+@media (max-width: 768px) {
+  .toast-stack {
+    right: 12px;
+    left: 12px;
+    bottom: 12px;
+    align-items: stretch;
+  }
+
+  .toast {
+    width: 100%;
+  }
+
+  .search__field {
+    width: 100%;
+  }
+
+  .search__hint {
+    display: none;
   }
 }
