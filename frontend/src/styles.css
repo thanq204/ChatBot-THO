@@ -206,7 +206,16 @@ a {
 }
 
 @media (min-width: 769px) {
+  /* Sticky, viewport-tall column so the nav stays put while the page scrolls.
+     align-self cancels the flex stretch that would otherwise size the sidebar
+     to the whole document and leave nothing for sticky to hold on to. */
   .sidebar {
+    position: sticky;
+    top: 0;
+    align-self: flex-start;
+    height: 100dvh;
+    overflow-x: hidden;
+    overflow-y: auto;
     transition: width 0.22s var(--ease-out), padding 0.22s var(--ease-out), border-color 0.22s var(--ease-out);
   }
 
