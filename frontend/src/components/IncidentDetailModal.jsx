@@ -20,9 +20,11 @@ import {
   decisionLabel,
   DECISION_COLORS,
   auditEventLabel,
+  vietnameseModerationText,
 } from "../lib/taxonomy.js";
 import { primaryCategory } from "../lib/incidents.js";
 import { relativeTime, percent } from "../lib/format.js";
+import { safeExternalUrl } from "../lib/urls.js";
 
 // "resolved" is deliberately excluded here: it's only reachable through the
 // Xác nhận vi phạm/Không vi phạm buttons below, which record who reviewed the
@@ -87,7 +89,7 @@ export default function IncidentDetailModal({ incidentId, headline, onClose, onU
     try {
       await ops.decideIncidentReputation(incidentId, {
         outcome,
-        note: outcome === "confirmed" ? "Admin/Mod xác nhận case vi phạm." : "Admin/Mod xác nhận case không vi phạm.",
+        note: outcome === "confirmed" ? "Admin/Mod xác nhận trường hợp vi phạm." : "Admin/Mod xác nhận trường hợp không vi phạm.",
       });
       await refreshAfterWrite();
     } catch (err) {
@@ -98,7 +100,7 @@ export default function IncidentDetailModal({ incidentId, headline, onClose, onU
   }
 
   return (
-    <Modal open={Boolean(incidentId)} title={headline || "Chi tiết case"} onClose={onClose}>
+    <Modal open={Boolean(incidentId)} title={headline || "Chi tiết trường hợp"} onClose={onClose}>
       {loading && (
         <div className="stack">
           <SkeletonLine width="70%" />
@@ -136,6 +138,7 @@ function Fact({ label, value }) {
 function DetailBody({ detail, onStatusChange, savingStatus, onReputationDecision, savingReputation, onActed }) {
   const { incident, messages = [], audit = [] } = detail;
   const root = messages.find((item) => !item.parent_message_id) || messages[0];
+  const rootSourceUrl = safeExternalUrl(incident.source_url || root?.source_url);
   const category = primaryCategory(incident);
   const reputationDecision = audit.find((item) => item.event_type === "incident_reputation_decision");
   const reputationPayload = reputationDecision?.payload || {};
@@ -149,27 +152,33 @@ function DetailBody({ detail, onStatusChange, savingStatus, onReputationDecision
       </div>
 
       <div className="case-callout">
-        <span className="case-callout__label">Vì sao case này được mở</span>
-        <p>{incident.summary}</p>
+        <span className="case-callout__label">Vì sao trường hợp này được mở</span>
+        <p>
+          {vietnameseModerationText(
+            incident.summary,
+            category,
+            `${categoryLabel(category)} từ ${root?.author_name || root?.author_id || "thành viên"}`,
+          )}
+        </p>
       </div>
 
       <dl className="case-facts">
         <Fact label="Nền tảng" value={platformLabel(incident.platform)} />
         <Fact label="Mức rủi ro" value={percent(incident.risk_score)} />
-        <Fact label="Số message" value={incident.message_count} />
+        <Fact label="Số tin nhắn" value={incident.message_count} />
         <Fact label="Cập nhật" value={relativeTime(incident.updated_at)} />
       </dl>
 
       {root && (
         <div className="quote">
-          <span className="section-heading">Message gốc</span>
+          <span className="section-heading">Tin nhắn gốc</span>
           <p style={{ marginTop: 6 }}>{root.text}</p>
           <span className="muted small">
             {root.author_id} · {relativeTime(root.timestamp)}
           </span>
-          {(incident.source_url || root.source_url) && (
+          {rootSourceUrl && (
             <a
-              href={incident.source_url || root.source_url}
+              href={rootSourceUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="quote__link"
@@ -214,11 +223,11 @@ function DetailBody({ detail, onStatusChange, savingStatus, onReputationDecision
             <p className="muted small">
               {reputationPayload.outcome === "confirmed"
                 ? `Đã xác nhận vi phạm của ${reputationPayload.affected_members || 0} thành viên. Quyết định được lưu vào audit và không làm thay đổi EXP.`
-                : "Đã xác nhận case không vi phạm. Không có thay đổi EXP."}
+                : "Đã xác nhận trường hợp không vi phạm. Không có thay đổi EXP."}
             </p>
           ) : (
             <p className="muted small">
-              AI chỉ cung cấp bằng chứng. Admin/Mod quyết định case; kết quả được lưu riêng và không trộn với EXP hoạt động cộng đồng.
+              AI chỉ cung cấp bằng chứng. Admin/Mod quyết định trường hợp; kết quả được lưu riêng và không trộn với EXP hoạt động cộng đồng.
             </p>
           )}
         </div>
@@ -246,22 +255,22 @@ function DetailBody({ detail, onStatusChange, savingStatus, onReputationDecision
 
       <Disclosure label="Xử lý thủ công người vi phạm" count={messages.length ? undefined : 0}>
         {messages.length === 0 ? (
-          <EmptyState message="Case này chưa có message nên chưa xác định được người vi phạm." />
+          <EmptyState message="Trường hợp này chưa có tin nhắn nên chưa xác định được người vi phạm." />
         ) : (
           <CaseActions incident={incident} messages={messages} onDone={onActed} />
         )}
       </Disclosure>
 
-      <Disclosure label="Tất cả message trong case" count={messages.length}>
+      <Disclosure label="Tất cả tin nhắn trong trường hợp" count={messages.length}>
         {messages.length === 0 ? (
-          <EmptyState message="Case này chưa có message chi tiết." />
+          <EmptyState message="Trường hợp này chưa có tin nhắn chi tiết." />
         ) : (
           <div className="list">
             {messages.map((item, index) => (
               <div className="list-row" key={item.message_id || index}>
                 <div className="list-row__head">
                   <span className="list-row__title">
-                    {item.parent_message_id ? "Reply" : "Message gốc"} · {item.author_id}
+                    {item.parent_message_id ? "Tin trả lời" : "Tin nhắn gốc"} · {item.author_id}
                   </span>
                   <span className="list-row__meta">{relativeTime(item.timestamp)}</span>
                 </div>
@@ -269,14 +278,18 @@ function DetailBody({ detail, onStatusChange, savingStatus, onReputationDecision
                 <div className="chip-row">
                   {item.decision && <Badge tone={DECISION_COLORS[item.decision]}>{decisionLabel(item.decision)}</Badge>}
                   {item.category && <span className="chip">{categoryLabel(item.category)}</span>}
-                  {item.risk_score != null && <span className="chip">risk {percent(item.risk_score)}</span>}
-                  {item.source_url && (
-                    <a href={item.source_url} target="_blank" rel="noopener noreferrer" className="chip chip--link">
+                  {item.risk_score != null && <span className="chip">rủi ro {percent(item.risk_score)}</span>}
+                  {safeExternalUrl(item.source_url) && (
+                    <a href={safeExternalUrl(item.source_url)} target="_blank" rel="noopener noreferrer" className="chip chip--link">
                       Mở gốc <ArrowSquareOut size={11} weight="bold" />
                     </a>
                   )}
                 </div>
-                {item.explanation && <p className="muted small">Vì sao: {item.explanation}</p>}
+                {item.explanation && (
+                  <p className="muted small">
+                    Vì sao: {vietnameseModerationText(item.explanation, item.category)}
+                  </p>
+                )}
               </div>
             ))}
           </div>
@@ -285,7 +298,7 @@ function DetailBody({ detail, onStatusChange, savingStatus, onReputationDecision
 
       <Disclosure label="Nhật ký xử lý" count={audit.length}>
         {audit.length === 0 ? (
-          <EmptyState message="Chưa có nhật ký xử lý cho case này." />
+          <EmptyState message="Chưa có nhật ký xử lý cho trường hợp này." />
         ) : (
           <ol className="case-timeline">
             {audit.map((item) => (

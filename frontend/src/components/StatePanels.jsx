@@ -4,7 +4,7 @@ export function ErrorState({ message, onRetry }) {
   return (
     <div className="state-panel state-panel--error">
       <WarningCircle size={22} weight="bold" />
-      <p>{message || "Không kết nối được với backend."}</p>
+      <p>{message || "Không kết nối được với hệ thống."}</p>
       {onRetry && (
         <button type="button" className="btn btn--ghost" onClick={onRetry}>
           Thử lại

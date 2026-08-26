@@ -187,9 +187,9 @@ export default function ExperiencePage() {
       {!error && (
         <div className="page-grid__row">
           <Card title="Link bị cộng đồng từ chối" className="span-12">
-            <p className="muted small">Blocklist là lớp bảo vệ realtime riêng. Phản hồi ❌ không trừ EXP và không phải kết luận người gửi thiếu uy tín.</p>
+            <p className="muted small">Danh sách chặn là lớp bảo vệ theo thời gian thực. Phản hồi ❌ không trừ EXP và không phải kết luận người gửi thiếu uy tín.</p>
             {loading && <SkeletonBlock height={160} />}
-            {!loading && blockedLinks.length === 0 && <EmptyState message="Chưa có link nào trong blocklist." />}
+            {!loading && blockedLinks.length === 0 && <EmptyState message="Chưa có liên kết nào trong danh sách chặn." />}
             {!loading && linkFeed.visible.map((link) => (
               <article className="flagged-link-row" key={link.link_id}>
                 <LinkBreak size={20} weight="duotone" />

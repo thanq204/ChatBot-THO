@@ -6,7 +6,9 @@ opt-in private warning for a non-allow decision from a live bot listener.
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime, timedelta
+
 import requests
 
 from backend.config import Settings, get_settings
@@ -28,10 +30,30 @@ class PlatformModerationService:
 
     def execute(self, *, platform: str, community_id: str, channel_id: str, user_id: str, message_id: str | None, action: str, text: str, duration_minutes: int | None) -> AdminPlatformActionResponse:
         if platform == "discord":
+            self._validate_discord_ids(community_id, channel_id, user_id, message_id)
             return self._discord(community_id, channel_id, user_id, message_id, action, text, duration_minutes)
         if platform == "telegram":
+            self._validate_telegram_ids(channel_id, user_id, message_id)
             return self._telegram(channel_id, user_id, message_id, action, text, duration_minutes)
         raise PlatformModerationError("Nền tảng này chưa hỗ trợ hành động quản trị trực tiếp.")
+
+    @staticmethod
+    def _validate_discord_ids(guild_id: str, channel_id: str, user_id: str, message_id: str | None) -> None:
+        values = {"server": guild_id, "kênh": channel_id, "thành viên": user_id}
+        if message_id is not None:
+            values["tin nhắn"] = message_id
+        for label, value in values.items():
+            if not re.fullmatch(r"\d{5,25}", str(value)):
+                raise PlatformModerationError(f"Discord ID của {label} không hợp lệ.")
+
+    @staticmethod
+    def _validate_telegram_ids(chat_id: str, user_id: str, message_id: str | None) -> None:
+        if not re.fullmatch(r"-?\d{1,20}", str(chat_id)):
+            raise PlatformModerationError("Telegram chat ID không hợp lệ.")
+        if not re.fullmatch(r"\d{1,20}", str(user_id)):
+            raise PlatformModerationError("Telegram user ID không hợp lệ.")
+        if message_id is not None and not re.fullmatch(r"\d{1,20}", str(message_id)):
+            raise PlatformModerationError("Telegram message ID không hợp lệ.")
 
     def send_telegram_action_notice(
         self,
@@ -140,7 +162,7 @@ class PlatformModerationService:
         try:
             if action == "dm":
                 if not text.strip():
-                    raise PlatformModerationError("Hành động DM cần nội dung message.")
+                    raise PlatformModerationError("Hành động nhắn riêng cần có nội dung.")
                 dm = requests.post(f"{base}/users/@me/channels", headers=headers, json={"recipient_id": user_id}, timeout=20)
                 dm.raise_for_status()
                 response = requests.post(f"{base}/channels/{dm.json()['id']}/messages", headers=headers, json={"content": text}, timeout=20)
@@ -175,7 +197,7 @@ class PlatformModerationService:
         try:
             if action == "dm":
                 if not text.strip():
-                    raise PlatformModerationError("Hành động DM cần nội dung message.")
+                    raise PlatformModerationError("Hành động nhắn riêng cần có nội dung.")
                 response = requests.post(f"{base}/sendMessage", json={"chat_id": user_id, "text": text}, timeout=20)
             elif action == "delete_message":
                 if not message_id:

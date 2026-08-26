@@ -18,7 +18,9 @@ class ContextAgentOutput(BaseModel):
 
     intent: Literal["neutral", "friendly", "joking", "conflict", "threat", "unknown"]
     tone: Literal["calm", "playful", "hostile", "distressed", "unknown"]
-    context_summary: str = Field(..., min_length=1, max_length=300)
+    context_summary: str = Field(
+        ..., min_length=1, max_length=300, description="Tóm tắt ngữ cảnh bằng tiếng Việt."
+    )
     ambiguity_score: float = Field(..., ge=0.0, le=1.0)
     evidence: list[str] = Field(default_factory=list, max_length=3)
 
@@ -28,7 +30,9 @@ class PolicyAgentOutput(BaseModel):
 
     category: ModerationCategory
     policy_id: str | None = Field(default=None, max_length=100)
-    policy_match: str = Field(..., min_length=1, max_length=300)
+    policy_match: str = Field(
+        ..., min_length=1, max_length=300, description="Giải thích chính sách phù hợp bằng tiếng Việt."
+    )
     violation_signal: bool
     evidence: list[str] = Field(default_factory=list, max_length=3)
 
@@ -39,7 +43,9 @@ class RiskAgentOutput(BaseModel):
     risk_level: RiskLevel
     risk_score: float = Field(..., ge=0.0, le=1.0)
     escalation_needed: bool
-    rationale: str = Field(..., min_length=1, max_length=300)
+    rationale: str = Field(
+        ..., min_length=1, max_length=300, description="Lý do chấm mức rủi ro bằng tiếng Việt."
+    )
     evidence: list[str] = Field(default_factory=list, max_length=3)
 
 
@@ -56,7 +62,7 @@ class ModerationResult(BaseModel):
     category: ModerationCategory
     risk_level: RiskLevel
     policy_id: str | None = Field(default=None, max_length=100)
-    reason: str = Field(..., min_length=1, max_length=500)
+    reason: str = Field(..., min_length=1, max_length=500, description="Diễn giải quyết định bằng tiếng Việt.")
     confidence: float = Field(..., ge=0.0, le=1.0)
     needs_admin_review: bool
     evidence: list[str] = Field(default_factory=list, max_length=5)
@@ -74,7 +80,7 @@ class GeminiModerationOutput(BaseModel):
     category: ModerationCategory
     risk_level: RiskLevel
     policy_id: str | None = None
-    reason: str = Field(..., min_length=1, max_length=500)
+    reason: str = Field(..., min_length=1, max_length=500, description="Diễn giải quyết định bằng tiếng Việt.")
     confidence: float = Field(..., ge=0.0, le=1.0)
     needs_admin_review: bool
     evidence: list[str] = Field(default_factory=list, max_length=5)

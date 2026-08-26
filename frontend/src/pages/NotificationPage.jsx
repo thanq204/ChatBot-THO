@@ -25,7 +25,6 @@ export default function NotificationPage() {
   const isAdmin = user?.role === "admin";
   const queryClient = useQueryClient();
   const [selectedPlatforms, setSelectedPlatforms] = useState([]);
-  const [actor, setActor] = useState("");
   const [message, setMessage] = useState("");
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState(null);
@@ -63,7 +62,6 @@ export default function NotificationPage() {
       const response = await ops.sendAnnouncement({
         message: message.trim(),
         targets: selectedPlatforms,
-        ...(actor.trim() ? { actor: actor.trim() } : {}),
       });
       setResult(response);
       loadHistory();
@@ -103,7 +101,7 @@ export default function NotificationPage() {
 
             <label className="field">
               Người gửi (tuỳ chọn)
-              <input value={actor} onChange={(event) => setActor(event.target.value)} placeholder="Admin" maxLength={100} />
+              <span className="muted small">Người gửi được lấy tự động từ tài khoản Admin đang đăng nhập.</span>
             </label>
 
             <label className="field">
@@ -179,7 +177,7 @@ export default function NotificationPage() {
           <div className="list">
             <div className="list-row"><strong>Quyền riêng tư</strong><p className="muted small">Lịch sử thông báo chỉ dành cho Admin để bảo vệ dữ liệu vận hành.</p></div>
             <div className="list-row"><strong>Khi cần hỗ trợ</strong><p className="muted small">Hãy liên hệ Admin nếu cần kiểm tra thông báo đã gửi hoặc thay đổi kênh nhận.</p></div>
-            <div className="list-row"><strong>Vai trò của bạn</strong><p className="muted small">Bạn vẫn có thể theo dõi và xử lý các case kiểm duyệt được phân công.</p></div>
+            <div className="list-row"><strong>Vai trò của bạn</strong><p className="muted small">Bạn vẫn có thể theo dõi và xử lý các trường hợp kiểm duyệt được phân công.</p></div>
           </div>
         </Card>}
       </div>

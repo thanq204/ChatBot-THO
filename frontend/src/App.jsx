@@ -51,19 +51,21 @@ export default function App() {
         <Route element={<RequireAuth />}>
           <Route element={<AppLayout />}>
             <Route path="/tong-quan" element={<OverviewPage />} />
-            <Route path="/cong-dong" element={<CommunityPage />} />
+            <Route element={<RequireRole roles={["admin", "mod"]} />}>
+              <Route path="/cong-dong" element={<CommunityPage />} />
+              <Route path="/nguoi-ban" element={<SellerTrustPage />} />
+              <Route path="/khu-thu-nghiem-ai" element={<AiSandboxPage />} />
+            </Route>
             <Route element={<RequireRole role="admin" />}>
               <Route path="/nhat-ky" element={<ModerationLogPage />} />
               <Route path="/quan-ly-mod" element={<ModManagementPage />} />
               <Route path="/quan-ly-faq" element={<FaqManagementPage />} />
               <Route path="/bang-exp" element={<ExperiencePage />} />
               <Route path="/bang-uy-tin" element={<Navigate to="/bang-exp" replace />} />
+              <Route path="/thong-bao" element={<NotificationPage />} />
+              <Route path="/quan-ly-noi-dung" element={<SettingsPage />} />
+              <Route path="/lenh-bot" element={<BotCommandsPage />} />
             </Route>
-            <Route path="/nguoi-ban" element={<SellerTrustPage />} />
-            <Route path="/khu-thu-nghiem-ai" element={<AiSandboxPage />} />
-            <Route path="/thong-bao" element={<NotificationPage />} />
-            <Route path="/quan-ly-noi-dung" element={<SettingsPage />} />
-            <Route path="/lenh-bot" element={<BotCommandsPage />} />
           </Route>
         </Route>
 

@@ -48,7 +48,7 @@ Các thư mục `00_inbox` đến `50_indexes` chỉ mô phỏng cùng contract 
 
 ## Quy tắc raw và normalized
 
-- File nhận trực tiếp từ web có thể là CSV, JSON, JSONL, TXT, Markdown hoặc DOCX và **không bắt buộc** theo schema chung.
+- File nhận trực tiếp từ web có thể là JSON, JSONL, CSV/TSV, XLSX, YAML, HTML, TXT, Markdown, DOCX hoặc PDF và **không bắt buộc** theo schema chung.
 - Phải giữ nguyên file raw sau khi nhận; không sửa nội dung, không đổi field và không ghi đè file gốc.
 - Sau bước đọc/parse/chuẩn hóa, phải tạo **một file normalized riêng** trong thư mục tương ứng dưới `20_normalized/`.
 - File normalized phải dùng đúng schema được ghi trong README mini của thư mục đó và JSONL phải có một object hợp lệ trên mỗi dòng.

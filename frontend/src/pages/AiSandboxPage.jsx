@@ -13,6 +13,7 @@ import {
   severityLabel,
   SEVERITY_COLORS,
   agentStepLabel,
+  vietnameseModerationText,
 } from "../lib/taxonomy.js";
 
 const MAX_LENGTH = 5000;
@@ -50,7 +51,13 @@ function ResultPanel({ response }) {
       {result.fallback_used && (
         <div className="sandbox-fallback">
           <WarningCircle size={16} weight="bold" />
-          <span>Đã chuyển sang chế độ dự phòng: {result.fallback_reason}</span>
+          <span>
+            Đã chuyển sang chế độ dự phòng: {vietnameseModerationText(
+              result.fallback_reason,
+              result.category,
+              "Mô hình chính gặp lỗi hoặc trả dữ liệu không hợp lệ.",
+            )}
+          </span>
         </div>
       )}
 
@@ -64,11 +71,11 @@ function ResultPanel({ response }) {
           <strong style={{ color: SEVERITY_COLORS[result.risk_level] }}>{severityLabel(result.risk_level)}</strong>
         </div>
         <div className="sandbox-stat">
-          <span className="muted small">Rule ID</span>
+          <span className="muted small">Mã quy tắc</span>
           <strong>{result.policy_id ?? "Không có"}</strong>
         </div>
         <div className="sandbox-stat">
-          <span className="muted small">Model</span>
+          <span className="muted small">Mô hình</span>
           <strong>
             {result.model_used} <span className="muted small">({result.mode})</span>
           </strong>
@@ -77,7 +84,7 @@ function ResultPanel({ response }) {
 
       <div>
         <h3 className="sandbox-subheading">Diễn giải</h3>
-        <p>{result.reason}</p>
+        <p>{vietnameseModerationText(result.reason, result.category)}</p>
         {result.evidence.length > 0 && (
           <div className="chip-row">
             {result.evidence.map((item) => (
@@ -178,7 +185,7 @@ export default function AiSandboxPage() {
           {submitting && <SkeletonBlock height={260} />}
           {!submitting && error && <ErrorState message={error} onRetry={submit} />}
           {!submitting && !error && !response && (
-            <EmptyState message="Nhập tin nhắn bên trái và bấm “Bắt đầu phân tích” để xem kết quả thật từ backend." />
+            <EmptyState message="Nhập tin nhắn bên trái và bấm “Bắt đầu phân tích” để xem kết quả thật từ hệ thống." />
           )}
           {!submitting && !error && response && <ResultPanel response={response} />}
         </Card>

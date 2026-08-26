@@ -9,7 +9,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from backend.config import Settings, get_settings
-from backend.services.database import json_value, postgres_connection
 from backend.models.moderation import (
     AdminDecisionRequest,
     AuditLogEntry,
@@ -17,6 +16,7 @@ from backend.models.moderation import (
     ModerationResult,
     ReviewCase,
 )
+from backend.services.database import json_value, postgres_connection
 
 
 def _now() -> str:
@@ -136,7 +136,7 @@ class ReviewStore:
             if row is None:
                 raise KeyError(review_id)
             if row["status"] != "pending":
-                raise ValueError("This review has already been decided.")
+                raise ValueError("Trường hợp này đã được xử lý trước đó.")
             db.execute(
                 """UPDATE reviews SET status = 'reviewed', reviewed_at = ?, admin_action = ?, admin_note = ?, reviewer = ?
                    WHERE review_id = ?""",

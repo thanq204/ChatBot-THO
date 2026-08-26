@@ -6,6 +6,7 @@ planned connectors until their business/app credentials are supplied.
 
 from __future__ import annotations
 
+import re
 import threading
 import time
 from datetime import UTC, datetime
@@ -41,11 +42,11 @@ class PlatformConnectors:
 
     def statuses(self) -> list[PlatformStatus]:
         return [
-            PlatformStatus(platform="discord", configured=bool(self.settings.discord_bot_token), connected=bool(self.settings.discord_bot_token), mode="live-read" if self.settings.discord_bot_token else "not-configured", missing_credentials=[] if self.settings.discord_bot_token else ["DISCORD_BOT_TOKEN", "DISCORD_DEFAULT_CHANNEL_ID"], note="Bot token + channel ID để đọc message Discord."),
-            PlatformStatus(platform="telegram", configured=bool(self.settings.telegram_bot_token), connected=bool(self.settings.telegram_bot_token), mode="live-read" if self.settings.telegram_bot_token else "not-configured", missing_credentials=[] if self.settings.telegram_bot_token else ["TELEGRAM_BOT_TOKEN", "TELEGRAM_DEFAULT_CHAT_ID"], note="Bot token + chat ID để đọc Telegram updates."),
+            PlatformStatus(platform="discord", configured=bool(self.settings.discord_bot_token), connected=bool(self.settings.discord_bot_token), mode="live-read" if self.settings.discord_bot_token else "not-configured", missing_credentials=[] if self.settings.discord_bot_token else ["DISCORD_BOT_TOKEN", "DISCORD_DEFAULT_CHANNEL_ID"], note="Token bot và mã kênh để đọc tin nhắn Discord."),
+            PlatformStatus(platform="telegram", configured=bool(self.settings.telegram_bot_token), connected=bool(self.settings.telegram_bot_token), mode="live-read" if self.settings.telegram_bot_token else "not-configured", missing_credentials=[] if self.settings.telegram_bot_token else ["TELEGRAM_BOT_TOKEN", "TELEGRAM_DEFAULT_CHAT_ID"], note="Token bot và mã cuộc trò chuyện để đọc cập nhật Telegram."),
             PlatformStatus(platform="zalo", configured=bool(self.settings.zalo_access_token), connected=False, mode="planned", missing_credentials=[] if self.settings.zalo_access_token else ["ZALO_ACCESS_TOKEN"], note="POC interface; cần Official Account credentials và scope phù hợp."),
             PlatformStatus(platform="messenger", configured=bool(self.settings.messenger_page_access_token), connected=False, mode="planned", missing_credentials=[] if self.settings.messenger_page_access_token else ["MESSENGER_PAGE_ACCESS_TOKEN"], note="POC interface; cần Meta Page token/webhook."),
-            PlatformStatus(platform="web", configured=True, connected=True, mode="local", missing_credentials=[], note="Web ingest local luôn sẵn sàng."),
+            PlatformStatus(platform="web", configured=True, connected=True, mode="local", missing_credentials=[], note="Luồng nhập dữ liệu web cục bộ luôn sẵn sàng."),
         ]
 
     def pull(self, platform: str, limit: int = 20, channel_id: str | None = None) -> list[CommonMessage]:
@@ -123,6 +124,8 @@ class PlatformConnectors:
         """Pull a channel and advance its scan cursor so the next scan only
         fetches messages posted after this one, instead of re-fetching (and
         re-running full AI moderation on) the same recent window every click."""
+        if not re.fullmatch(r"\d{5,25}", str(channel_id)):
+            raise ConnectorError("Discord channel ID không hợp lệ.")
         since = self.store.get_platform_sync_cursor("discord", channel_id) if self.store else None
         guild_id = self._guild_id_for_channel(channel_id)
         messages, newest_seen_id = self._discord(limit, channel_id, since_message_id=since, guild_id=guild_id)

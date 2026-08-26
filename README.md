@@ -35,7 +35,7 @@ CHAT-10 hỗ trợ Admin/Moderator quản lý cộng đồng học tập trên D
 | Cộng đồng | Bảng EXP cho thành viên thật; giới hạn chống cày và không trộn với vi phạm |
 | Giao dịch | `/trade_open`, `/trade_confirm`, `/trade_review`, `/seller_check`; hồ sơ người bán có cỡ mẫu và hàng đợi Admin/Mod |
 | Nền tảng | Discord listener, Telegram listener/alert, FastAPI, React/Vite admin dashboard |
-| Dữ liệu | Supabase PostgreSQL + pgvector; `data/` chỉ giữ contract/example, import knowledge CSV/JSON/TXT, embedding OpenAI tùy chọn |
+| Dữ liệu | Supabase PostgreSQL + pgvector; `data/` chỉ giữ contract/example, import JSON/JSONL/CSV/TSV/XLSX/YAML/HTML/MD/TXT/DOCX/PDF, embedding OpenAI tùy chọn |
 
 ## Kiến trúc
 

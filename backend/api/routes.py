@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.concurrency import run_in_threadpool
 
 from backend.agents.graph import agent
+from backend.models.auth import UserPublic
 from backend.models.moderation import (
     AdminDecisionRequest,
     AuditLogEntry,
@@ -10,11 +11,11 @@ from backend.models.moderation import (
     ReviewCase,
 )
 from backend.models.schemas import ChatRequest, ChatResponse
+from backend.services.auth_service import current_user, require_roles
 from backend.services.demo_cases import DEMO_CASES
 from backend.services.moderation import ModerationConfigurationError, ModerationEngine
+from backend.services.rate_limit import rate_limit
 from backend.services.review_store import ReviewStore
-from backend.models.auth import UserPublic
-from backend.services.auth_service import require_roles
 
 router = APIRouter()
 _moderation_engine: ModerationEngine | None = None
@@ -36,21 +37,29 @@ def get_review_store() -> ReviewStore:
 
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest) -> ChatResponse:
+async def chat(
+    request: ChatRequest,
+    _: UserPublic = Depends(current_user),
+    __: UserPublic = Depends(rate_limit("legacy-agent-chat", limit=15)),
+) -> ChatResponse:
     try:
         result = await agent.ainvoke({"query": request.message})
         return ChatResponse(response=result.get("response", ""), analysis=result.get("analysis", ""))
     except Exception as exc:
-        raise HTTPException(status_code=500, detail="Agent request failed.") from exc
+        raise HTTPException(status_code=500, detail="Không thể xử lý yêu cầu bằng Agent.") from exc
 
 
 @router.get("/status")
-def agent_status():
+def agent_status(_: UserPublic = Depends(current_user)):
     return {"status": "ready", "agent": "LangGraph Agent v1.0"}
 
 
 @router.post("/moderation/submit", response_model=ModerationSubmissionResponse)
-async def submit_for_moderation(submission: MemberSubmission) -> ModerationSubmissionResponse:
+async def submit_for_moderation(
+    submission: MemberSubmission,
+    _: UserPublic = Depends(require_roles("admin", "mod")),
+    __: UserPublic = Depends(rate_limit("moderation-sandbox", limit=20)),
+) -> ModerationSubmissionResponse:
     try:
         result = await get_moderation_engine().moderate(submission)
     except ModerationConfigurationError as exc:
@@ -62,7 +71,7 @@ async def submit_for_moderation(submission: MemberSubmission) -> ModerationSubmi
         if result.needs_admin_review
         else None
     )
-    message = "Nội dung đang chờ Admin xem xét." if review else "Phân tích moderation đã hoàn tất."
+    message = "Nội dung đang chờ Admin xem xét." if review else "Phân tích kiểm duyệt đã hoàn tất."
     return ModerationSubmissionResponse(
         moderation=result,
         review=review,
@@ -88,7 +97,7 @@ def decide_review(
     try:
         return get_review_store().decide(review_id, decision)
     except KeyError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Review case not found.") from exc
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy trường hợp cần duyệt.") from exc
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
@@ -99,12 +108,12 @@ def audit_logs(_: UserPublic = Depends(require_roles("admin"))) -> list[AuditLog
 
 
 @router.get("/moderation/demo-cases", response_model=list[MemberSubmission])
-def demo_cases() -> list[MemberSubmission]:
+def demo_cases(_: UserPublic = Depends(require_roles("admin", "mod"))) -> list[MemberSubmission]:
     return DEMO_CASES
 
 
 @router.get("/moderation/status")
-def moderation_status() -> dict[str, object]:
+def moderation_status(_: UserPublic = Depends(require_roles("admin", "mod"))) -> dict[str, object]:
     engine = get_moderation_engine()
     settings = engine.settings
     provider = engine.provider

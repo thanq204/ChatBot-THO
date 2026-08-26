@@ -1,23 +1,92 @@
-from contextlib import asynccontextmanager
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from backend.api.auth_routes import router as auth_router
 from backend.api.operations_routes import get_operations_pipeline
 from backend.api.operations_routes import router as operations_router
-from backend.api.auth_routes import router as auth_router
 from backend.api.routes import get_review_store, router
 from backend.config import get_settings
-from backend.services.discord.bot import DiscordRagBot
-from backend.services.telegram.bot import TelegramRagBot
 from backend.services.auth_service import current_user, get_auth_store
 from backend.services.database import close_postgres_pools, warm_postgres_pool
+from backend.services.discord.bot import DiscordRagBot
+from backend.services.telegram.bot import TelegramRagBot
 
 logger = logging.getLogger(__name__)
+
+MAX_API_REQUEST_BYTES = 12 * 1024 * 1024
+
+
+class RequestSafetyMiddleware:
+    """Reject oversized API bodies and attach browser hardening headers."""
+
+    def __init__(self, app: Any, *, max_body_bytes: int, production: bool) -> None:
+        self.app = app
+        self.max_body_bytes = max_body_bytes
+        self.production = production
+
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+
+        path = str(scope.get("path") or "")
+        if path.startswith("/api/"):
+            headers = {key.lower(): value for key, value in scope.get("headers", [])}
+            raw_length = headers.get(b"content-length")
+            try:
+                if raw_length and (int(raw_length) < 0 or int(raw_length) > self.max_body_bytes):
+                    await JSONResponse(
+                        {"detail": "Request vượt quá giới hạn 12 MB."},
+                        status_code=413,
+                    )(scope, receive, send)
+                    return
+            except ValueError:
+                await JSONResponse({"detail": "Content-Length không hợp lệ."}, status_code=400)(scope, receive, send)
+                return
+
+        received = 0
+
+        async def limited_receive() -> dict[str, Any]:
+            nonlocal received
+            message = await receive()
+            if path.startswith("/api/") and message.get("type") == "http.request":
+                received += len(message.get("body", b""))
+                if received > self.max_body_bytes:
+                    raise ValueError("request-body-too-large")
+            return message
+
+        async def secure_send(message: dict[str, Any]) -> None:
+            if message.get("type") == "http.response.start":
+                headers = list(message.get("headers", []))
+                headers.extend(
+                    [
+                        (b"x-content-type-options", b"nosniff"),
+                        (b"x-frame-options", b"DENY"),
+                        (b"referrer-policy", b"strict-origin-when-cross-origin"),
+                        (b"permissions-policy", b"camera=(), microphone=(), geolocation=()"),
+                    ]
+                )
+                if self.production:
+                    headers.append((b"strict-transport-security", b"max-age=31536000; includeSubDomains"))
+                message["headers"] = headers
+            await send(message)
+
+        try:
+            await self.app(scope, limited_receive, secure_send)
+        except ValueError as exc:
+            if str(exc) != "request-body-too-large":
+                raise
+            await JSONResponse(
+                {"detail": "Request vượt quá giới hạn 12 MB."},
+                status_code=413,
+            )(scope, receive, secure_send)
 
 
 @asynccontextmanager
@@ -63,17 +132,26 @@ async def lifespan(app: FastAPI):
         print("Shutting down...")
 
 
+settings = get_settings()
+production = settings.app_env == "production"
 app = FastAPI(
     title="AI20K Agent",
     description="AI Agent built with LangGraph",
     version="1.0.0",
     lifespan=lifespan,
+    docs_url=None if production else "/docs",
+    redoc_url=None if production else "/redoc",
+    openapi_url=None if production else "/openapi.json",
 )
 
-settings = get_settings()
+app.add_middleware(
+    RequestSafetyMiddleware,
+    max_body_bytes=MAX_API_REQUEST_BYTES,
+    production=production,
+)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins.split(","),
+    allow_origins=[origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -104,7 +182,7 @@ if (FRONTEND_DIST / "index.html").exists():
     async def spa_fallback(full_path: str):
         """Serve built files directly, and hand every other path to the router."""
         if full_path.startswith(("api/", "health", "docs", "redoc", "openapi.json")):
-            raise HTTPException(status_code=404, detail="Not found")
+            raise HTTPException(status_code=404, detail="Không tìm thấy tài nguyên.")
         candidate = (FRONTEND_DIST / full_path).resolve()
         if full_path and candidate.is_file() and candidate.is_relative_to(FRONTEND_DIST):
             return FileResponse(candidate)

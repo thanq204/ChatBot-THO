@@ -15,7 +15,7 @@ class AdminAnnouncementSender:
             return self._discord(message)
         if target == "telegram":
             return self._telegram(message)
-        raise ValueError(f"Unsupported announcement target: {target}")
+        raise ValueError(f"Nền tảng nhận thông báo không được hỗ trợ: {target}")
 
     def _discord(self, message: str) -> AnnouncementDelivery:
         if not self.settings.discord_bot_token or not self.settings.discord_default_channel_id:

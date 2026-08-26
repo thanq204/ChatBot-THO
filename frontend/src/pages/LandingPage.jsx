@@ -131,9 +131,9 @@ export default function LandingPage() {
           </a>
 
           <nav className="lnav__links" aria-label="Nội dung trang">
-            <a href="#features">Features</a>
-            <a href="#how-it-works">How it works</a>
-            <a href="#platforms">Platforms</a>
+            <a href="#features">Tính năng</a>
+            <a href="#how-it-works">Cách hoạt động</a>
+            <a href="#platforms">Nền tảng</a>
           </nav>
 
           <div className="lnav__actions">
@@ -408,9 +408,9 @@ export default function LandingPage() {
             {BRAND.name}
           </a>
           <nav className="lfooter__links" aria-label="Liên kết chân trang">
-            <a href="#features">Features</a>
-            <a href="#how-it-works">How it works</a>
-            <a href="#platforms">Platforms</a>
+            <a href="#features">Tính năng</a>
+            <a href="#how-it-works">Cách hoạt động</a>
+            <a href="#platforms">Nền tảng</a>
             <a href={REPO_URL} target="_blank" rel="noreferrer">
               <GithubLogo size={15} weight="fill" />
               GitHub

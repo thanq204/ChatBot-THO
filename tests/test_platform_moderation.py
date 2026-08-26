@@ -17,10 +17,19 @@ def _response(status_code: int = 200, payload: dict | None = None) -> Mock:
 def test_discord_delete_uses_case_channel_and_message() -> None:
     service = PlatformModerationService(Settings(discord_bot_token="token"))
     with patch("backend.services.platform_moderation.requests.delete", return_value=_response()) as delete:
-        result = service.execute(platform="discord", community_id="guild-1", channel_id="channel-1", user_id="member-1", message_id="message-1", action="delete_message", text="", duration_minutes=None)
+        result = service.execute(
+            platform="discord",
+            community_id="111111111111111111",
+            channel_id="222222222222222222",
+            user_id="333333333333333333",
+            message_id="444444444444444444",
+            action="delete_message",
+            text="",
+            duration_minutes=None,
+        )
 
     assert result.completed is True
-    assert "/channels/channel-1/messages/message-1" in delete.call_args.args[0]
+    assert "/channels/222222222222222222/messages/444444444444444444" in delete.call_args.args[0]
 
 
 def test_telegram_dm_uses_member_id_not_group_chat() -> None:
@@ -35,7 +44,32 @@ def test_telegram_dm_uses_member_id_not_group_chat() -> None:
 def test_timeout_requires_duration() -> None:
     service = PlatformModerationService(Settings(discord_bot_token="token"))
     with pytest.raises(PlatformModerationError, match="duration_minutes"):
-        service.execute(platform="discord", community_id="guild", channel_id="channel", user_id="member", message_id=None, action="timeout", text="", duration_minutes=None)
+        service.execute(
+            platform="discord",
+            community_id="111111111111111111",
+            channel_id="222222222222222222",
+            user_id="333333333333333333",
+            message_id=None,
+            action="timeout",
+            text="",
+            duration_minutes=None,
+        )
+
+
+def test_discord_action_rejects_path_injection_ids() -> None:
+    service = PlatformModerationService(Settings(discord_bot_token="token"))
+
+    with pytest.raises(PlatformModerationError, match="không hợp lệ"):
+        service.execute(
+            platform="discord",
+            community_id="111111111111111111",
+            channel_id="../users/@me",
+            user_id="333333333333333333",
+            message_id="444444444444444444",
+            action="delete_message",
+            text="",
+            duration_minutes=None,
+        )
 
 
 def test_telegram_permanent_ban_is_not_available() -> None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from urllib.parse import urlsplit
 
 from .contracts import AnswerEnvelope, Citation, FlowName, GenerationMode, QuestionDecision
 
@@ -69,4 +70,15 @@ class AnswerComposer:
         if not hasattr(metadata, "get"):
             return None
         value = metadata.get("source_url")
-        return str(value) if value else None
+        if not value:
+            return None
+        cleaned = str(value).strip()
+        try:
+            parsed = urlsplit(cleaned)
+        except ValueError:
+            return None
+        if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+            return None
+        if parsed.username or parsed.password:
+            return None
+        return cleaned

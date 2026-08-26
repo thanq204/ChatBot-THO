@@ -213,7 +213,7 @@ export default function CaseActions({ incident, messages, onDone }) {
 
       <label className="actions__confirm">
         <input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />
-        Tôi đã xem lại case và xác nhận thực hiện hành động này.
+        Tôi đã xem lại trường hợp và xác nhận thực hiện hành động này.
       </label>
 
       <div className="form-actions">

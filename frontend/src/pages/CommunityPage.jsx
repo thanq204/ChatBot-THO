@@ -20,6 +20,7 @@ import {
 } from "../lib/taxonomy.js";
 import { actorFromTitle, caseHeadline, primaryCategory } from "../lib/incidents.js";
 import { relativeTime, percent } from "../lib/format.js";
+import { safeExternalUrl } from "../lib/urls.js";
 
 const PLATFORM_OPTIONS = [
   { value: "", label: "Mọi nền tảng" },
@@ -164,7 +165,7 @@ export default function CommunityPage() {
   if (error) {
     return (
       <div className="page-grid">
-        <ErrorState message={`Không lấy được danh sách case: ${error}`} onRetry={load} />
+        <ErrorState message={`Không lấy được danh sách trường hợp: ${error}`} onRetry={load} />
       </div>
     );
   }
@@ -173,7 +174,7 @@ export default function CommunityPage() {
     <div className="page-grid">
       <div className="page-grid__row">
         <Card
-          title="Cases cần Admin xem"
+          title="Trường hợp cần Admin xem"
           className="span-12"
           action={
             <div className="case-filters">
@@ -235,19 +236,19 @@ export default function CommunityPage() {
             </div>
           )}
           {!loading && (!incidents || incidents.length === 0) && (
-            <EmptyState message="Chưa có case nào cho bộ lọc này. Hãy quét connector ở trang Tổng quan." />
+            <EmptyState message="Chưa có trường hợp nào cho bộ lọc này. Hãy quét kết nối ở trang Tổng quan." />
           )}
           {!loading && incidents && incidents.length > 0 && visibleIncidents.length === 0 && (
-            <EmptyState message="Không có case nào khớp với bộ lọc đã chọn." />
+            <EmptyState message="Không có trường hợp nào khớp với bộ lọc đã chọn." />
           )}
           {!loading && visibleIncidents.length > 0 && (
             <div className={refreshing ? "is-refreshing" : undefined}>
               <div className="case-tally">
                 <p className="case-tally__line">
-                  <strong>{visibleIncidents.length}</strong> / {scopedIncidents.length} case
+                  <strong>{visibleIncidents.length}</strong> / {scopedIncidents.length} trường hợp
                   {severityFilter ? ` (đang lọc ${severityLabel(severityFilter).toLowerCase()})` : ""}
                   <span className="case-tally__sep">·</span>
-                  bấm vào một case để xem chi tiết
+                  bấm vào một trường hợp để xem chi tiết
                 </p>
                 {/* Ưu tiên: chip theo mức độ cho phép nhảy thẳng tới "cần xử lý
                     trước" thay vì phải tự lướt qua toàn bộ danh sách. */}
@@ -279,7 +280,7 @@ export default function CommunityPage() {
               <LoadMore
                 remaining={remainingCount}
                 step={PAGE_SIZE}
-                unit="case"
+                unit="trường hợp"
                 onMore={() => setVisibleCount((count) => count + PAGE_SIZE)}
                 canCollapse={visibleCount > PAGE_SIZE}
                 onCollapse={() => setVisibleCount(PAGE_SIZE)}
@@ -312,6 +313,7 @@ export default function CommunityPage() {
  * it is near-identical across rows, so it hid the fields that actually differ.
  */
 const CaseRow = memo(function CaseRow({ incident, channelName, onOpen }) {
+  const sourceUrl = safeExternalUrl(incident.source_url);
   const actor = actorFromTitle(incident.title);
   // Resolved/snoozed cases don't need Admin attention anymore; recede them
   // visually so the eye lands on open/monitoring rows first.
@@ -344,11 +346,11 @@ const CaseRow = memo(function CaseRow({ incident, channelName, onOpen }) {
         <span>{platformLabel(incident.platform)}</span>
         {channelName && <span>#{channelName}</span>}
         <span>{incident.message_count} tin</span>
-        <span>risk {percent(incident.risk_score)}</span>
+        <span>rủi ro {percent(incident.risk_score)}</span>
         <span>{relativeTime(incident.updated_at)}</span>
-        {incident.source_url && (
+        {sourceUrl && (
           <a
-            href={incident.source_url}
+            href={sourceUrl}
             target="_blank"
             rel="noopener noreferrer"
             className="case-row__link"

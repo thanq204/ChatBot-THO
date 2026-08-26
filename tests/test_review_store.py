@@ -32,5 +32,5 @@ async def test_review_cannot_be_decided_twice(tmp_path):
     review = store.create_review(submission, await ModerationEngine(Settings(moderation_mode="mock")).moderate(submission))
     store.decide(review.review_id, AdminDecisionRequest(action="allow"))
 
-    with pytest.raises(ValueError, match="already been decided"):
+    with pytest.raises(ValueError, match="đã được xử lý trước đó"):
         store.decide(review.review_id, AdminDecisionRequest(action="hide"))

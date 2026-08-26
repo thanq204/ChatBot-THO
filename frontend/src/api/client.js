@@ -1,23 +1,36 @@
 const API_ROOT = "/api/v1";
 const TOKEN_KEY = "acm-access-token";
+const DEFAULT_TIMEOUT_MS = 20_000;
+const MAX_IMPORT_FILE_BYTES = 5 * 1024 * 1024;
 
 export function getAccessToken() { return window.localStorage.getItem(TOKEN_KEY); }
 export function setAccessToken(token) { window.localStorage.setItem(TOKEN_KEY, token); }
 export function clearAccessToken() { window.localStorage.removeItem(TOKEN_KEY); }
 
 async function request(path, options = {}) {
-  const response = await fetch(`${API_ROOT}${path}`, {
-    headers: { "Content-Type": "application/json", ...(getAccessToken() ? { Authorization: `Bearer ${getAccessToken()}` } : {}), ...(options.headers || {}) },
-    ...options,
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.detail || "Request failed");
-  return body;
+  const { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {}, signal, ...fetchOptions } = options;
+  const controller = signal ? null : new AbortController();
+  const timeoutId = controller ? window.setTimeout(() => controller.abort(), timeoutMs) : null;
+  try {
+    const response = await fetch(`${API_ROOT}${path}`, {
+      headers: { "Content-Type": "application/json", ...(getAccessToken() ? { Authorization: `Bearer ${getAccessToken()}` } : {}), ...headers },
+      signal: signal || controller.signal,
+      ...fetchOptions,
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.detail || `Request failed (HTTP ${response.status})`);
+    return body;
+  } catch (error) {
+    if (error?.name === "AbortError") throw new Error("Máy chủ phản hồi quá lâu. Hãy thử lại.");
+    throw error;
+  } finally {
+    if (timeoutId) window.clearTimeout(timeoutId);
+  }
 }
 
 const get = (path) => request(path);
-const post = (path, payload) =>
-  request(path, { method: "POST", body: payload === undefined ? undefined : JSON.stringify(payload) });
+const post = (path, payload, options = {}) =>
+  request(path, { method: "POST", body: payload === undefined ? undefined : JSON.stringify(payload), ...options });
 const put = (path, payload) => request(path, { method: "PUT", body: JSON.stringify(payload) });
 const patch = (path, payload) => request(path, { method: "PATCH", body: JSON.stringify(payload) });
 const del = (path) => request(path, { method: "DELETE" });
@@ -30,7 +43,7 @@ export const ops = {
   communityHealth: (windowHours = 24) => get(`/community-health?window_hours=${windowHours}`),
   platforms: () => get("/platforms"),
   discordChannels: () => get("/platforms/discord/channels"),
-  pullPlatform: (platform, limit) => post(`/platforms/${platform}/pull?limit=${limit}`),
+  pullPlatform: (platform, limit) => post(`/platforms/${encodeURIComponent(platform)}/pull?limit=${limit}`, undefined, { timeoutMs: 60_000 }),
   incidents: (filters = {}) => {
     const params = new URLSearchParams();
     if (filters.platform) params.set("platform", filters.platform);
@@ -43,16 +56,16 @@ export const ops = {
   decideIncidentReputation: (id, payload) =>
     post(`/incidents/${encodeURIComponent(id)}/reputation-decision`, payload),
   audit: (incidentId) => get(`/audit${incidentId ? `?incident_id=${encodeURIComponent(incidentId)}` : ""}`),
-  analyze: (message) => post("/messages/analyze", { message }),
-  ingest: (payload) => post("/messages/ingest", payload),
-  ask: (question, dataset) => post("/rag/ask", { question, dataset: dataset || null }),
+  analyze: (message) => post("/messages/analyze", { message }, { timeoutMs: 30_000 }),
+  ingest: (payload) => post("/messages/ingest", payload, { timeoutMs: 60_000 }),
+  ask: (question, dataset) => post("/rag/ask", { question, dataset: dataset || null }, { timeoutMs: 30_000 }),
   policies: () => get("/policies"),
   savePolicy: (id, payload) => put(`/policies/${encodeURIComponent(id)}`, payload),
   deletePolicy: (id) => del(`/policies/${encodeURIComponent(id)}`),
   knowledge: () => get("/knowledge"),
   saveKnowledge: (id, payload) => put(`/knowledge/${encodeURIComponent(id)}`, payload),
   deleteKnowledge: (id) => del(`/knowledge/${encodeURIComponent(id)}`),
-  importKnowledge: (payload) => post("/knowledge/import", payload),
+  importKnowledge: (payload) => post("/knowledge/import", payload, { timeoutMs: 120_000 }),
   knowledgeImports: () => get("/knowledge/imports"),
   faqs: (activeOnly = false) => get(`/faqs?active_only=${activeOnly}`),
   faqTopTopics: (limit = 10) => get(`/faq-top-topics?limit=${limit}`),
@@ -144,6 +157,9 @@ export async function health() {
 
 /** Browsers cannot send raw bytes as JSON, so files travel base64-encoded. */
 export async function fileToBase64(file) {
+  if (file.size > MAX_IMPORT_FILE_BYTES) {
+    throw new Error("File vượt quá giới hạn 5 MB.");
+  }
   const bytes = new Uint8Array(await file.arrayBuffer());
   let binary = "";
   for (let index = 0; index < bytes.length; index += 0x8000) {
