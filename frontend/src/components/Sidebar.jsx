@@ -5,6 +5,17 @@ import { BRAND } from "../lib/brand.js";
 
 export default function Sidebar({ open, hidden, onNavigate }) {
   const { user } = useAuth();
+
+  // The page scrolls on the document — .app-shell__content sets no overflow of
+  // its own — so this is a window scroll, not a container one.
+  const scrollToTop = () => {
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    window.scrollTo({ top: 0, behavior: reduceMotion ? "auto" : "smooth" });
+    // On mobile the sidebar is an overlay drawer: leaving it open would hide
+    // the top of the page the user just asked to see.
+    onNavigate?.();
+  };
+
   return (
     <aside
       className={`sidebar ${open ? "sidebar--open" : ""}`}
@@ -13,10 +24,10 @@ export default function Sidebar({ open, hidden, onNavigate }) {
       inert={hidden ? "" : undefined}
       aria-hidden={hidden ? "true" : undefined}
     >
-      <div className="sidebar__brand">
+      <button type="button" className="sidebar__brand" onClick={scrollToTop} title="Về đầu trang">
         <span className="sidebar__logo">{BRAND.name}</span>
         <span className="sidebar__subtitle">{BRAND.dashboardSubtitle}</span>
-      </div>
+      </button>
 
       <nav className="sidebar__nav" aria-label="Điều hướng chính">
         {navItemsFor(user?.role).map(({ to, label, icon: Icon, end }) => (

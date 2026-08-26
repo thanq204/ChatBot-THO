@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { Navigate, useSearchParams } from "react-router-dom";
 import { ArrowLeft, EnvelopeSimple, Eye, EyeSlash, IdentificationBadge, LockSimple, SpinnerGap, WarningCircle } from "@phosphor-icons/react";
-import Mascot from "../components/landing/Mascot.jsx";
 import SakuraField from "../components/landing/SakuraField.jsx";
 import { useAuth } from "../auth/AuthProvider.jsx";
 import { auth } from "../api/client.js";
 import { TransitionLink, usePageTransition } from "../transitions/PageTransition.jsx";
 import "../login.css";
 import { BRAND } from "../lib/brand.js";
+import ThoMascot from "../components/ThoMascot.jsx";
 
 export default function AcceptInvitePage() {
   const [searchParams] = useSearchParams();
@@ -49,7 +49,7 @@ export default function AcceptInvitePage() {
   return <div className="auth"><div className="auth__blobs" aria-hidden="true"><span className="auth__blob auth__blob--pink" /><span className="auth__blob auth__blob--lavender" /></div><SakuraField />
     <div className="auth__card"><TransitionLink to="/" className="auth__back"><ArrowLeft size={15} weight="bold" />Quay lại trang chủ</TransitionLink>
       <div className="auth__head">
-        <Mascot size={62} variant="auth" className="auth__mascot" />
+        <ThoMascot height={74} className="auth__mascot" />
         <span className="auth__brand">{BRAND.name} · {BRAND.tagline}</span>
         <h1 className="auth__title">Nhận lời mời làm Mod</h1>
         <p className="auth__subtitle">Hoàn tất đăng ký để tham gia đội kiểm duyệt.</p>
