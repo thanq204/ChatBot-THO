@@ -18,13 +18,39 @@ export default function Modal({ open, title, onClose, children }) {
   // there on close instead of resetting to the top of the document.
   const returnFocusRef = useRef(null);
 
+  // onClose is read through a ref so the effects below can key on `open` alone.
+  // Most callers pass a fresh closure every render (an inline arrow, or a plain
+  // `function closeModal()` in the component body). With onClose in the
+  // dependency array, the effect re-ran on every keystroke and re-focused the
+  // panel — which stole focus out of whatever field was being typed into, so
+  // only the first character ever landed.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => { onCloseRef.current = onClose; });
+
+  // Focus handover and the body scroll lock: strictly once per open/close.
   useEffect(() => {
     if (!open) return undefined;
     returnFocusRef.current = document.activeElement;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    panelRef.current?.focus();
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      // Guard the call: the trigger may have been unmounted by the very action
+      // that closed the dialog (deleting the row you opened it from).
+      if (typeof returnFocusRef.current?.focus === "function" && document.contains(returnFocusRef.current)) {
+        returnFocusRef.current.focus();
+      }
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return undefined;
 
     const handleKeyDown = (event) => {
       if (event.key === "Escape") {
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (event.key !== "Tab") return;
@@ -51,21 +77,9 @@ export default function Modal({ open, title, onClose, children }) {
       }
     };
 
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
     document.addEventListener("keydown", handleKeyDown);
-    panelRef.current?.focus();
-
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      document.removeEventListener("keydown", handleKeyDown);
-      // Guard the call: the trigger may have been unmounted by the very action
-      // that closed the dialog (deleting the row you opened it from).
-      if (typeof returnFocusRef.current?.focus === "function" && document.contains(returnFocusRef.current)) {
-        returnFocusRef.current.focus();
-      }
-    };
-  }, [open, onClose]);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [open]);
 
   return createPortal(
     <AnimatePresence>
