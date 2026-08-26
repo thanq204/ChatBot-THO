@@ -11,6 +11,12 @@ export const CATEGORY_LABELS = {
   disagreement: "Tranh luận gay gắt",
   friendly_teasing: "Đùa giỡn thân thiện",
   safe: "An toàn",
+  sexual: "Nội dung nhạy cảm",
+  self_harm: "Tự gây hại",
+  ambiguous: "Chưa rõ ràng",
+  benign_activity: "Hoạt động thông thường",
+  quoted_or_educational: "Trích dẫn / giáo dục",
+  other: "Khác",
 };
 
 export const CATEGORY_COLORS = {
@@ -65,16 +71,16 @@ export const STATUS_COLORS = {
 
 /** event_type values written by OperationsStore.add_audit and the admin routes. */
 export const AUDIT_EVENT_LABELS = {
-  incident_created: "Mở case",
-  message_grouped: "Gộp thêm message",
+  incident_created: "Mở trường hợp",
+  message_grouped: "Gộp thêm tin nhắn",
   analysis_completed: "AI phân tích xong",
-  incident_updated: "Admin cập nhật case",
+  incident_updated: "Admin cập nhật trường hợp",
   admin_platform_action: "Admin xử lý trên nền tảng",
   automatic_moderation_dm: "Tự động nhắn nhắc nhở",
   member_report_created: "Thành viên báo cáo",
   member_report_reviewed: "Admin xử lý báo cáo",
   admin_announcement: "Admin gửi thông báo",
-  moderation_memory_updated: "Lưu case làm mẫu tham chiếu",
+  moderation_memory_updated: "Lưu trường hợp làm mẫu tham chiếu",
   duplicate_admin_notification_suppressed: "Bỏ qua thông báo trùng lặp",
   recent_duplicate_notification_suppressed: "Bỏ qua thông báo trùng lặp gần đây",
   incident_reputation_decision: "Admin/Mod duyệt vi phạm",
@@ -125,14 +131,14 @@ export function describeAuditEntry(item) {
     case "incident_updated": {
       const status = payload.status ? ` → ${statusLabel(payload.status)}` : "";
       const note = payload.note ? `: ${payload.note}` : "";
-      return `cập nhật case${status}${note}`;
+      return `cập nhật trường hợp${status}${note}`;
     }
     case "member_report_reviewed":
       return `đánh dấu báo cáo ${payload.report_id ?? ""} là ${payload.status === "reviewed" ? "đã xử lý" : "mở lại"}`;
     case "admin_announcement":
       return `gửi thông báo tới ${(payload.targets || []).join(", ") || "nền tảng"}`;
     case "moderation_memory_updated":
-      return `lưu case làm mẫu tham chiếu (${moderationCategoryLabel(payload.category)})`;
+      return `lưu trường hợp làm mẫu tham chiếu (${moderationCategoryLabel(payload.category)})`;
     default:
       return auditEventLabel(item.event_type);
   }
@@ -154,7 +160,7 @@ export const DECISION_LABELS = {
   allow: "Cho phép",
   warn: "Cảnh báo",
   hide: "Ẩn",
-  hold_for_review: "Chờ review",
+  hold_for_review: "Chờ duyệt",
 };
 
 export const DECISION_COLORS = {
@@ -223,10 +229,40 @@ const AGENT_TRACE_LABELS = {
   "Safety Gate": "Cổng an toàn",
   "Decision Agent": "Agent quyết định",
   "Agent Graph": "Đồ thị Agent",
-  "Invalid Output Guardrail": "Chặn output không hợp lệ",
-  "Mock Policy Agent": "Agent chính sách (mock)",
-  "Deterministic Guardrail": "Guardrail tất định",
+  "Invalid Output Guardrail": "Cổng chặn kết quả không hợp lệ",
+  "Mock Policy Agent": "Agent chính sách mô phỏng",
+  "Deterministic Guardrail": "Cổng an toàn tất định",
 };
+
+const MODERATION_REASON_FALLBACKS = {
+  safe: "Không phát hiện dấu hiệu vi phạm rõ ràng.",
+  spam: "Nội dung có dấu hiệu spam hoặc lừa đảo và cần được kiểm tra.",
+  harassment: "Nội dung có dấu hiệu quấy rối hoặc công kích cá nhân.",
+  hate: "Nội dung có dấu hiệu ngôn từ thù ghét.",
+  violence: "Nội dung có dấu hiệu đe dọa hoặc cổ súy bạo lực.",
+  sexual: "Nội dung có dấu hiệu nhạy cảm và cần được kiểm tra.",
+  self_harm: "Nội dung liên quan đến tự gây hại và cần Admin/Mod xem xét.",
+  ambiguous: "Ngữ cảnh chưa đủ rõ để hệ thống tự động đưa ra kết luận.",
+  benign_activity: "Đây là hoạt động thông thường, chưa thấy ý định gây hại.",
+  friendly_teasing: "Ngữ cảnh cho thấy đây có thể là lời đùa thân thiện.",
+  quoted_or_educational: "Nội dung đang được trích dẫn hoặc dùng để giải thích, chưa thấy ý định gây hại.",
+  other: "Nội dung cần được kiểm tra thêm trước khi đưa ra kết luận.",
+};
+
+const ENGLISH_REASON_WORDS = new Set([
+  "agents", "ambiguous", "appears", "attack", "because", "clear", "contains", "content", "context",
+  "detected", "evidence", "exceeded", "found", "harmful", "harassment", "intent", "language", "message",
+  "personal", "policy", "quota", "requires", "risk", "safe", "specialist", "threat", "user", "violation",
+]);
+
+function looksLikeEnglishReason(value) {
+  const text = String(value || "").trim().toLowerCase();
+  if (!text) return false;
+  if (/^(allow|allowed|ambiguous|hide|no violation|review|safe|warn)[.! ]*$/.test(text)) return true;
+  if (/^(spam|harassment|hate|violence|sexual|self_harm|ambiguous|safe)\s+từ\s+/i.test(text)) return true;
+  const words = text.match(/[a-z]+/g) || [];
+  return words.filter((word) => ENGLISH_REASON_WORDS.has(word)).length >= 2;
+}
 
 export function moderationCategoryLabel(category) {
   return MODERATION_CATEGORY_LABELS[category] ?? category;
@@ -237,5 +273,11 @@ export function moderationActionLabel(action) {
 }
 
 export function agentStepLabel(step) {
-  return AGENT_TRACE_LABELS[step] ?? step;
+  return AGENT_TRACE_LABELS[step] ?? "Bước xử lý bổ sung";
+}
+
+export function vietnameseModerationText(value, category = "other", fallback = "") {
+  const text = String(value || "").trim();
+  if (text && !looksLikeEnglishReason(text)) return text;
+  return fallback || MODERATION_REASON_FALLBACKS[category] || MODERATION_REASON_FALLBACKS.other;
 }

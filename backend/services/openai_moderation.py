@@ -44,7 +44,7 @@ class OpenAIModerationService:
 
     def run_context_agent(self, submission: MemberSubmission) -> GeminiAgentStageResult:
         return self.generate_structured(
-            self._agent_prompt(submission, "context", "Interpret intent, tone and ambiguity."),
+            self._agent_prompt(submission, "ngữ cảnh", "Phân tích ý định, giọng điệu và mức độ mơ hồ."),
             ContextAgentOutput,
             "Context Agent",
         )
@@ -54,7 +54,7 @@ class OpenAIModerationService:
             self._agent_prompt(
                 submission,
                 "policy",
-                "Map the message to exactly one moderation policy.\ncontext_agent_output:\n" + context.model_dump_json(),
+                "Ánh xạ tin nhắn vào đúng một nhóm chính sách kiểm duyệt.\nket_qua_agent_ngu_canh:\n" + context.model_dump_json(),
             ),
             PolicyAgentOutput,
             "Policy Agent",
@@ -65,9 +65,9 @@ class OpenAIModerationService:
             self._agent_prompt(
                 submission,
                 "risk",
-                "Score safety risk and decide whether escalation is needed.\n"
-                f"context_agent_output:\n{context.model_dump_json()}\n"
-                f"policy_agent_output:\n{policy.model_dump_json()}",
+                "Chấm điểm rủi ro an toàn và xác định có cần chuyển Admin/Mod xem xét hay không.\n"
+                f"ket_qua_agent_ngu_canh:\n{context.model_dump_json()}\n"
+                f"ket_qua_agent_chinh_sach:\n{policy.model_dump_json()}",
             ),
             RiskAgentOutput,
             "Risk Agent",
@@ -78,10 +78,10 @@ class OpenAIModerationService:
             self._agent_prompt(
                 submission,
                 "decision",
-                "Produce the final moderation decision using all specialist outputs.\n"
-                f"context_agent_output:\n{context.model_dump_json()}\n"
-                f"policy_agent_output:\n{policy.model_dump_json()}\n"
-                f"risk_agent_output:\n{risk.model_dump_json()}",
+                "Tạo quyết định kiểm duyệt cuối cùng từ kết quả của các agent chuyên trách.\n"
+                f"ket_qua_agent_ngu_canh:\n{context.model_dump_json()}\n"
+                f"ket_qua_agent_chinh_sach:\n{policy.model_dump_json()}\n"
+                f"ket_qua_agent_rui_ro:\n{risk.model_dump_json()}",
             ),
             GeminiModerationOutput,
             "Decision Agent",
@@ -95,6 +95,8 @@ class OpenAIModerationService:
                 model=self.settings.openai_moderation_model,
                 api_key=self.settings.openai_api_key,
                 temperature=self.settings.llm_temperature,
+                timeout=self.settings.gemini_timeout_seconds,
+                max_retries=1,
             )
             try:
                 structured = llm.with_structured_output(schema, method="json_schema")
@@ -104,7 +106,7 @@ class OpenAIModerationService:
             if isinstance(output, dict):
                 output = schema.model_validate(output)
             if not isinstance(output, BaseModel):
-                raise ValueError("OpenAI returned an unexpected structured-output type.")
+                raise ValueError("OpenAI trả về structured output không đúng kiểu dữ liệu mong đợi.")
             return GeminiAgentStageResult(
                 output=output,
                 model_used=self.settings.openai_moderation_model,

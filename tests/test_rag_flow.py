@@ -237,7 +237,7 @@ def test_general_question_labels_deterministic_fallback_honestly() -> None:
 
     outcome = chat.reply(_message("fallback-name", "bạn tên là gì"))
 
-    assert outcome.answer == "[Hệ thống]\nMình tên là CHAT-10, trợ lý cộng đồng học tập."
+    assert outcome.answer == "[Hệ thống]\nMình tên là THO, trợ lý cộng đồng học tập."
     assert outcome.model_used == "system-fallback"
 
 

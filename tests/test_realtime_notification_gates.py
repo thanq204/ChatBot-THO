@@ -90,7 +90,7 @@ def test_legacy_telegram_case_title_uses_sender_name_instead_of_id(tmp_path) -> 
     incident = store.upsert_incident(message, result)
     store.link_message_incident(message.message_id, incident.incident_id)
 
-    assert store.list_incidents()[0].title == "Harassment từ Simon"
+    assert store.list_incidents()[0].title == "Quấy rối từ Simon"
 
 
 def test_identical_telegram_messages_from_different_members_do_not_share_a_case(tmp_path) -> None:
@@ -114,7 +114,7 @@ def test_identical_telegram_messages_from_different_members_do_not_share_a_case(
         incident = store.upsert_incident(item, decision)
         store.link_message_incident(item.message_id, incident.incident_id)
 
-    assert [item.title for item in store.list_incidents()] == ["Harassment từ Thanh Nguyen", "Harassment từ Simon"]
+    assert [item.title for item in store.list_incidents()] == ["Quấy rối từ Thanh Nguyen", "Quấy rối từ Simon"]
 
 
 def test_gate2_automatically_reads_nearby_context(tmp_path) -> None:

@@ -9,4 +9,6 @@ def get_llm() -> ChatOpenAI:
         model=settings.model_name,
         api_key=settings.openai_api_key,
         temperature=settings.llm_temperature,
+        timeout=15,
+        max_retries=1,
     )

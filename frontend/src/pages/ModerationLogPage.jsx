@@ -71,7 +71,7 @@ export default function ModerationLogPage() {
 
       <div className="page-grid__row">
         <Card title="Nhật ký hành động Admin" className="span-12">
-          <p className="muted small">Những gì Admin/Mod đã thực sự làm trên các case thật: xoá tin, timeout, kick, ban, gửi thông báo...</p>
+          <p className="muted small">Những gì Admin/Mod đã thực sự làm trên các trường hợp thật: xoá tin, tạm khóa chat, mời khỏi nhóm, cấm và gửi thông báo.</p>
           {loading && <SkeletonBlock height={260} />}
           {!loading && adminActions.length === 0 && <EmptyState message="Chưa có hành động Admin nào được ghi nhận." />}
           {!loading && adminActions.length > 0 && (
@@ -107,7 +107,7 @@ export default function ModerationLogPage() {
       <div className="page-grid__row">
         <Card title="Nhật ký quyết định (thử nghiệm)" className="span-12" delay={0.05}>
           <p className="muted small">
-            Quyết định allow/warn/hide trên các tin nhắn giả lập gửi ở "Khu thử nghiệm AI" — không phải hành động trên tin nhắn
+            Quyết định cho phép/cảnh báo/ẩn trên các tin nhắn giả lập gửi ở "Khu thử nghiệm AI" — không phải hành động trên tin nhắn
             thật.
           </p>
           {loading && <SkeletonBlock height={160} />}

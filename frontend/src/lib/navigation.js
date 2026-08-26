@@ -32,9 +32,9 @@ export const NAV_ITEMS = [
   { to: "/quan-ly-faq", label: "Quản lý FAQ", icon: ChatCircleDots, adminOnly: true, keywords: "câu hỏi thường gặp chủ đề" },
   { to: "/bang-exp", label: "Bảng EXP", icon: Trophy, adminOnly: true, keywords: "điểm level thành viên xếp hạng uy tín" },
   { to: "/nguoi-ban", label: "Người bán", icon: Storefront, keywords: "seller giao dịch uy tín scam trade" },
-  { to: "/thong-bao", label: "Thông báo", icon: Megaphone, keywords: "announcement gửi broadcast telegram discord" },
-  { to: "/quan-ly-noi-dung", label: "Quản lý nội dung", icon: Books, keywords: "tài liệu rag knowledge tri thức import" },
-  { to: "/lenh-bot", label: "Nội dung lệnh bot", icon: Robot, keywords: "command lệnh bot nội dung" },
+  { to: "/thong-bao", label: "Thông báo", icon: Megaphone, adminOnly: true, keywords: "announcement gửi broadcast telegram discord" },
+  { to: "/quan-ly-noi-dung", label: "Quản lý nội dung", icon: Books, adminOnly: true, keywords: "tài liệu rag knowledge tri thức import" },
+  { to: "/lenh-bot", label: "Nội dung lệnh bot", icon: Robot, adminOnly: true, keywords: "command lệnh bot nội dung" },
 ];
 
 /** Admin-only destinations are filtered out entirely rather than shown disabled. */

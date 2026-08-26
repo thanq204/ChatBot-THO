@@ -1,15 +1,46 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from typing import Literal
+from urllib.parse import urlsplit
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 PlatformName = Literal["discord", "telegram", "zalo", "messenger", "web", "demo"]
 GateName = Literal["gate1_fast_filter", "gate2_context_review", "gate3_approved_case_retrieval"]
 Decision = Literal["allow", "warn", "hide", "hold_for_review"]
 IncidentStatus = Literal["open", "monitoring", "resolved", "snoozed"]
 Severity = Literal["low", "medium", "high", "critical"]
+
+
+def _safe_http_url(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+    if len(cleaned) > 2_000:
+        raise ValueError("URL vượt quá 2.000 ký tự.")
+    parts = urlsplit(cleaned)
+    if parts.scheme.lower() not in {"http", "https"} or not parts.hostname:
+        raise ValueError("Chỉ chấp nhận URL http/https hợp lệ.")
+    if parts.username or parts.password:
+        raise ValueError("URL không được chứa thông tin đăng nhập.")
+    return cleaned
+
+
+def _bounded_strings(values: list[str], *, item_length: int) -> list[str]:
+    cleaned: list[str] = []
+    for value in values:
+        item = str(value).strip()
+        if not item:
+            continue
+        if len(item) > item_length:
+            raise ValueError(f"Mỗi giá trị chỉ được dài tối đa {item_length} ký tự.")
+        if item not in cleaned:
+            cleaned.append(item)
+    return cleaned
 
 
 class CommonMessage(BaseModel):
@@ -26,9 +57,21 @@ class CommonMessage(BaseModel):
     source_url: str | None = None
     raw: dict[str, object] = Field(default_factory=dict)
 
+    @field_validator("source_url")
+    @classmethod
+    def validate_source_url(cls, value: str | None) -> str | None:
+        return _safe_http_url(value)
+
+    @field_validator("raw")
+    @classmethod
+    def validate_raw_payload(cls, value: dict[str, object]) -> dict[str, object]:
+        if len(json.dumps(value, ensure_ascii=False, default=str)) > 50_000:
+            raise ValueError("Raw platform payload vượt quá 50.000 ký tự.")
+        return value
+
 
 class MessageIngestRequest(BaseModel):
-    messages: list[CommonMessage] = Field(..., min_length=1, max_length=500)
+    messages: list[CommonMessage] = Field(..., min_length=1, max_length=200)
     analyze: bool = True
 
 
@@ -53,7 +96,7 @@ class ContextReviewOutput(BaseModel):
     category: str = "safe"
     risk_score: float = Field(default=0.0, ge=0.0, le=1.0)
     evidence: list[str] = Field(default_factory=list, max_length=6)
-    explanation: str = Field(default="", max_length=500)
+    explanation: str = Field(default="", max_length=500, description="Diễn giải bằng tiếng Việt.")
 
 
 class MessageDecision(BaseModel):
@@ -151,6 +194,11 @@ class PolicyUpsertRequest(BaseModel):
     trigger_terms: list[str] = Field(default_factory=list, max_length=30)
     active: bool = True
 
+    @field_validator("trigger_terms")
+    @classmethod
+    def validate_trigger_terms(cls, value: list[str]) -> list[str]:
+        return _bounded_strings(value, item_length=100)
+
 
 class KnowledgeDocument(BaseModel):
     document_id: str
@@ -168,6 +216,11 @@ class KnowledgeDocumentRequest(BaseModel):
     tags: list[str] = Field(default_factory=list, max_length=20)
     dataset: str = Field(default="general", min_length=1, max_length=80)
     active: bool = True
+
+    @field_validator("tags")
+    @classmethod
+    def validate_tags(cls, value: list[str]) -> list[str]:
+        return _bounded_strings(value, item_length=60)
 
 
 class KnowledgeImportResponse(BaseModel):
@@ -199,6 +252,7 @@ class KnowledgeImportRecord(BaseModel):
     skipped_count: int
     warnings: list[str] = Field(default_factory=list)
     normalized_by: str
+    status: Literal["processing", "completed", "failed"] = "completed"
     created_at: datetime
 
 
@@ -228,6 +282,11 @@ class FAQUpsertRequest(BaseModel):
     answer: str = Field(..., min_length=1, max_length=5000)
     tags: list[str] = Field(default_factory=list, max_length=20)
     active: bool = True
+
+    @field_validator("tags")
+    @classmethod
+    def validate_tags(cls, value: list[str]) -> list[str]:
+        return _bounded_strings(value, item_length=60)
 
 
 class FAQWriteResponse(BaseModel):
@@ -262,6 +321,11 @@ class FAQSuggestionApproveRequest(BaseModel):
     question: str | None = Field(default=None, min_length=3, max_length=500)
     answer: str = Field(..., min_length=1, max_length=5000)
     tags: list[str] = Field(default_factory=list, max_length=20)
+
+    @field_validator("tags")
+    @classmethod
+    def validate_tags(cls, value: list[str]) -> list[str]:
+        return _bounded_strings(value, item_length=60)
 
 
 class ChatOutcome(BaseModel):
@@ -371,6 +435,11 @@ class TradeCaseCreateRequest(BaseModel):
     seller_name: str | None = Field(default=None, max_length=200)
     item_summary: str = Field(..., min_length=3, max_length=500)
     evidence_urls: list[str] = Field(default_factory=list, max_length=10)
+
+    @field_validator("evidence_urls")
+    @classmethod
+    def validate_evidence_urls(cls, value: list[str]) -> list[str]:
+        return [url for item in value if (url := _safe_http_url(item))]
 
 
 class TradeCase(BaseModel):

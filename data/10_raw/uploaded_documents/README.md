@@ -8,7 +8,9 @@ Lưu file gốc đã qua validation từ luồng upload web, nhóm theo `import_
 └── metadata.json
 ```
 
-Các format hiện được hỗ trợ gồm JSON, JSONL, CSV, Markdown, TXT và DOCX. Parsing và normalization thuộc bước sau.
+Các format hiện được hỗ trợ gồm JSON, JSONL, CSV/TSV, XLSX, YAML, HTML, Markdown, TXT, DOCX và PDF (tối đa 5 MB). Parsing và normalization thuộc bước sau.
+
+Importer tự nhận encoding và dấu phân cách CSV, đọc từng sheet XLSX, giữ nội dung bảng DOCX và số trang PDF. PDF scan không có lớp chữ cần được OCR trước khi upload. Bản ghi lỗi riêng lẻ được bỏ qua kèm cảnh báo; tài liệu dài được tách thành nhiều document canonical để không mất nội dung.
 
 ## Output bắt buộc sau chuẩn hóa
 

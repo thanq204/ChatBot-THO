@@ -147,6 +147,6 @@ def test_moderation_reply_never_exposes_an_old_admin_action_as_new_action() -> N
     )
 
     assert outcome.stage == "moderation"
-    assert outcome.answer.startswith("[Cảnh báo]")
+    assert outcome.answer.startswith("[Moderation]")
     assert "delete_message" not in outcome.answer
     assert "chỉ được thực hiện sau khi Admin/Mod xác nhận" in outcome.answer

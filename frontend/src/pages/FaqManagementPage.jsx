@@ -252,7 +252,7 @@ export default function FaqManagementPage() {
           <label className="field">
             Tags
             <input value={form.tags} onChange={update("tags")} placeholder="lịch học, đăng ký môn, hỗ trợ" />
-            <span className="field__hint">Phân tách bằng dấu phẩy, tối đa 20 tags.</span>
+            <span className="field__hint">Phân tách bằng dấu phẩy, tối đa 20 thẻ.</span>
           </label>
           {form.mode === "edit" && (
             <label className="faq-active-toggle">
@@ -282,7 +282,7 @@ function TopTopics({ topics, onAnswer }) {
   const feed = useLoadMore(topics, TOPIC_STEP);
 
   if (topics.length === 0) {
-    return <EmptyState message="Chưa có topic nào đang chờ. Các câu hỏi mới đủ điều kiện sẽ tự xuất hiện tại đây." />;
+    return <EmptyState message="Chưa có chủ đề nào đang chờ. Các câu hỏi mới đủ điều kiện sẽ tự xuất hiện tại đây." />;
   }
 
   return (
@@ -340,7 +340,7 @@ function FaqHistory({ faqs, total, query, onQueryChange, onEdit }) {
           type="search"
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
-          placeholder="Tìm theo câu hỏi, câu trả lời, ID hoặc tags..."
+          placeholder="Tìm theo câu hỏi, câu trả lời, ID hoặc thẻ..."
           aria-label="Tìm trong lịch sử FAQ"
         />
       </div>
@@ -364,7 +364,7 @@ function FaqHistory({ faqs, total, query, onQueryChange, onEdit }) {
               <div className="faq-history__footer">
                 <div className="chip-row">
                   {(faq.tags || []).map((tag) => <span className="chip" key={`${faq.faq_id}-${tag}`}>{tag}</span>)}
-                  {(!faq.tags || faq.tags.length === 0) && <span className="list-row__meta">Chưa có tags</span>}
+                  {(!faq.tags || faq.tags.length === 0) && <span className="list-row__meta">Chưa có thẻ</span>}
                 </div>
                 <span className="list-row__meta">Sửa {relativeTime(faq.updated_at)}</span>
               </div>

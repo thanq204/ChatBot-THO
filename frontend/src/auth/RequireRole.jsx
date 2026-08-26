@@ -11,11 +11,12 @@ import { PAGE_TITLES } from "../lib/navigation.js";
  * link simply appeared on the overview page with no explanation, which reads as
  * the app losing the navigation rather than refusing it. It now says why.
  */
-export default function RequireRole({ role }) {
+export default function RequireRole({ role, roles }) {
   const { user } = useAuth();
   const location = useLocation();
   const toast = useToast();
-  const allowed = user?.role === role;
+  const acceptedRoles = roles ?? [role];
+  const allowed = acceptedRoles.includes(user?.role);
   // StrictMode double-invokes effects in development; without this the same
   // refusal would raise two identical toasts.
   const announced = useRef(false);
@@ -26,8 +27,8 @@ export default function RequireRole({ role }) {
     const page = PAGE_TITLES[location.pathname];
     toast.info(
       page
-        ? `Trang “${page}” chỉ dành cho Quản trị viên. Đã đưa bạn về Tổng quan.`
-        : "Trang này chỉ dành cho Quản trị viên. Đã đưa bạn về Tổng quan.",
+        ? `Bạn không có quyền mở trang “${page}”. Đã đưa bạn về Tổng quan.`
+        : "Bạn không có quyền mở trang này. Đã đưa bạn về Tổng quan.",
     );
   }, [allowed, location.pathname, toast]);
 

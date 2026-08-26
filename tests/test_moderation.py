@@ -2,7 +2,7 @@ import pytest
 
 from backend.config import Settings
 from backend.models.moderation import GeminiModerationOutput, MemberSubmission
-from backend.services.gemini_moderation import GeminiModerationError
+from backend.services.gemini_moderation import GeminiModerationError, GeminiModerationService
 from backend.services.moderation import ModerationConfigurationError, ModerationEngine
 
 
@@ -57,6 +57,7 @@ async def test_multi_agent_graph_returns_final_decision_and_trace(monkeypatch):
     assert result.mode == "gemini"
     assert result.model_used == "gemini-3.6-flash"
     assert result.action == "review"
+    assert result.reason == "Ngữ cảnh chưa đủ rõ để hệ thống tự động đưa ra kết luận."
     assert result.agent_trace == ["Context Agent", "Policy Agent", "Risk Agent", "Decision Agent", "Deterministic Guardrail"]
 
 
@@ -81,6 +82,7 @@ async def test_gemini_policy_id_can_be_descriptive(monkeypatch):
 
     assert result.policy_id == "harassment_policy_001"
     assert result.action == "warn"
+    assert result.reason == "Nội dung có dấu hiệu quấy rối hoặc công kích cá nhân."
 
 
 @pytest.mark.asyncio
@@ -97,7 +99,7 @@ async def test_mock_fallback_requires_explicit_flag(monkeypatch):
     assert result.mode == "mock-fallback"
     assert result.model_used == "mock-fallback"
     assert result.fallback_used is True
-    assert result.fallback_reason is not None
+    assert result.fallback_reason == "Mô hình chính gặp lỗi hoặc đã đạt giới hạn sử dụng."
 
 
 @pytest.mark.asyncio
@@ -117,3 +119,13 @@ async def test_invalid_gemini_output_is_sent_to_review(monkeypatch):
     assert result.category == "ambiguous"
     assert result.needs_admin_review is True
     assert result.fallback_used is False
+
+
+def test_moderation_prompt_requires_vietnamese_generated_text():
+    prompt = GeminiModerationService._prompt(
+        MemberSubmission(user_id="U001", text="Tin nhắn thử nghiệm"),
+        "phân loại",
+    )
+
+    assert "PHẢI viết bằng tiếng Việt" in prompt
+    assert "Evidence chỉ được trích nguyên văn" in prompt

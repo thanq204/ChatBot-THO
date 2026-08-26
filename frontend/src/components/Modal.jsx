@@ -92,7 +92,7 @@ export default function Modal({ open, title, onClose, children }) {
           >
             <header className="modal__header">
               <h2 className="modal__title">{title}</h2>
-              <button type="button" className="modal__close" onClick={onClose} aria-label="Đóng chi tiết case">
+              <button type="button" className="modal__close" onClick={onClose} aria-label="Đóng chi tiết trường hợp">
                 <X size={17} weight="bold" />
               </button>
             </header>

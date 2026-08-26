@@ -66,8 +66,8 @@ _SOCIAL_OR_ACTIVITY = re.compile(
 _NON_REUSABLE_QUESTION = re.compile(
     r"\b(?:hom nay|bay gio|hien tai)\b.*\b(?:ngay|thu|gio|thoi tiet|nhiet do)\b"
     r"|\b(?:thoi tiet|nhiet do)\b"
-    r"|\b(?:ban|chatbot|chat-10|bot)\b.*\b(?:ten|la ai|model|mo hinh|llm|lam duoc gi)\b"
-    r"|\b(?:khi nao|luc nao|tai sao)\b.*\b(?:ban|chatbot|chat-10|bot)\b.*\b(?:llm|rag|model|mo hinh)\b"
+    r"|\b(?:ban|chatbot|chat-10|tho|bot)\b.*\b(?:ten|la ai|model|mo hinh|llm|lam duoc gi)\b"
+    r"|\b(?:khi nao|luc nao|tai sao)\b.*\b(?:ban|chatbot|chat-10|tho|bot)\b.*\b(?:llm|rag|model|mo hinh)\b"
     r"|\bban\b.*\b(?:khoe|thich|yeu|cam thay)\b",
     re.I,
 )

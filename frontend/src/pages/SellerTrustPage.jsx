@@ -106,7 +106,7 @@ export default function SellerTrustPage() {
             {!loading && sellers.length > 0 && (
               <div className="reputation-table-wrap">
                 <table className="reputation-table seller-table">
-                  <thead><tr><th>Người bán</th><th>Hoàn tất</th><th>Review xác thực</th><th>Buyer khác nhau</th><th>Điểm TB</th><th>Tín hiệu cần xem</th><th>Trạng thái dữ liệu</th></tr></thead>
+                  <thead><tr><th>Người bán</th><th>Hoàn tất</th><th>Đánh giá xác thực</th><th>Người mua khác nhau</th><th>Điểm TB</th><th>Tín hiệu cần xem</th><th>Trạng thái dữ liệu</th></tr></thead>
                   <tbody>
                     {sellerPage.slice.map((seller) => {
                       const [label, tone] = DATA_STATUS[seller.data_status] || DATA_STATUS.insufficient_data;
@@ -179,7 +179,7 @@ export default function SellerTrustPage() {
             {!loading && trades.length > 0 && (
               <div className="reputation-table-wrap">
                 <table className="reputation-table seller-table">
-                  <thead><tr><th>Mã</th><th>Buyer</th><th>Seller</th><th>Nội dung</th><th>Xác nhận</th><th>Trạng thái</th><th>Cập nhật</th></tr></thead>
+                  <thead><tr><th>Mã</th><th>Người mua</th><th>Người bán</th><th>Nội dung</th><th>Xác nhận</th><th>Trạng thái</th><th>Cập nhật</th></tr></thead>
                   <tbody>
                     {tradePage.slice.map((trade) => {
                       const [label, tone] = TRADE_STATUS[trade.status] || TRADE_STATUS.opened;
@@ -189,7 +189,7 @@ export default function SellerTrustPage() {
                           <td>{trade.buyer_name || trade.buyer_id}</td>
                           <td>{trade.seller_name || trade.seller_id}</td>
                           <td>{trade.item_summary}</td>
-                          <td>{trade.buyer_confirmed ? "Buyer ✓" : "Buyer …"} · {trade.seller_confirmed ? "Seller ✓" : "Seller …"}</td>
+                          <td>{trade.buyer_confirmed ? "Người mua ✓" : "Người mua …"} · {trade.seller_confirmed ? "Người bán ✓" : "Người bán …"}</td>
                           <td><Badge tone={tone}>{label}</Badge></td>
                           <td>{relativeTime(trade.updated_at)}</td>
                         </tr>
@@ -217,9 +217,9 @@ export default function SellerTrustPage() {
       <div className="page-grid__row">
         <Card title="Tiêu chí có ích và giới hạn" className="span-12">
           <div className="seller-criteria-grid">
-            <Criteria title="Dữ kiện được dùng" items={["Giao dịch hai bên xác nhận", "Review từ đúng buyer", "Độ chính xác mô tả", "Giao tiếp và hoàn tất", "Số buyer khác nhau", "Tranh chấp đã có bằng chứng"]} />
-            <Criteria title="Chống thao túng" items={["Một review mỗi trade_id", "Không tự review bản thân", "Phát hiện review dồn trong 24 giờ", "Cảnh báo buyer tập trung", "Cảnh báo giao dịch đối ứng lặp", "Admin/Mod quyết định case nhạy cảm"]} />
-            <Criteria title="Không được suy diễn" items={["Không bảo đảm giao dịch an toàn", "Không kết tội từ một review", "Không dùng lời khen trong chat làm điểm", "Không lưu OTP/thẻ/mật khẩu", "Không đưa tư vấn pháp lý", "Không ẩn review chỉ vì tiêu cực"]} />
+            <Criteria title="Dữ kiện được dùng" items={["Giao dịch hai bên xác nhận", "Đánh giá từ đúng người mua", "Độ chính xác mô tả", "Giao tiếp và hoàn tất", "Số người mua khác nhau", "Tranh chấp đã có bằng chứng"]} />
+            <Criteria title="Chống thao túng" items={["Một đánh giá cho mỗi mã giao dịch", "Không tự đánh giá bản thân", "Phát hiện đánh giá dồn trong 24 giờ", "Cảnh báo người mua tập trung", "Cảnh báo giao dịch đối ứng lặp", "Admin/Mod quyết định trường hợp nhạy cảm"]} />
+            <Criteria title="Không được suy diễn" items={["Không bảo đảm giao dịch an toàn", "Không kết tội từ một đánh giá", "Không dùng lời khen trong chat làm điểm", "Không lưu OTP/thẻ/mật khẩu", "Không đưa tư vấn pháp lý", "Không ẩn đánh giá chỉ vì tiêu cực"]} />
           </div>
         </Card>
       </div>
@@ -241,7 +241,7 @@ function AssessmentCard({ assessment, onSaved }) {
   return (
     <article className="seller-assessment-card">
       <div className="seller-assessment-card__head">
-        <div><strong>{assessment.assessment_id}</strong><small>Seller: {assessment.seller_id} · Người hỏi: {assessment.requester_id}</small></div>
+        <div><strong>{assessment.assessment_id}</strong><small>Người bán: {assessment.seller_id} · Người hỏi: {assessment.requester_id}</small></div>
         <Badge tone="var(--sev-medium)">Chờ duyệt</Badge>
       </div>
       <p><strong>Lý do:</strong> {assessment.reason}</p>

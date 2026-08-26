@@ -16,6 +16,8 @@ export default defineConfig({
   },
   build: {
     outDir: "dist",
-    sourcemap: true,
+    // Production source maps expose implementation details and are not needed
+    // by this MVP's browser runtime.
+    sourcemap: false,
   },
 });

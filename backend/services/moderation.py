@@ -10,6 +10,7 @@ from backend.config import Settings, get_settings
 from backend.models.moderation import MemberSubmission, ModerationResult
 from backend.services.gemini_moderation import GeminiModerationError, GeminiModerationService, GeminiStageResult
 from backend.services.openai_moderation import OpenAIModerationError, OpenAIModerationService
+from backend.services.vietnamese_text import vietnamese_moderation_explanation, vietnamese_response_or_fallback
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +54,10 @@ class ModerationEngine:
                         "mode": "mock-fallback",
                         "model_used": "mock-fallback",
                         "fallback_used": True,
-                        "fallback_reason": exc.user_message,
+                        "fallback_reason": vietnamese_response_or_fallback(
+                            exc.user_message,
+                            "Mô hình chính gặp lỗi hoặc đã đạt giới hạn sử dụng.",
+                        ),
                     }
                 )
             raise ModerationConfigurationError(exc.user_message) from exc
@@ -83,7 +87,7 @@ class ModerationEngine:
             category=output.category,
             risk_level=output.risk_level,
             policy_id=output.policy_id,
-            reason=output.reason,
+            reason=vietnamese_moderation_explanation(output.reason, output.category),
             confidence=output.confidence,
             needs_admin_review=needs_review,
             evidence=output.evidence,
@@ -104,7 +108,7 @@ class ModerationEngine:
             category=output.category,
             risk_level=output.risk_level,
             policy_id=output.policy_id,
-            reason=output.reason,
+            reason=vietnamese_moderation_explanation(output.reason, output.category),
             confidence=output.confidence,
             needs_admin_review=needs_review,
             evidence=output.evidence,

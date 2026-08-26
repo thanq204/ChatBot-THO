@@ -223,7 +223,7 @@ export default function SettingsPage() {
   if (error) {
     return (
       <div className="page-grid">
-        <ErrorState message={`Không lấy được knowledge base: ${error}`} onRetry={load} />
+        <ErrorState message={`Không lấy được kho tri thức: ${error}`} onRetry={load} />
       </div>
     );
   }
@@ -275,7 +275,7 @@ export default function SettingsPage() {
               type="search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Tìm tài liệu theo tiêu đề, nội dung, dataset..."
+              placeholder="Tìm tài liệu theo tiêu đề, nội dung, bộ dữ liệu..."
               aria-label="Tìm tài liệu"
             />
           </div>
@@ -317,7 +317,7 @@ export default function SettingsPage() {
                       {expanded && (
                         <>
                           <p className="list-row__body">{item.body}</p>
-                          <span className="list-row__meta">tags: {(item.tags || []).join(", ") || "không có"}</span>
+                          <span className="list-row__meta">thẻ: {(item.tags || []).join(", ") || "không có"}</span>
                         </>
                       )}
                       <div className="list-row__actions">
@@ -395,12 +395,12 @@ export default function SettingsPage() {
               </label>
               <label className="field">
                 Tags
-                <input value={form.tags} onChange={update("tags")} placeholder="event, rules, schedule" />
+                <input value={form.tags} onChange={update("tags")} placeholder="sự kiện, quy tắc, lịch trình" />
               </label>
             </div>
             <label className="field">
               Nội dung
-              <textarea value={form.body} onChange={update("body")} rows={4} maxLength={10000} placeholder="Nội dung policy/event/playbook" required />
+              <textarea value={form.body} onChange={update("body")} rows={4} maxLength={10000} placeholder="Nội dung chính sách, sự kiện hoặc hướng dẫn vận hành" required />
             </label>
             {formError && <p style={{ color: "var(--sev-critical)", fontSize: 12.5 }}>{formError}</p>}
             <div className="form-actions">
@@ -417,19 +417,19 @@ export default function SettingsPage() {
         {!editingId && mode === "file" && (
           <form className="stack" onSubmit={runImport}>
             <p className="muted small">
-              JSON, JSONL, CSV, Markdown, TXT, DOCX hoặc PDF, tối đa 5MB. Hệ thống tự chuẩn hóa về schema canonical và có thể
-              tách một file thành nhiều tài liệu.
+              JSON, JSONL, CSV/TSV, XLSX, YAML, HTML, Markdown, TXT, DOCX hoặc PDF, tối đa 5MB. Hệ thống tự chuẩn hóa về
+              schema canonical và có thể tách một file thành nhiều tài liệu.
             </p>
             <label className="field">
               File
-              <input ref={fileRef} type="file" accept=".json,.jsonl,.csv,.md,.markdown,.txt,.docx,.pdf" required />
+              <input ref={fileRef} type="file" accept=".json,.jsonl,.csv,.tsv,.xlsx,.yaml,.yml,.html,.htm,.md,.markdown,.txt,.docx,.pdf" required />
             </label>
             <label className="field">
               Đích đến
               <select value={importTarget} onChange={(event) => setImportTarget(event.target.value)}>
-                <option value="auto">Tự nhận diện knowledge/policy</option>
-                <option value="knowledge">Knowledge document</option>
-                <option value="policy">Policy / rule</option>
+                <option value="auto">Tự nhận diện tài liệu/quy tắc</option>
+                <option value="knowledge">Tài liệu tri thức</option>
+                <option value="policy">Chính sách / quy tắc</option>
               </select>
             </label>
             <div className="form-actions">
@@ -466,10 +466,10 @@ function ImportHistoryCard({ imports, loading }) {
   const feed = useLoadMore(imports, IMPORT_STEP);
 
   return (
-    <Card title="Lịch sử import" className="span-5">
+    <Card title="Lịch sử nhập dữ liệu" className="span-5">
       {loading && <SkeletonLine width="80%" />}
       {!loading && (!imports || imports.length === 0) && (
-        <EmptyState message="Chưa import lần nào. Dùng “Thêm tài liệu → Tải file lên” để nạp hàng loạt." />
+        <EmptyState message="Chưa nhập dữ liệu lần nào. Dùng “Thêm tài liệu → Tải file lên” để nạp hàng loạt." />
       )}
       {!loading && imports && imports.length > 0 && (
         <>
@@ -489,7 +489,7 @@ function ImportHistoryCard({ imports, loading }) {
           <LoadMore
             remaining={feed.remaining}
             step={IMPORT_STEP}
-            unit="lần import"
+            unit="lần nhập dữ liệu"
             onMore={feed.showMore}
             canCollapse={feed.canCollapse}
             onCollapse={feed.collapse}
@@ -525,7 +525,7 @@ function RagAskCard() {
             onChange={(event) => setQuestion(event.target.value)}
             rows={3}
             maxLength={2000}
-            placeholder="Ví dụ: Khi nào nên hold for review?"
+            placeholder="Ví dụ: Khi nào nên chuyển sang chờ Admin/Mod duyệt?"
             required
           />
         </label>

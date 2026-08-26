@@ -66,13 +66,13 @@ class TelegramAlertSender:
         lines = [
             "🚨 LINK ĐÃ BỊ CỘNG ĐỒNG CHẶN XUẤT HIỆN LẠI",
             f"Nền tảng: {message.platform.upper()} · Kênh: {message.channel_id}",
-            f"User ID: {message.author_id}",
+            f"Mã thành viên: {message.author_id}",
             f"Nội dung đầy đủ: {content}",
             f"Link chuẩn hóa: {canonical_url}",
             f"Xóa khỏi Discord: {'thành công' if deleted else 'không thành công - cần Admin xử lý'}",
         ]
         if message.source_url:
-            lines.append(f"Mở message: {message.source_url}")
+            lines.append(f"Mở tin nhắn: {message.source_url}")
         return self._send_text(message.message_id, "\n".join(lines)[:3900])
 
     def _send_text(self, message_id: str, text: str) -> bool:
@@ -130,5 +130,5 @@ class TelegramAlertSender:
         if result.incident_id:
             lines.append(f"Incident: {result.incident_id}")
         if message.source_url:
-            lines.append(f"Mở message: {message.source_url}")
+            lines.append(f"Mở tin nhắn: {message.source_url}")
         return "\n".join(lines)[:3900]
