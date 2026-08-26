@@ -7,10 +7,15 @@ import logging
 
 from backend.agents.moderation_graph import ModerationAgentGraph
 from backend.config import Settings, get_settings
-from backend.models.moderation import MemberSubmission, ModerationResult
+from backend.models.moderation import ContextAgentOutput, MemberSubmission, ModerationResult
 from backend.services.gemini_moderation import GeminiModerationError, GeminiModerationService, GeminiStageResult
 from backend.services.openai_moderation import OpenAIModerationError, OpenAIModerationService
-from backend.services.vietnamese_text import vietnamese_moderation_explanation, vietnamese_response_or_fallback
+from backend.services.vietnamese_text import (
+    concise_moderation_evidence,
+    vietnamese_language_label,
+    vietnamese_moderation_explanation,
+    vietnamese_response_or_fallback,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +103,13 @@ class ModerationEngine:
 
     def _graph_to_result(self, state: dict[str, object]) -> ModerationResult:
         output = state["decision"]
+        submission = state.get("submission")
+        source_text = submission.text if isinstance(submission, MemberSubmission) else ""
+        context = state.get("context")
+        context_output = context if isinstance(context, ContextAgentOutput) else None
+        context_spans = context_output.harmful_spans if context_output else []
+        evidence_candidates = context_spans or output.evidence
+        evidence = concise_moderation_evidence(evidence_candidates, source_text)
         needs_review = bool(
             output.needs_admin_review
             or output.action == "review"
@@ -108,10 +120,26 @@ class ModerationEngine:
             category=output.category,
             risk_level=output.risk_level,
             policy_id=output.policy_id,
-            reason=vietnamese_moderation_explanation(output.reason, output.category),
+            reason=vietnamese_moderation_explanation(
+                output.reason,
+                output.category,
+                evidence=evidence,
+                source_text=source_text,
+                normalized_meaning=(
+                    context_output.harmful_meaning_vi or context_output.normalized_meaning_vi
+                    if context_output
+                    else None
+                ),
+            ),
             confidence=output.confidence,
             needs_admin_review=needs_review,
-            evidence=output.evidence,
+            evidence=evidence,
+            detected_language=(
+                vietnamese_language_label(context_output.detected_language)
+                if context_output
+                else None
+            ),
+            normalized_meaning_vi=context_output.normalized_meaning_vi if context_output else None,
             model_used=str(state.get("model_used") or self._active_model),
             mode=self.provider,
             fallback_used=False,

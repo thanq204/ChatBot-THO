@@ -80,18 +80,25 @@ function ResultPanel({ response }) {
             {result.model_used} <span className="muted small">({result.mode})</span>
           </strong>
         </div>
+        <div className="sandbox-stat">
+          <span className="muted small">Ngôn ngữ phát hiện</span>
+          <strong>{result.detected_language ?? "Không xác định"}</strong>
+        </div>
       </div>
 
       <div>
         <h3 className="sandbox-subheading">Diễn giải</h3>
         <p>{vietnameseModerationText(result.reason, result.category)}</p>
         {result.evidence.length > 0 && (
-          <div className="chip-row">
-            {result.evidence.map((item) => (
-              <span key={item} className="chip">
-                {item}
-              </span>
-            ))}
+          <div>
+            <p className="muted small">Cụm từ hoặc tín hiệu được phân tích</p>
+            <div className="chip-row">
+              {result.evidence.map((item) => (
+                <span key={item} className="chip">
+                  {item}
+                </span>
+              ))}
+            </div>
           </div>
         )}
       </div>

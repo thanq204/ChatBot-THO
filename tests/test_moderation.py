@@ -1,7 +1,7 @@
 import pytest
 
 from backend.config import Settings
-from backend.models.moderation import GeminiModerationOutput, MemberSubmission
+from backend.models.moderation import ContextAgentOutput, GeminiModerationOutput, MemberSubmission
 from backend.services.gemini_moderation import GeminiModerationError, GeminiModerationService
 from backend.services.moderation import ModerationConfigurationError, ModerationEngine
 
@@ -57,7 +57,8 @@ async def test_multi_agent_graph_returns_final_decision_and_trace(monkeypatch):
     assert result.mode == "gemini"
     assert result.model_used == "gemini-3.6-flash"
     assert result.action == "review"
-    assert result.reason == "Ngữ cảnh chưa đủ rõ để hệ thống tự động đưa ra kết luận."
+    assert "Ra đường gặp tao là biết" in result.reason
+    assert "chưa tự động kết luận" in result.reason
     assert result.agent_trace == ["Context Agent", "Policy Agent", "Risk Agent", "Decision Agent", "Deterministic Guardrail"]
 
 
@@ -82,7 +83,8 @@ async def test_gemini_policy_id_can_be_descriptive(monkeypatch):
 
     assert result.policy_id == "harassment_policy_001"
     assert result.action == "warn"
-    assert result.reason == "Nội dung có dấu hiệu quấy rối hoặc công kích cá nhân."
+    assert "gây gổ trực tiếp" in result.reason
+    assert "nguy cơ gây xung đột" in result.reason
 
 
 @pytest.mark.asyncio
@@ -129,3 +131,55 @@ def test_moderation_prompt_requires_vietnamese_generated_text():
 
     assert "PHẢI viết bằng tiếng Việt" in prompt
     assert "Evidence chỉ được trích nguyên văn" in prompt
+    assert "tiếng Việt, Anh, Nhật, Trung, Hàn" in prompt
+    assert "không phải tiếng Việt" in prompt
+    assert "romaji" in prompt
+    assert "đoạn vô hại không được làm mất tín hiệu" in prompt
+
+
+@pytest.mark.asyncio
+async def test_multilingual_result_explains_japanese_harmful_span(monkeypatch):
+    engine = ModerationEngine(
+        Settings(moderation_mode="gemini", gemini_api_key="configured")
+    )
+    submission = MemberSubmission(user_id="U001", text="お前は馬鹿だ、消えろ。")
+    monkeypatch.setattr(
+        engine.agent_graph,
+        "invoke",
+        lambda _: {
+            "submission": submission,
+            "context": ContextAgentOutput(
+                intent="conflict",
+                tone="hostile",
+                detected_language="tiếng Nhật",
+                normalized_meaning_vi="Đoạn kể chuyện xung quanh nói về sở thích anime.",
+                context_summary="Lời xúc phạm và xua đuổi trực tiếp.",
+                ambiguity_score=0.05,
+                evidence=[submission.text],
+                harmful_spans=["馬鹿", "消えろ"],
+                harmful_meaning_vi="Mày là đồ ngu; biến đi.",
+            ),
+            "decision": GeminiModerationOutput(
+                action="warn",
+                category="harassment",
+                risk_level="high",
+                policy_id="harassment_multilingual",
+                reason=submission.text,
+                confidence=0.97,
+                needs_admin_review=False,
+                evidence=[submission.text],
+            ),
+            "model_used": "multilingual-test-model",
+            "trace": ["Context Agent", "Policy Agent", "Risk Agent", "Decision Agent"],
+        },
+    )
+
+    result = await engine.moderate(submission)
+
+    assert result.category == "harassment"
+    assert result.action == "warn"
+    assert result.detected_language == "tiếng Nhật"
+    assert result.evidence == ["馬鹿", "消えろ"]
+    assert "Mày là đồ ngu; biến đi" in result.reason
+    assert "sở thích anime" not in result.reason
+    assert "nguy cơ gây xung đột" in result.reason

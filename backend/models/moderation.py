@@ -18,11 +18,33 @@ class ContextAgentOutput(BaseModel):
 
     intent: Literal["neutral", "friendly", "joking", "conflict", "threat", "unknown"]
     tone: Literal["calm", "playful", "hostile", "distressed", "unknown"]
+    detected_language: str = Field(
+        default="không xác định",
+        min_length=1,
+        max_length=80,
+        description="Ngôn ngữ hoặc nhóm ngôn ngữ được phát hiện.",
+    )
+    normalized_meaning_vi: str = Field(
+        default="Chưa xác định được nghĩa.",
+        min_length=1,
+        max_length=400,
+        description="Ý nghĩa của tin nhắn được diễn giải trung lập bằng tiếng Việt.",
+    )
     context_summary: str = Field(
         ..., min_length=1, max_length=300, description="Tóm tắt ngữ cảnh bằng tiếng Việt."
     )
     ambiguity_score: float = Field(..., ge=0.0, le=1.0)
     evidence: list[str] = Field(default_factory=list, max_length=3)
+    harmful_spans: list[str] = Field(
+        default_factory=list,
+        max_length=3,
+        description="Các cụm nguyên văn ngắn mang nghĩa xúc phạm, đe dọa hoặc gây hại.",
+    )
+    harmful_meaning_vi: str = Field(
+        default="",
+        max_length=400,
+        description="Nghĩa tiếng Việt của riêng các cụm gây hại, không tóm tắt phần vô hại.",
+    )
 
 
 class PolicyAgentOutput(BaseModel):
@@ -66,6 +88,8 @@ class ModerationResult(BaseModel):
     confidence: float = Field(..., ge=0.0, le=1.0)
     needs_admin_review: bool
     evidence: list[str] = Field(default_factory=list, max_length=5)
+    detected_language: str | None = Field(default=None, max_length=80)
+    normalized_meaning_vi: str | None = Field(default=None, max_length=400)
     model_used: str
     mode: Literal["openai", "gemini", "mock", "mock-fallback"]
     fallback_used: bool = False
