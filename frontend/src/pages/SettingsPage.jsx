@@ -10,6 +10,7 @@ import { ErrorState, EmptyState } from "../components/StatePanels.jsx";
 import { ops, fileToBase64 } from "../api/client.js";
 import { queryKeys } from "../lib/queryClient.js";
 import { relativeTime } from "../lib/format.js";
+import { useTablist } from "../lib/useTablist.js";
 
 const BLANK = { title: "", dataset: "", body: "", tags: "" };
 const DOC_PAGE_SIZE_OPTIONS = [10, 25, 50];
@@ -20,6 +21,8 @@ function matches(item, query) {
 }
 
 export default function SettingsPage() {
+  const viewTabs = useTablist();
+  const modeTabs = useTablist();
   const queryClient = useQueryClient();
   const [actionError, setActionError] = useState(null);
   const [query, setQuery] = useState("");
@@ -230,7 +233,7 @@ export default function SettingsPage() {
 
   return (
     <div className="page-grid">
-      <div className="segmented" role="tablist" aria-label="Chế độ xem">
+      <div className="segmented" role="tablist" aria-label="Chế độ xem" ref={viewTabs.ref} onKeyDown={viewTabs.onKeyDown}>
         <button
           type="button"
           role="tab"
@@ -360,7 +363,7 @@ export default function SettingsPage() {
 
       <Modal open={formOpen} title={editingId ? "Sửa tài liệu" : "Thêm tài liệu"} onClose={cancelEdit}>
         {!editingId && (
-          <div className="segmented" role="tablist" aria-label="Cách thêm tài liệu">
+          <div className="segmented" role="tablist" aria-label="Cách thêm tài liệu" ref={modeTabs.ref} onKeyDown={modeTabs.onKeyDown}>
             <button
               type="button"
               role="tab"

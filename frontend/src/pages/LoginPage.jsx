@@ -1,12 +1,13 @@
 import { useRef, useState } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { ArrowLeft, EnvelopeSimple, Eye, EyeSlash, IdentificationBadge, Info, LockSimple, SpinnerGap, WarningCircle } from "@phosphor-icons/react";
-import Mascot from "../components/landing/Mascot.jsx";
 import SakuraField from "../components/landing/SakuraField.jsx";
 import { useAuth } from "../auth/AuthProvider.jsx";
 import { TransitionLink, usePageTransition } from "../transitions/PageTransition.jsx";
 import "../login.css";
 import { BRAND } from "../lib/brand.js";
+import ThoMascot from "../components/ThoMascot.jsx";
+import { useTablist } from "../lib/useTablist.js";
 
 const REGISTER_BLANK = { email: "", display_name: "", password: "" };
 const DEMO_PASSWORD = "12345678";
@@ -18,6 +19,7 @@ const DEMO_ACCOUNTS = [
 export default function LoginPage() {
   const location = useLocation(); const { isAuthenticated, signIn, register } = useAuth(); const { transitionTo } = usePageTransition();
   const [tab, setTab] = useState("login"); const [values, setValues] = useState({ email: "", password: "" }); const [registerValues, setRegisterValues] = useState(REGISTER_BLANK); const [revealed, setRevealed] = useState(false); const [submitting, setSubmitting] = useState(false); const [formError, setFormError] = useState(""); const submitRef = useRef(null);
+  const authTabs = useTablist();
   const switchTab = (next) => { setTab(next); setFormError(""); };
   const fillDemo = (account) => { setValues({ email: account.email, password: account.password }); setFormError(""); };
   const destination = location.state?.from && location.state.from !== "/login" ? location.state.from : "/tong-quan";
@@ -37,13 +39,13 @@ export default function LoginPage() {
   return <div className="auth"><div className="auth__blobs" aria-hidden="true"><span className="auth__blob auth__blob--pink" /><span className="auth__blob auth__blob--lavender" /></div><SakuraField />
     <div className="auth__card"><TransitionLink to="/" className="auth__back"><ArrowLeft size={15} weight="bold" />Quay lại trang chủ</TransitionLink>
       <div className="auth__head">
-        <Mascot size={62} variant="auth" className="auth__mascot" />
+        <ThoMascot height={74} className="auth__mascot" />
         <span className="auth__brand">{BRAND.name} · {BRAND.tagline}</span>
         <h1 className="auth__title">{tab === "register" ? "Tạo tài khoản" : "Chào mừng trở lại"}</h1>
         <p className="auth__subtitle">{tab === "register" ? "Tạo tài khoản Admin để bắt đầu quản lý cộng đồng." : "Đăng nhập để tiếp tục quản lý cộng đồng."}</p>
       </div>
 
-      <div className="auth__tabs" role="tablist" aria-label="Đăng nhập hoặc đăng ký">
+      <div className="auth__tabs" role="tablist" aria-label="Đăng nhập hoặc đăng ký" ref={authTabs.ref} onKeyDown={authTabs.onKeyDown}>
         <button type="button" role="tab" aria-selected={tab === "login"} className={`auth__tab ${tab === "login" ? "is-active" : ""}`.trim()} onClick={() => switchTab("login")}>Đăng nhập</button>
         <button type="button" role="tab" aria-selected={tab === "register"} className={`auth__tab ${tab === "register" ? "is-active" : ""}`.trim()} onClick={() => switchTab("register")}>Đăng ký</button>
       </div>

@@ -10,6 +10,7 @@ import { EmptyState, ErrorState } from "../components/StatePanels.jsx";
 import { SkeletonBlock } from "../components/Skeleton.jsx";
 import { auth } from "../api/client.js";
 import { queryKeys } from "../lib/queryClient.js";
+import { useTablist } from "../lib/useTablist.js";
 
 function inviteLink(token) {
   return `${window.location.origin}/dang-ky?token=${token}`;
@@ -33,6 +34,7 @@ function initials(name, email) {
 }
 
 export default function ModManagementPage() {
+  const roleTabs = useTablist();
   const queryClient = useQueryClient();
   const toast = useToast();
   const [inviteEmail, setInviteEmail] = useState("");
@@ -264,7 +266,7 @@ export default function ModManagementPage() {
           }
         >
           <div className="table-toolbar">
-            <div className="segmented" role="tablist" aria-label="Lọc theo vai trò">
+            <div className="segmented" role="tablist" aria-label="Lọc theo vai trò" ref={roleTabs.ref} onKeyDown={roleTabs.onKeyDown}>
               {ROLE_FILTERS.map(({ value, label }) => (
                 <button
                   key={value || "all"}
