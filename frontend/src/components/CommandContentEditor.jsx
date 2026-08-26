@@ -7,6 +7,7 @@ import Modal from "./Modal.jsx";
 import { ops } from "../api/client.js";
 import { queryKeys } from "../lib/queryClient.js";
 import { relativeTime } from "../lib/format.js";
+import { useTablist } from "../lib/useTablist.js";
 
 /**
  * Rewrites the text the bot replies with for /event, /daily, /weekly and
@@ -62,6 +63,7 @@ function PlatformCheckboxes({ value, onToggle }) {
 }
 
 export default function CommandContentEditor() {
+  const cmdTabs = useTablist();
   const queryClient = useQueryClient();
   const [active, setActive] = useState(null);
   const [draft, setDraft] = useState("");
@@ -230,7 +232,7 @@ export default function CommandContentEditor() {
 
   return (
     <div className="cmd">
-      <div className="cmd__tabs" role="tablist" aria-label="Chọn lệnh">
+      <div className="cmd__tabs" role="tablist" aria-label="Chọn lệnh" ref={cmdTabs.ref} onKeyDown={cmdTabs.onKeyDown}>
         {commands?.map((command) => (
           <button
             key={command.command}

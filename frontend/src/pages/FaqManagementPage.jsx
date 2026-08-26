@@ -18,6 +18,7 @@ import { EmptyState, ErrorState } from "../components/StatePanels.jsx";
 import { ops } from "../api/client.js";
 import { queryKeys } from "../lib/queryClient.js";
 import { formatNumber, relativeTime } from "../lib/format.js";
+import { useTablist } from "../lib/useTablist.js";
 
 const TOPIC_STEP = 5;
 const FAQ_PAGE_SIZE = 10;
@@ -37,6 +38,7 @@ function parseTags(value) {
 }
 
 export default function FaqManagementPage() {
+  const faqTabs = useTablist();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState("top");
   const [query, setQuery] = useState("");
@@ -185,7 +187,7 @@ export default function FaqManagementPage() {
         <div className="page-grid__row">
           <Card className="span-12">
             <div className="faq-toolbar">
-              <div className="tab-bar" role="tablist" aria-label="Quản lý FAQ">
+              <div className="tab-bar" role="tablist" aria-label="Quản lý FAQ" ref={faqTabs.ref} onKeyDown={faqTabs.onKeyDown}>
                 <button
                   type="button"
                   role="tab"

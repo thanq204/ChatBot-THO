@@ -257,7 +257,7 @@
 
 .lhero__mascot {
   position: absolute;
-  top: -46px;
+  top: -52px;
   right: 18px;
   z-index: 2;
   filter: drop-shadow(0 8px 20px rgb(219 39 119 / 0.22));
@@ -942,9 +942,8 @@
   }
 
   .lhero__mascot {
-    width: 54px;
-    height: 54px;
-    top: -32px;
+    --mascot-h: 58px;
+    top: -36px;
     right: 4px;
   }
 

@@ -227,11 +227,29 @@ a {
   }
 }
 
+/* A button, so "back to top" is reachable by keyboard and announced as an
+   action — but it must not look like one, so the chrome is stripped back to
+   the plain brand block it replaced. */
 .sidebar__brand {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 2px;
-  padding: 0 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: var(--radius-control);
+  background: none;
+  text-align: left;
+  transition: background-color 0.15s var(--ease-out);
+}
+
+.sidebar__brand:hover {
+  background: var(--surface-alt);
+}
+
+.sidebar__brand:active {
+  transform: scale(0.98);
 }
 
 .sidebar__logo {
@@ -4077,4 +4095,21 @@ button.list-row:hover {
   .search__hint {
     display: none;
   }
+}
+
+/* ==========================================================================
+   Product mascot
+   Sized by --mascot-h, set per placement by the ThoMascot component and
+   overridable by any breakpoint that needs the art smaller.
+   ========================================================================== */
+
+.tho-mascot {
+  display: block;
+  width: fit-content;
+}
+
+.tho-mascot img {
+  display: block;
+  width: auto;
+  height: var(--mascot-h, 74px);
 }
