@@ -12,13 +12,13 @@ import {
   Sun,
 } from "@phosphor-icons/react";
 import AgentFlow from "../components/landing/AgentFlow.jsx";
-import Mascot from "../components/landing/Mascot.jsx";
 import SakuraField from "../components/landing/SakuraField.jsx";
 import { TransitionLink } from "../transitions/PageTransition.jsx";
 import { useAuth } from "../auth/AuthProvider.jsx";
 import { useTheme } from "../theme/ThemeProvider.jsx";
 import "../landing.css";
 import { BRAND } from "../lib/brand.js";
+import ThoMascot from "../components/ThoMascot.jsx";
 
 const REPO_URL = "https://github.com/AI20K-Build-Phase-Cohort-3/P-232";
 
@@ -228,7 +228,7 @@ export default function LandingPage() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.8, delay: 0.2, ease: [0.16, 1, 0.3, 1] }}
             >
-              <Mascot size={68} variant="hero" className="lhero__mascot" />
+              <ThoMascot height={78} className="lhero__mascot" />
               <AgentFlow />
             </motion.div>
           </div>
@@ -263,7 +263,7 @@ export default function LandingPage() {
             <div className="lbento__grid">
               <Reveal className="lcell lcell--mascot">
                 <div className="lcell__stage" aria-hidden="true">
-                  <Mascot size={96} variant="cell" />
+                  <ThoMascot height={112} />
                 </div>
                 <div className="lcell__body">
                   <Broadcast size={19} weight="fill" />

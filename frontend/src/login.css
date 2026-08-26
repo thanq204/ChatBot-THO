@@ -117,8 +117,14 @@
 
 .auth__mascot {
   position: relative;
+  display: block;
+  width: fit-content;
   margin: 0 auto 14px;
 }
+
+/* The PNG is cut out against transparency, so the pink glow from
+   .auth__mascot::before shows through instead of the original white photo
+   background — which would read as a white rectangle on the dark card. */
 
 .auth__mascot::before {
   content: "";
