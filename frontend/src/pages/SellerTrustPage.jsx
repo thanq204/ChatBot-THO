@@ -172,7 +172,7 @@ export default function SellerTrustPage() {
         <div className="page-grid__row">
           <Card title="Giao dịch gần đây" className="span-12">
             <p className="muted small">
-              Luồng Discord: <code>/trade_open</code> → buyer và seller dùng <code>/trade_confirm</code> → buyer dùng <code>/trade_review</code>.
+              Luồng Discord/Telegram: <code>/trade_open</code> → buyer và seller dùng <code>/trade_confirm</code> → buyer dùng <code>/trade_review</code>.
             </p>
             {loading && <SkeletonBlock height={220} />}
             {!loading && trades.length === 0 && <EmptyState message="Chưa có giao dịch." />}

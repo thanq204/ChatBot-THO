@@ -1036,7 +1036,7 @@ class OperationsStore:
         return output
 
     def list_member_experience(self) -> list[MemberExperience]:
-        """Rank real Discord members by positive contribution events only."""
+        """Rank real Discord and Telegram members by positive contributions."""
         with self._connect() as db:
             rows = db.execute(
                 """SELECT m.*,
@@ -1046,7 +1046,7 @@ class OperationsStore:
                 FROM community_members m
                 LEFT JOIN member_reputation_events e ON e.member_id=m.member_id
                     AND e.event_type NOT IN ('unapproved_penalty_reversed')
-                WHERE m.is_bot=FALSE AND m.platform='discord'
+                WHERE m.is_bot=FALSE AND m.platform IN ('discord', 'telegram')
                 GROUP BY m.member_id, m.platform, m.community_id, m.platform_user_id, m.display_name,
                          m.is_bot, m.reputation_score, m.first_seen_at, m.last_seen_at, m.metadata
                 ORDER BY m.last_seen_at DESC"""
@@ -1055,12 +1055,16 @@ class OperationsStore:
         grouped: dict[str, dict[str, Any]] = {}
         for row in rows:
             user_id = str(row["platform_user_id"])
+            platform = str(row["platform"])
+            identity = f"{platform}:{user_id}"
             last_seen = timestamp_value(row["last_seen_at"])
             last_event = timestamp_value(row["last_event_at"]) if row["last_event_at"] else None
-            current = grouped.get(user_id)
+            current = grouped.get(identity)
             if current is None:
-                grouped[user_id] = {
+                grouped[identity] = {
                     "member_id": str(row["member_id"]),
+                    "platform": platform,
+                    "platform_user_id": user_id,
                     "community_id": str(row["community_id"]),
                     "display_name": row["display_name"],
                     "exp_score": int(row["exp_score"] or 0),
@@ -1080,15 +1084,15 @@ class OperationsStore:
                 current["last_event_at"] = last_event
 
         output: list[MemberExperience] = []
-        for user_id, member in grouped.items():
+        for member in grouped.values():
             exp_score = member["exp_score"]
             level = "veteran" if exp_score >= 100 else "contributor" if exp_score >= 30 else "active" if exp_score >= 5 else "new"
             output.append(
                 MemberExperience(
                     member_id=member["member_id"],
-                    platform="discord",
+                    platform=member["platform"],
                     community_id=member["community_id"],
-                    platform_user_id=user_id,
+                    platform_user_id=member["platform_user_id"],
                     display_name=member["display_name"],
                     exp_score=exp_score,
                     event_count=member["event_count"],
@@ -1121,8 +1125,8 @@ class OperationsStore:
         created_by: str,
         evidence_urls: list[str] | None = None,
     ) -> TradeCase:
-        if platform != "discord":
-            raise ValueError("Giao dịch xác thực hiện chỉ hỗ trợ Discord.")
+        if platform not in {"discord", "telegram"}:
+            raise ValueError("Giao dịch xác thực chỉ hỗ trợ Discord và Telegram.")
         if buyer_id == seller_id:
             raise ValueError("Người mua và người bán phải là hai tài khoản khác nhau.")
         trade_id = f"TRD-{uuid.uuid4().hex[:12].upper()}"
@@ -1322,10 +1326,15 @@ class OperationsStore:
                 WHERE m.category='spam' AND a.event_type='incident_reputation_decision'
                   AND {human_only}"""
             ).fetchall()
-        keys = {(trade.community_id, trade.seller_id) for trade in trades}
+        keys = {(trade.platform, trade.community_id, trade.seller_id) for trade in trades}
         output: list[SellerTrustSummary] = []
-        for community_id, seller_id in keys:
-            seller_trades = [trade for trade in trades if trade.community_id == community_id and trade.seller_id == seller_id]
+        for platform, community_id, seller_id in keys:
+            seller_trades = [
+                trade for trade in trades
+                if trade.platform == platform
+                and trade.community_id == community_id
+                and trade.seller_id == seller_id
+            ]
             completed = [trade for trade in seller_trades if trade.status == "completed"]
             seller_reviews = [
                 review for review in reviews
@@ -1361,7 +1370,8 @@ class OperationsStore:
             reciprocal_buyers = {
                 trade.seller_id
                 for trade in trades
-                if trade.community_id == community_id
+                if trade.platform == platform
+                and trade.community_id == community_id
                 and trade.buyer_id == seller_id
                 and trade.seller_id in reviewer_ids
             }
@@ -1396,6 +1406,7 @@ class OperationsStore:
             seller_name = next((trade.seller_name for trade in seller_trades if trade.seller_name), None)
             output.append(
                 SellerTrustSummary(
+                    platform=platform,
                     community_id=community_id,
                     seller_id=seller_id,
                     seller_name=seller_name,
@@ -1437,9 +1448,12 @@ class OperationsStore:
         summary = next(
             (
                 item for item in self.list_seller_summaries()
-                if item.community_id == community_id and item.seller_id == seller_id
+                if item.platform == platform
+                and item.community_id == community_id
+                and item.seller_id == seller_id
             ),
             SellerTrustSummary(
+                platform=platform,
                 community_id=community_id,
                 seller_id=seller_id,
                 data_status="insufficient_data",
@@ -1654,6 +1668,38 @@ class OperationsStore:
             source_url=row["source_url"],
             raw=json_value(row["raw_json"], {}),
         )
+
+    def find_telegram_member_by_username(
+        self,
+        channel_id: str,
+        username: str,
+    ) -> tuple[str, str | None] | None:
+        """Resolve a Telegram username only from messages in the current trade chat."""
+        normalized = username.strip().lstrip("@").lower()
+        if not normalized:
+            return None
+        with self._connect(readonly=True) as db:
+            rows = db.execute(
+                """SELECT author_id, raw_json FROM operations_messages
+                WHERE platform='telegram' AND channel_id=?
+                ORDER BY timestamp DESC LIMIT 5000""",
+                (channel_id,),
+            ).fetchall()
+        for row in rows:
+            raw = json_value(row["raw_json"], {})
+            sender = raw.get("from") if isinstance(raw, dict) else None
+            if not isinstance(sender, dict):
+                continue
+            saved_username = str(sender.get("username") or "").strip().lstrip("@").lower()
+            if saved_username != normalized or sender.get("is_bot"):
+                continue
+            display_name = " ".join(
+                str(part).strip()
+                for part in (sender.get("first_name"), sender.get("last_name"))
+                if part and str(part).strip()
+            ) or f"@{saved_username}"
+            return str(row["author_id"]), display_name
+        return None
 
     def recent_context(self, message: CommonMessage) -> list[CommonMessage]:
         """Load nearby messages from the same live conversation for Gate 2."""
@@ -2546,8 +2592,24 @@ class OperationsStore:
     def create_member_report(self, message: CommonMessage, details: str) -> MemberReport:
         report = MemberReport(report_id=f"REP-{uuid.uuid4().hex[:10].upper()}", platform=message.platform, reporter_id=message.author_id, channel_id=message.channel_id, details=details[:4000], created_at=datetime.now(UTC))
         with self._connect() as db:
+            source_exists = db.execute(
+                "SELECT 1 FROM operations_messages WHERE message_id=?",
+                (message.message_id,),
+            ).fetchone()
+            audit_message_id = message.message_id if source_exists else None
             db.execute("INSERT INTO operations_member_reports VALUES (?, ?, ?, ?, ?, 'open', ?)", (report.report_id, report.platform, report.reporter_id, report.channel_id, report.details, report.created_at.isoformat()))
-        self.add_audit(None, message.message_id, "member_report_created", message.author_id, {"report_id": report.report_id, "details": report.details})
+            db.execute(
+                "INSERT INTO operations_audit VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    f"AUD-{uuid.uuid4().hex[:10].upper()}",
+                    None,
+                    audit_message_id,
+                    "member_report_created",
+                    message.author_id,
+                    _json({"report_id": report.report_id, "details": report.details}),
+                    _now(),
+                ),
+            )
         return report
 
     def list_member_reports(self) -> list[MemberReport]:
