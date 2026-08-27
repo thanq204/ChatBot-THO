@@ -134,6 +134,7 @@ export default function CommunityCard3D({
   const cardRef = useRef(null);
   const reduce = useReducedMotion();
   const [isHovered, setIsHovered] = useState(false);
+  const [isClicked, setIsClicked] = useState(false);
 
   // Mouse tilt motion values
   const mouseX = useMotionValue(0);
@@ -170,6 +171,22 @@ export default function CommunityCard3D({
     mouseY.set(0);
   };
 
+  const handleClick = (e) => {
+    e.preventDefault();
+    if (isClicked) return;
+    setIsClicked(true);
+
+    // Give user visual feedback with logo zoom before opening invite link
+    setTimeout(() => {
+      window.open(url, "_blank", "noopener,noreferrer");
+    }, 280);
+
+    // Reset clicked state after 1.2s
+    setTimeout(() => {
+      setIsClicked(false);
+    }, 1200);
+  };
+
   const isDiscord = platform === "discord";
 
   return (
@@ -185,7 +202,8 @@ export default function CommunityCard3D({
         href={url}
         target="_blank"
         rel="noopener noreferrer"
-        className={`card-3d card-3d--${platform}`}
+        onClick={handleClick}
+        className={`card-3d card-3d--${platform} ${isClicked ? "is-clicked" : ""}`}
         style={{
           transformStyle: "preserve-3d",
           rotateX: reduce ? 0 : rotateX,
@@ -228,15 +246,27 @@ export default function CommunityCard3D({
           <motion.div
             className="card-3d__logo-box"
             animate={
-              reduce
+              isClicked
+                ? {
+                    scale: [1, 1.48, 1.4],
+                    y: -16,
+                    rotateZ: isDiscord ? -8 : 8,
+                    filter: isDiscord
+                      ? "drop-shadow(0 14px 28px rgba(88, 101, 242, 0.55))"
+                      : "drop-shadow(0 14px 28px rgba(38, 165, 228, 0.55))",
+                  }
+                : reduce
                 ? {}
                 : {
+                    scale: isHovered ? 1.08 : 1,
                     y: isHovered ? -8 : [0, -6, 0],
                     rotateZ: isHovered ? (isDiscord ? -3 : 3) : 0,
                   }
             }
             transition={
-              isHovered
+              isClicked
+                ? { type: "spring", stiffness: 450, damping: 14 }
+                : isHovered
                 ? { type: "spring", stiffness: 300, damping: 15 }
                 : { repeat: Infinity, duration: 4, ease: "easeInOut" }
             }
@@ -267,9 +297,13 @@ export default function CommunityCard3D({
 
         {/* Action Button Footer */}
         <div className="card-3d__footer" style={{ transform: "translateZ(35px)" }}>
-          <span className={`card-3d__btn card-3d__btn--${platform}`}>
-            <span>{ctaLabel}</span>
-            <ArrowUpRight size={16} weight="bold" className="card-3d__arrow-icon" />
+          <span className={`card-3d__btn card-3d__btn--${platform} ${isClicked ? "is-clicked" : ""}`}>
+            <span>{isClicked ? "Đang mở phòng chat..." : ctaLabel}</span>
+            <ArrowUpRight
+              size={16}
+              weight="bold"
+              className={`card-3d__arrow-icon ${isClicked ? "is-clicked-arrow" : ""}`}
+            />
           </span>
         </div>
       </motion.a>
