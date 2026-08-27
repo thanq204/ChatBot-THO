@@ -426,7 +426,7 @@ class ReputationRule(BaseModel):
 
 
 class TradeCaseCreateRequest(BaseModel):
-    platform: Literal["discord"] = "discord"
+    platform: Literal["discord", "telegram"] = "discord"
     community_id: str = Field(..., min_length=1, max_length=200)
     channel_id: str = Field(..., min_length=1, max_length=200)
     buyer_id: str = Field(..., min_length=1, max_length=200)
@@ -444,7 +444,7 @@ class TradeCaseCreateRequest(BaseModel):
 
 class TradeCase(BaseModel):
     trade_id: str
-    platform: Literal["discord"] = "discord"
+    platform: Literal["discord", "telegram"] = "discord"
     community_id: str
     channel_id: str
     buyer_id: str
@@ -496,7 +496,7 @@ class SellerReview(BaseModel):
 
 
 class SellerTrustSummary(BaseModel):
-    platform: Literal["discord"] = "discord"
+    platform: Literal["discord", "telegram"] = "discord"
     community_id: str
     seller_id: str
     seller_name: str | None = None
@@ -517,7 +517,7 @@ class SellerTrustSummary(BaseModel):
 
 
 class SellerAssessmentCreateRequest(BaseModel):
-    platform: Literal["discord"] = "discord"
+    platform: Literal["discord", "telegram"] = "discord"
     community_id: str = Field(..., min_length=1, max_length=200)
     requester_id: str = Field(..., min_length=1, max_length=200)
     seller_id: str = Field(..., min_length=1, max_length=200)
@@ -531,7 +531,7 @@ class SellerAssessmentDecisionRequest(BaseModel):
 
 class SellerAssessment(BaseModel):
     assessment_id: str
-    platform: Literal["discord"] = "discord"
+    platform: Literal["discord", "telegram"] = "discord"
     community_id: str
     requester_id: str
     seller_id: str

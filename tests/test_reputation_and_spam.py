@@ -147,6 +147,13 @@ def test_reputation_leaderboard_includes_telegram_and_excludes_bots_and_demo_rec
     assert members[0].event_count == 1
     assert members[1].platform == "telegram"
 
+    experience = {
+        (member.platform, member.platform_user_id): member
+        for member in store.list_member_experience()
+    }
+    assert ("telegram", "telegram-user") in experience
+    assert experience[("telegram", "telegram-user")].exp_score == 0
+
 
 def test_rejected_link_is_blocked_but_penalty_waits_for_admin(tmp_path) -> None:
     settings = _settings(tmp_path)
@@ -294,6 +301,34 @@ def test_verified_trade_review_requires_both_parties_and_the_real_buyer(tmp_path
     assert summary.unique_buyers == 1
     assert summary.average_rating == 4.0
     assert summary.data_status == "insufficient_data"
+
+
+def test_verified_trade_store_supports_telegram_and_preserves_platform(tmp_path) -> None:
+    store = OperationsStore(_settings(tmp_path))
+
+    trade = store.create_trade_case(
+        platform="telegram",
+        community_id="-100123",
+        channel_id="-100123",
+        buyer_id="9001",
+        buyer_name="Buyer",
+        seller_id="9002",
+        seller_name="Seller",
+        item_summary="Bàn phím cơ cũ",
+        created_by="9001",
+    )
+
+    assert trade.platform == "telegram"
+    summary = store.list_seller_summaries()[0]
+    assert summary.platform == "telegram"
+    assessment = store.create_seller_assessment(
+        platform="telegram",
+        community_id="-100123",
+        requester_id="9001",
+        seller_id="9002",
+        reason="Kiểm tra lịch sử giao dịch",
+    )
+    assert assessment.platform == "telegram"
     assert summary.anomaly_flags == []
 
 

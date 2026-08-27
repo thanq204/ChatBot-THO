@@ -116,6 +116,58 @@ def test_level_one_commands_bypass_moderation() -> None:
     pipeline.analyze.assert_not_called()
 
 
+def test_report_command_audits_an_unpersisted_telegram_message(tmp_path) -> None:
+    settings = Settings(database_url=f"sqlite:///{tmp_path / 'app.db'}")
+    store = OperationsStore(settings)
+    chat = ChatOrchestrator(store, settings, Mock())
+
+    outcome = chat.reply(message("telegram-report-1", "/report 123 - spam link"))
+
+    assert outcome.stage == "rule"
+    assert len(store.list_member_reports()) == 1
+    audit = store.audit()[0]
+    assert audit["event_type"] == "member_report_created"
+    assert audit["message_id"] is None
+
+
+def test_telegram_username_lookup_is_scoped_to_the_current_trade_chat(tmp_path) -> None:
+    settings = Settings(database_url=f"sqlite:///{tmp_path / 'app.db'}")
+    store = OperationsStore(settings)
+    seller_message = message("seller-message-1", "Xin chào").model_copy(
+        update={
+            "community_id": "-100-old",
+            "channel_id": "-100-old",
+            "author_id": "6981526945",
+            "author_name": "Thanh Nguyen",
+            "raw": {
+                "from": {
+                    "id": 6981526945,
+                    "username": "thanh24109",
+                    "first_name": "Thanh",
+                    "last_name": "Nguyen",
+                    "is_bot": False,
+                }
+            },
+        }
+    )
+    store.save_message(seller_message, allowed(), None)
+
+    assert store.find_telegram_member_by_username("-100-trade", "@Thanh24109") is None
+
+    current_trade_message = seller_message.model_copy(
+        update={
+            "message_id": "seller-message-2",
+            "community_id": "-100-trade",
+            "channel_id": "-100-trade",
+        }
+    )
+    store.save_message(current_trade_message, allowed(), None)
+    assert store.find_telegram_member_by_username("-100-trade", "@Thanh24109") == (
+        "6981526945",
+        "Thanh Nguyen",
+    )
+
+
 def test_unknown_command_stops_at_rule() -> None:
     store = Mock()
     store.get_command_content.return_value = None
