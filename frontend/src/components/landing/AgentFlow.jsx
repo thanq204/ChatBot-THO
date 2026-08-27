@@ -131,22 +131,36 @@ export default function AgentFlow() {
         })}
       </ol>
 
-      <AnimatePresence mode="wait">
-        {settled && (
-          <motion.div
-            key={`${scenario.id}-result`}
-            className={`flow__result flow__result--${scenario.tone}`}
-            initial={reduce ? false : { opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={reduce ? undefined : { opacity: 0 }}
-            transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-          >
-            <span className="flow__verdict">{scenario.decision}</span>
-            <span className="flow__category">{scenario.category}</span>
-            <p className="flow__note">{scenario.note}</p>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <div className="flow__result-slot">
+        <AnimatePresence mode="wait">
+          {settled ? (
+            <motion.div
+              key={`${scenario.id}-result`}
+              className={`flow__result flow__result--${scenario.tone}`}
+              initial={reduce ? false : { opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={reduce ? undefined : { opacity: 0, y: -4 }}
+              transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+            >
+              <span className="flow__verdict">{scenario.decision}</span>
+              <span className="flow__category">{scenario.category}</span>
+              <p className="flow__note">{scenario.note}</p>
+            </motion.div>
+          ) : (
+            <motion.div
+              key="analyzing-slot"
+              className="flow__result-placeholder"
+              initial={reduce ? false : { opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+            >
+              <span className="flow__placeholder-pulse" />
+              <span className="flow__placeholder-text">Agent đang phân tích & đối chiếu ngữ cảnh...</span>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
     </div>
   );
 }
