@@ -121,12 +121,17 @@ export default function ExperiencePage() {
                   <thead><tr><th>Hạng</th><th>Thành viên</th><th>EXP</th><th>Cấp</th><th>Sự kiện ghi nhận</th><th>Cập nhật</th></tr></thead>
                   <tbody>
                     {memberPage.slice.map((member) => {
-                      const rank = members.findIndex((item) => item.platform_user_id === member.platform_user_id) + 1;
+                      const rank = members.findIndex((item) => (
+                        item.platform === member.platform && item.platform_user_id === member.platform_user_id
+                      )) + 1;
                       const [label, tone] = LEVEL_META[member.level] || LEVEL_META.new;
                       return (
-                        <tr key={member.platform_user_id}>
+                        <tr key={`${member.platform}:${member.platform_user_id}`}>
                           <td><span className="reputation-rank">{rank}</span></td>
-                          <td><strong>{member.display_name || "Chưa có tên"}</strong><small>User ID: {member.platform_user_id}</small></td>
+                          <td>
+                            <strong>{member.display_name || "Chưa có tên"}</strong>
+                            <small>{member.platform === "telegram" ? "Telegram" : "Discord"} · User ID: {member.platform_user_id}</small>
+                          </td>
                           <td className="score-positive">+{formatNumber(member.exp_score)}</td>
                           <td><Badge tone={tone}>{label}</Badge></td>
                           <td>{formatNumber(member.event_count)}</td>

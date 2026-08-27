@@ -118,7 +118,16 @@ Luồng giao dịch chỉ mở trong `DISCORD_TRADE_CHANNEL_ID`. Hai bên xác n
 ```dotenv
 TELEGRAM_BOT_TOKEN=your-telegram-token
 TELEGRAM_LISTENER_ENABLED=true
+TELEGRAM_TRADE_CHAT_ID=your-dedicated-trade-chat-id
 ```
+
+Trong nhóm `TELEGRAM_TRADE_CHAT_ID`, Telegram hỗ trợ cùng luồng xác thực như Discord:
+`/trade_open`, `/trade_confirm`, `/trade_review` và `/seller_check`. Với seller, có thể reply
+tin nhắn của họ hoặc nhập `@username`; seller cần từng gửi ít nhất một tin nhắn để bot ánh xạ
+username sang Telegram user ID.
+`/report` và các lệnh trade được đăng ký là Telegram ephemeral commands. Trong group, command,
+ô nhập tiếp theo, lỗi validation và kết quả chỉ người thao tác với bot nhìn thấy; dùng `/cancel`
+để hủy thao tác đang chờ.
 
 Không commit `.env`. Danh sách đầy đủ và giá trị mặc định nằm trong [.env.example](.env.example).
 

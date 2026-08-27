@@ -6,22 +6,23 @@ import logging
 import re
 import threading
 from datetime import UTC, datetime
+from time import monotonic
 from typing import Any
 
 import requests
 
 from backend.config import Settings, get_settings
-from backend.models.operations import RESERVED_BOT_COMMANDS, CommonMessage
+from backend.models.operations import RESERVED_BOT_COMMANDS, CommonMessage, MessageDecision
 from backend.services.chat_orchestrator import ChatOrchestrator
 from backend.services.operations_pipeline import OperationsPipeline
 from backend.services.operations_store import OperationsStore
-from backend.services.question_intent import is_reusable_faq_question
 from backend.services.platform_moderation import PlatformModerationService
+from backend.services.question_intent import is_reusable_faq_question
 from backend.services.telegram.alerts import TelegramAlertSender
 
 logger = logging.getLogger(__name__)
 
-_active_bot: "TelegramRagBot | None" = None
+_active_bot: TelegramRagBot | None = None
 
 
 def notify_commands_changed() -> None:
@@ -52,6 +53,9 @@ class TelegramRagBot:
         self._username = ""
         self._message_cache: dict[tuple[str, str], CommonMessage] = {}
         self._reaction_users: dict[tuple[str, str, str], set[str]] = {}
+        self._pending_commands: dict[tuple[str, str], tuple[str, dict[str, Any], float]] = {}
+        self._telegram_users_by_username: dict[tuple[str, str], tuple[str, str | None]] = {}
+        self._telegram_username_by_user_id: dict[tuple[str, str], str] = {}
 
     def start(self) -> None:
         print(f"[Telegram] start() called: listener_enabled={self.settings.telegram_listener_enabled}, token={'SET' if self.settings.telegram_bot_token else 'EMPTY'}", flush=True)
@@ -98,10 +102,14 @@ class TelegramRagBot:
             {"command": "daily", "description": "Việc cần làm hôm nay"},
             {"command": "weekly", "description": "Kế hoạch tuần"},
             {"command": "faq", "description": "Câu hỏi thường gặp"},
-            {"command": "report", "description": "Báo cáo vi phạm"},
+            {"command": "report", "description": "Báo cáo vi phạm", "is_ephemeral": True},
             {"command": "admin", "description": "Liên hệ Admin/Mod"},
             {"command": "resources", "description": "Tài liệu học tập"},
             {"command": "settings", "description": "Cài đặt thông báo"},
+            {"command": "trade_open", "description": "Mở giao dịch với người bán", "is_ephemeral": True},
+            {"command": "trade_confirm", "description": "Xác nhận giao dịch hoàn tất", "is_ephemeral": True},
+            {"command": "trade_review", "description": "Đánh giá giao dịch đã xác nhận", "is_ephemeral": True},
+            {"command": "seller_check", "description": "Yêu cầu kiểm tra người bán", "is_ephemeral": True},
         ]
         known = {item["command"] for item in commands}
         try:
@@ -168,17 +176,53 @@ class TelegramRagBot:
 
     def _handle_update(self, update: dict[str, Any]) -> None:
         message = update.get("message") or {}
-        text = str(message.get("text") or "").strip()
+        text = str(message.get("text") or message.get("caption") or "").strip()
         sender = message.get("from") or {}
+        chat_id = str((message.get("chat") or {}).get("id") or "")
+        self._remember_telegram_user(chat_id, sender)
+        self._remember_telegram_user(chat_id, (message.get("reply_to_message") or {}).get("from") or {})
         if sender.get("is_bot"):
             return
-        if not text:
-            self._send_message(str((message.get("chat") or {}).get("id")), "Bạn hãy nhập câu hỏi hoặc dùng /help.")
+        new_members = message.get("new_chat_members")
+        if isinstance(new_members, list):
+            for member in new_members:
+                self._remember_telegram_user(chat_id, member)
+            self._welcome_new_members(message, new_members)
             return
+        if not text:
+            return
+        pending_key = self._pending_command_key(message)
+        if re.fullmatch(r"/cancel(?:@\w+)?", text, re.I):
+            had_pending = self._pending_commands.pop(pending_key, None) is not None
+            response = "Đã hủy thao tác đang chờ." if had_pending else "Không có thao tác nào đang chờ."
+            self._send_message(
+                str((message.get("chat") or {}).get("id") or ""),
+                response,
+                **self._ephemeral_reply_kwargs(message),
+            )
+            return
+        message, text = self._resume_pending_command(message, text)
+        resumed_private_command = str(message.pop("_resumed_private_command", ""))
+        if (
+            resumed_private_command in {"report", "trade_open", "trade_confirm", "trade_review", "seller_check"}
+            and str((message.get("chat") or {}).get("type") or "") in {"group", "supergroup"}
+            and message.get("ephemeral_message_id") is None
+        ):
+            # Some Telegram mobile clients submit ForceReply input as a normal
+            # group message even when the originating command was ephemeral.
+            # Remove that visible input immediately before processing it.
+            if not self._delete_message(chat_id, message.get("message_id")):
+                logger.warning(
+                    "Could not hide visible Telegram %s input %s; grant the bot Delete messages permission.",
+                    resumed_private_command,
+                    message.get("message_id"),
+                )
         common = self._common_message(message)
         self._message_cache[(common.channel_id, str(message.get("message_id")))] = common
         if len(self._message_cache) > 5_000:
             self._message_cache.pop(next(iter(self._message_cache)))
+        if self._handle_report_command(message, text):
+            return
         blocked_links = self.store.find_blocked_links(common.text)
         # Production stores return a list. Keep lightweight test/API mocks from
         # being mistaken for a blocked-link match.
@@ -195,7 +239,14 @@ class TelegramRagBot:
                 {"canonical_url": blocked_links[0].canonical_url, "author_id": common.author_id, "deleted": deleted},
             )
             self.telegram_alerts.send_blocked_link_alert(common, blocked_links[0].canonical_url, deleted=deleted)
+            self._send_moderation_notice(
+                common,
+                result,
+                reply_to_message_id=None if deleted else message.get("message_id"),
+            )
             self.platform_moderation.send_automatic_warning(common, result, self.store)
+            return
+        if self._handle_trade_command(message, text):
             return
         question = self._question_to_answer(message, text)
         tracking_message = None
@@ -209,6 +260,12 @@ class TelegramRagBot:
         else:
             result = self.pipeline.analyze(common)
         if result:
+            if question is None:
+                self._send_moderation_notice(
+                    common,
+                    result,
+                    reply_to_message_id=message.get("message_id"),
+                )
             if self.telegram_alerts.send_alert(common, result):
                 logger.info("Admin Telegram alert sent for Telegram message %s", common.message_id)
             warning = self.platform_moderation.send_automatic_warning(common, result, self.store)
@@ -219,6 +276,389 @@ class TelegramRagBot:
                 self.store.record_member_question(tracking_message, outcome_stage=outcome.stage)
             except Exception:
                 logger.exception("Telegram FAQ analytics failed for message %s", common.message_id)
+
+    def _welcome_new_members(self, message: dict[str, Any], members: list[dict[str, Any]]) -> None:
+        if not self.settings.telegram_welcome_new_members_enabled:
+            return
+        names = []
+        for member in members:
+            if member.get("is_bot"):
+                continue
+            name = " ".join(
+                part for part in (member.get("first_name"), member.get("last_name")) if part
+            ) or member.get("username") or "thành viên mới"
+            names.append(str(name))
+        if not names:
+            return
+        self._send_message(
+            str((message.get("chat") or {}).get("id") or ""),
+            f"Chào {', '.join(names)}! Mừng bạn đến với cộng đồng. Dùng /help để xem hướng dẫn và các lệnh hỗ trợ.",
+            reply_to_message_id=message.get("message_id"),
+        )
+
+    def _remember_telegram_user(self, chat_id: str, user: dict[str, Any]) -> None:
+        """Keep a group-local username-to-ID directory from Telegram updates."""
+        if not chat_id or user.get("is_bot") or user.get("id") is None:
+            return
+        user_id = str(user["id"])
+        reverse_key = (chat_id, user_id)
+        previous_username = self._telegram_username_by_user_id.get(reverse_key)
+        username = str(user.get("username") or "").strip().lstrip("@").lower()
+        if previous_username and previous_username != username:
+            self._telegram_users_by_username.pop((chat_id, previous_username), None)
+        if not username:
+            self._telegram_username_by_user_id.pop(reverse_key, None)
+            return
+        name = " ".join(
+            part for part in (user.get("first_name"), user.get("last_name")) if part
+        ) or f"@{username}"
+        self._telegram_users_by_username[(chat_id, username)] = (user_id, str(name))
+        self._telegram_username_by_user_id[reverse_key] = username
+
+    def _send_moderation_notice(
+        self,
+        message: CommonMessage,
+        result: MessageDecision,
+        *,
+        reply_to_message_id: int | None,
+    ) -> bool:
+        """Notify the group only for a gated, non-allow moderation decision."""
+        if not result.send_to_member or result.decision not in {"warn", "hide", "hold_for_review"}:
+            return False
+        fallback = {
+            "warn": "Nội dung có dấu hiệu vi phạm nội quy cộng đồng.",
+            "hide": "Nội dung có dấu hiệu vi phạm và được đề xuất ẩn.",
+            "hold_for_review": "Nội dung đang chờ Admin/Mod xem xét.",
+        }[result.decision]
+        status = (result.banner or fallback).strip()
+        explanation = str(result.explanation or "").strip()
+        notice = f"⚠️ {status}"
+        if explanation and explanation.lower() not in status.lower():
+            notice += f"\nLý do: {explanation[:500]}"
+        self._send_message(
+            message.channel_id,
+            notice,
+            reply_to_message_id=reply_to_message_id,
+        )
+        return True
+
+    @staticmethod
+    def _pending_command_key(message: dict[str, Any]) -> tuple[str, str]:
+        chat_id = str((message.get("chat") or {}).get("id") or "")
+        author_id = str((message.get("from") or {}).get("id") or "anonymous")
+        return chat_id, author_id
+
+    def _begin_pending_command(self, command: str, message: dict[str, Any], prompt: str) -> None:
+        self._pending_commands[self._pending_command_key(message)] = (command, dict(message), monotonic())
+        placeholders = {
+            "report": "Nhập nội dung cần báo cáo",
+            "trade_open": "Nhập seller và mô tả món hàng",
+            "trade_confirm": "Nhập mã giao dịch TRD-...",
+            "trade_review": "Nhập mã giao dịch và điểm đánh giá",
+            "seller_check": "Nhập seller và lý do kiểm tra",
+        }
+        self._send_message(
+            str((message.get("chat") or {}).get("id") or ""),
+            prompt + "\nGửi /cancel để hủy.",
+            force_reply=True,
+            force_reply_placeholder=placeholders.get(command),
+            **self._ephemeral_reply_kwargs(message),
+        )
+
+    def _resume_pending_command(
+        self,
+        message: dict[str, Any],
+        text: str,
+    ) -> tuple[dict[str, Any], str]:
+        key = self._pending_command_key(message)
+        pending = self._pending_commands.get(key)
+        if pending is None:
+            command = self._command_from_replied_prompt(message)
+            if command is None or text.startswith("/"):
+                return message, text
+            original_message = message
+        else:
+            command, original_message, started_at = pending
+            if monotonic() - started_at > 300:
+                self._pending_commands.pop(key, None)
+                return message, text
+        if text.startswith("/"):
+            self._pending_commands.pop(key, None)
+            return message, text
+
+        self._pending_commands.pop(key, None)
+        resumed_message = dict(message)
+        # Preserve command context (for example, the seller selected by
+        # replying to their message). A mobile ForceReply response normally
+        # points at the bot prompt, which must not replace that seller context.
+        if original_message.get("reply_to_message"):
+            resumed_message["reply_to_message"] = original_message["reply_to_message"]
+        resumed_text = f"/{command} {text}"
+        resumed_message["text"] = resumed_text
+        resumed_message["_resumed_private_command"] = command
+        return resumed_message, resumed_text
+
+    def _command_from_replied_prompt(self, message: dict[str, Any]) -> str | None:
+        """Recover a pending flow from ForceReply after a worker restart."""
+        replied = message.get("reply_to_message") or {}
+        replied_sender = replied.get("from") or {}
+        replied_username = str(replied_sender.get("username") or "").lower()
+        if not replied_sender.get("is_bot") or (
+            self._username and replied_username != self._username
+        ):
+            return None
+        current_date = int(message.get("date") or 0)
+        prompt_date = int(replied.get("date") or 0)
+        if current_date and prompt_date and current_date - prompt_date > 300:
+            return None
+        prompt = str(replied.get("text") or "")
+        prompt_commands = {
+            "Hãy gửi liên kết hoặc mã tin nhắn": "report",
+            "Hãy gửi <seller_id> <mô tả món hàng>": "trade_open",
+            "Hãy gửi mã giao dịch cần xác nhận": "trade_confirm",
+            "Hãy gửi: <trade_id>": "trade_review",
+            "Hãy gửi <seller_id> [lý do]": "seller_check",
+        }
+        return next(
+            (command for prefix, command in prompt_commands.items() if prompt.startswith(prefix)),
+            None,
+        )
+
+    def _handle_report_command(self, message: dict[str, Any], text: str) -> bool:
+        match = re.match(r"^/report(?:@\w+)?(?:\s+(.*))?$", text, re.I | re.S)
+        if not match:
+            return False
+        argument = (match.group(1) or "").strip()
+        if not argument:
+            self._begin_pending_command(
+                "report",
+                message,
+                "Hãy gửi liên kết hoặc mã tin nhắn kèm mô tả ngắn về nội dung cần báo cáo.",
+            )
+            return True
+
+        common = self._common_message(message).model_copy(update={"text": f"/report {argument}"})
+        outcome = self.chat.reply(common, track_question=False)
+        self._send_message(
+            common.channel_id,
+            outcome.answer,
+            **self._ephemeral_reply_kwargs(message),
+        )
+        return True
+
+    def _handle_trade_command(self, message: dict[str, Any], text: str) -> bool:
+        """Handle Telegram-native versions of the verified trade commands."""
+        match = re.match(r"^/(trade_open|trade_confirm|trade_review|seller_check)(?:@\w+)?(?:\s+(.*))?$", text, re.I | re.S)
+        if not match:
+            return False
+
+        command = match.group(1).lower()
+        argument = (match.group(2) or "").strip()
+        chat = message.get("chat") or {}
+        chat_id = str(chat.get("id") or "")
+
+        def reply(body: str) -> None:
+            self._send_message(chat_id, body, **self._ephemeral_reply_kwargs(message))
+
+        configured_chat = self.settings.telegram_trade_chat_id.strip()
+        if not configured_chat:
+            reply("Admin chưa cấu hình TELEGRAM_TRADE_CHAT_ID nên luồng giao dịch đang khóa.")
+            return True
+        if chat_id != configured_chat:
+            reply("Lệnh giao dịch chỉ dùng trong nhóm Telegram giao dịch đã được Admin cấu hình.")
+            return True
+
+        common = self._common_message(message)
+        if common.author_id == "anonymous":
+            reply("Không xác định được tài khoản Telegram của bạn.")
+            return True
+
+        if not argument:
+            prompts = {
+                "trade_open": (
+                    "Hãy gửi @username <mô tả món hàng>. Nếu bạn đã reply tin nhắn của seller khi bấm lệnh, "
+                    "chỉ cần gửi mô tả món hàng."
+                ),
+                "trade_confirm": "Hãy gửi mã giao dịch cần xác nhận, ví dụ TRD-ABC123.",
+                "trade_review": (
+                    "Hãy gửi: <trade_id> <tổng quan 1-5> <đúng mô tả 1-5> <giao tiếp 1-5> "
+                    "<hoàn tất 1-5> <có|không> [nhận xét]."
+                ),
+                "seller_check": (
+                    "Hãy gửi @username [lý do]. Nếu bạn đã reply tin nhắn của seller khi bấm lệnh, "
+                    "chỉ cần gửi lý do."
+                ),
+            }
+            self._begin_pending_command(command, message, prompts[command])
+            return True
+
+        if command == "trade_confirm":
+            if not re.fullmatch(r"TRD-[A-Z0-9]+", argument, re.I):
+                reply("Cú pháp: /trade_confirm TRD-... ")
+                return True
+            try:
+                trade = self.store.confirm_trade_case(argument.upper(), common.author_id)
+            except (ValueError, PermissionError) as exc:
+                reply(str(exc))
+                return True
+            if not trade:
+                reply("Không tìm thấy mã giao dịch.")
+                return True
+            status = (
+                "Hai bên đã xác nhận. Người mua có thể dùng /trade_review."
+                if trade.status == "completed"
+                else "Đã ghi nhận xác nhận của bạn; đang chờ bên còn lại."
+            )
+            reply(f"Giao dịch {trade.trade_id}: {status}")
+            return True
+
+        if command == "trade_review":
+            parts = argument.split(maxsplit=6)
+            if len(parts) < 6:
+                reply(
+                    "Cú pháp: /trade_review TRD-... <tổng_quan 1-5> <đúng_mô_tả 1-5> "
+                    "<giao_tiếp 1-5> <hoàn_tất 1-5> <có|không> [nhận xét]"
+                )
+                return True
+            trade_id, *review_parts = parts
+            try:
+                ratings = [int(value) for value in review_parts[:4]]
+            except ValueError:
+                ratings = []
+            if len(ratings) != 4 or any(value < 1 or value > 5 for value in ratings):
+                reply("Bốn điểm đánh giá phải là số từ 1 đến 5.")
+                return True
+            again_value = review_parts[4].lower()
+            yes_values = {"có", "co", "yes", "y", "true", "1"}
+            no_values = {"không", "khong", "no", "n", "false", "0"}
+            if again_value not in yes_values | no_values:
+                reply("Giá trị giao dịch lại phải là có/không (hoặc yes/no).")
+                return True
+            comment = review_parts[5] if len(review_parts) > 5 else ""
+            if len(comment) > 2_000:
+                reply("Nhận xét chỉ được dài tối đa 2.000 ký tự.")
+                return True
+            try:
+                review = self.store.add_seller_review(
+                    trade_id.upper(),
+                    buyer_id=common.author_id,
+                    overall_rating=ratings[0],
+                    item_accuracy=ratings[1],
+                    communication=ratings[2],
+                    fulfillment=ratings[3],
+                    would_trade_again=again_value in yes_values,
+                    comment=comment,
+                )
+            except (LookupError, ValueError, PermissionError) as exc:
+                reply(str(exc))
+                return True
+            reply(
+                f"Đã lưu đánh giá {review.review_id} dưới nhãn giao dịch xác thực. "
+                "Đây là trải nghiệm của người mua, không phải bảo đảm an toàn từ bot."
+            )
+            return True
+
+        seller_id, seller_name, detail = self._telegram_seller_target(message, argument)
+        if not seller_id:
+            seller_token = argument.split(maxsplit=1)[0] if argument else ""
+            if seller_token.startswith("@"):
+                reply(
+                    f"Không tìm thấy {seller_token} trong thành viên bot đã ghi nhận. "
+                    "Seller hãy gửi một tin nhắn trong nhóm, hoặc bạn reply trực tiếp tin nhắn của seller rồi thử lại."
+                )
+                return True
+            usage = (
+                "/trade_open @username <mô tả món hàng>, hoặc reply tin nhắn seller bằng /trade_open <mô tả>"
+                if command == "trade_open"
+                else "/seller_check @username [lý do], hoặc reply tin nhắn seller bằng /seller_check [lý do]"
+            )
+            reply(f"Không xác định được seller. Cú pháp: {usage}")
+            return True
+
+        if command == "trade_open":
+            if len(detail) < 3 or len(detail) > 500:
+                retry_message = dict(message)
+                retry_message["reply_to_message"] = {
+                    "from": {
+                        "id": seller_id,
+                        "first_name": seller_name or f"Seller {seller_id}",
+                        "is_bot": False,
+                    }
+                }
+                self._begin_pending_command(
+                    "trade_open",
+                    retry_message,
+                    "Mô tả món hàng phải dài từ 3 đến 500 ký tự. Hãy nhập lại mô tả món hàng; không cần nhập lại seller.",
+                )
+                return True
+            try:
+                trade = self.store.create_trade_case(
+                    platform="telegram",
+                    community_id=chat_id,
+                    channel_id=chat_id,
+                    buyer_id=common.author_id,
+                    buyer_name=common.author_name,
+                    seller_id=seller_id,
+                    seller_name=seller_name,
+                    item_summary=detail,
+                    created_by=common.author_id,
+                    evidence_urls=[],
+                )
+            except ValueError as exc:
+                reply(str(exc))
+                return True
+            buyer_label = common.author_name or f"ID {common.author_id}"
+            seller_label = seller_name or f"ID {seller_id}"
+            reply(
+                f"Đã mở giao dịch {trade.trade_id} giữa người mua {buyer_label} và người bán {seller_label}. "
+                "Hai bên dùng /trade_confirm sau khi hoàn tất. Không gửi OTP, mật khẩu hoặc thông tin thẻ vào Telegram."
+            )
+            return True
+
+        reason = detail or "Thành viên yêu cầu kiểm tra thông tin người bán."
+        if len(reason) > 1_000:
+            reply("Lý do kiểm tra chỉ được dài tối đa 1.000 ký tự.")
+            return True
+        assessment = self.store.create_seller_assessment(
+            platform="telegram",
+            community_id=chat_id,
+            requester_id=common.author_id,
+            seller_id=seller_id,
+            reason=reason,
+        )
+        reply(
+            f"Đã gửi yêu cầu {assessment.assessment_id} cho Admin/Mod. "
+            "Bot không tự kết luận người bán an toàn hoặc lừa đảo."
+        )
+        return True
+
+    def _telegram_seller_target(self, message: dict[str, Any], argument: str) -> tuple[str, str | None, str]:
+        """Resolve a seller from a replied-to message, @username, or numeric ID."""
+        replied_sender = (message.get("reply_to_message") or {}).get("from") or {}
+        if replied_sender.get("id") is not None and not replied_sender.get("is_bot"):
+            name = " ".join(
+                part for part in (replied_sender.get("first_name"), replied_sender.get("last_name")) if part
+            ) or replied_sender.get("username") or None
+            return str(replied_sender["id"]), name, argument
+
+        parts = argument.split(maxsplit=1)
+        if not parts:
+            return "", None, argument
+        detail = parts[1].strip() if len(parts) > 1 else ""
+        if parts[0].startswith("@"):
+            username = parts[0][1:].lower()
+            chat_id = str((message.get("chat") or {}).get("id") or "")
+            seller = self._telegram_users_by_username.get((chat_id, username))
+            if seller:
+                return seller[0], seller[1], detail
+            persisted_seller = self.store.find_telegram_member_by_username(chat_id, username)
+            if isinstance(persisted_seller, tuple) and len(persisted_seller) == 2:
+                self._telegram_users_by_username[(chat_id, username)] = persisted_seller
+                return persisted_seller[0], persisted_seller[1], detail
+            return "", None, detail
+        if re.fullmatch(r"\d{1,20}", parts[0]):
+            return parts[0], None, detail
+        return "", None, argument
 
     def _question_to_answer(self, message: dict[str, Any], text: str) -> str | None:
         chat_type = str((message.get("chat") or {}).get("type", ""))
@@ -238,21 +678,65 @@ class TelegramRagBot:
                 return f"/{name}" + (f" {argument}" if argument else "")
         if chat_type == "private":
             return text
+        replied_sender = (message.get("reply_to_message") or {}).get("from") or {}
+        replied_username = str(replied_sender.get("username") or "").lower()
+        if replied_sender.get("is_bot") and (
+            not self._username or replied_username == self._username
+        ):
+            return text
         if self._username:
             mention = f"@{self._username}"
             if mention in text.lower():
                 return re.sub(re.escape(mention), "", text, flags=re.I).strip() or "hello"
         return None
 
-    def _send_message(self, chat_id: str, text: str, *, reply_to_message_id: int | None = None) -> None:
+    def _send_message(
+        self,
+        chat_id: str,
+        text: str,
+        *,
+        reply_to_message_id: int | None = None,
+        reply_to_ephemeral_message_id: int | None = None,
+        ephemeral_user_id: int | None = None,
+        force_reply: bool = False,
+        force_reply_placeholder: str | None = None,
+    ) -> None:
         try:
             payload: dict[str, object] = {"chat_id": chat_id, "text": text[:self.settings.telegram_reply_max_chars]}
-            if reply_to_message_id is not None:
+            if ephemeral_user_id is not None:
+                payload["ephemeral_message_parameters"] = {"receiver_user_id": ephemeral_user_id}
+            if reply_to_ephemeral_message_id is not None:
+                payload["reply_parameters"] = {"ephemeral_message_id": reply_to_ephemeral_message_id}
+            elif reply_to_message_id is not None:
                 payload["reply_to_message_id"] = reply_to_message_id
+            if force_reply:
+                reply_markup: dict[str, object] = {"force_reply": True}
+                # An ephemeral prompt already has exactly one receiver. Avoid
+                # selective targeting here because some mobile clients do not
+                # activate ForceReply for the new ephemeral reply target.
+                if ephemeral_user_id is None:
+                    reply_markup["selective"] = True
+                if force_reply_placeholder:
+                    reply_markup["input_field_placeholder"] = force_reply_placeholder[:64]
+                payload["reply_markup"] = reply_markup
             response = requests.post(f"{self._api_base}/sendMessage", json=payload, timeout=20)
             response.raise_for_status()
         except requests.RequestException:
             logger.exception("Telegram RAG reply failed.")
+
+    @staticmethod
+    def _ephemeral_reply_kwargs(message: dict[str, Any]) -> dict[str, int]:
+        """Target one group member and, when possible, reply to their ephemeral message."""
+        if str((message.get("chat") or {}).get("type") or "") not in {"group", "supergroup"}:
+            return {}
+        user_id = (message.get("from") or {}).get("id")
+        if not isinstance(user_id, int):
+            return {}
+        kwargs = {"ephemeral_user_id": user_id}
+        ephemeral_message_id = message.get("ephemeral_message_id")
+        if isinstance(ephemeral_message_id, int):
+            kwargs["reply_to_ephemeral_message_id"] = ephemeral_message_id
+        return kwargs
 
     def _delete_message(self, chat_id: str, message_id: Any) -> bool:
         if message_id is None:
@@ -362,12 +846,15 @@ class TelegramRagBot:
         author_name = " ".join(
             part for part in (sender.get("first_name"), sender.get("last_name")) if part
         ) or sender.get("username") or None
+        platform_message_id = message.get("message_id")
+        if platform_message_id is None and message.get("ephemeral_message_id") is not None:
+            platform_message_id = f"ephemeral-{message['ephemeral_message_id']}"
         return CommonMessage(
-            message_id=f"telegram-{chat.get('id')}-{message.get('message_id')}",
+            message_id=f"telegram-{chat.get('id')}-{platform_message_id}",
             platform="telegram",
             community_id=str(chat.get("id") or "telegram"),
             channel_id=str(chat.get("id") or "general"),
-            thread_key=str(reply.get("message_id") or message.get("message_id")),
+            thread_key=str(reply.get("message_id") or platform_message_id),
             parent_message_id=str(reply["message_id"]) if reply.get("message_id") else None,
             author_id=str(sender.get("id") or "anonymous"),
             author_name=author_name,
