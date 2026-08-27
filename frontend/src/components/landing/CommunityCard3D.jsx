@@ -176,15 +176,15 @@ export default function CommunityCard3D({
     if (isClicked) return;
     setIsClicked(true);
 
-    // Give user visual feedback with logo zoom before opening invite link
+    // Give user clear visual feedback with massive logo pop before opening invite link
     setTimeout(() => {
       window.open(url, "_blank", "noopener,noreferrer");
-    }, 280);
+    }, 450);
 
-    // Reset clicked state after 1.2s
+    // Reset clicked state after 1.5s
     setTimeout(() => {
       setIsClicked(false);
-    }, 1200);
+    }, 1500);
   };
 
   const isDiscord = platform === "discord";
@@ -242,18 +242,19 @@ export default function CommunityCard3D({
         </div>
 
         {/* Center: 3D Floating Vector Logo */}
-        <div className="card-3d__hero" style={{ transform: "translateZ(45px)" }}>
+        <div className="card-3d__hero" style={{ transform: "translateZ(45px)", position: "relative" }}>
           <motion.div
             className="card-3d__logo-box"
+            style={{ position: "relative", zIndex: isClicked ? 60 : 2 }}
             animate={
               isClicked
                 ? {
-                    scale: [1, 1.48, 1.4],
-                    y: -16,
-                    rotateZ: isDiscord ? -8 : 8,
+                    scale: [1, 2.35, 2.1],
+                    y: -36,
+                    rotateZ: isDiscord ? -10 : 10,
                     filter: isDiscord
-                      ? "drop-shadow(0 14px 28px rgba(88, 101, 242, 0.55))"
-                      : "drop-shadow(0 14px 28px rgba(38, 165, 228, 0.55))",
+                      ? "drop-shadow(0 24px 50px rgba(88, 101, 242, 0.85))"
+                      : "drop-shadow(0 24px 50px rgba(38, 165, 228, 0.85))",
                   }
                 : reduce
                 ? {}
@@ -265,7 +266,7 @@ export default function CommunityCard3D({
             }
             transition={
               isClicked
-                ? { type: "spring", stiffness: 450, damping: 14 }
+                ? { type: "spring", stiffness: 380, damping: 12 }
                 : isHovered
                 ? { type: "spring", stiffness: 300, damping: 15 }
                 : { repeat: Infinity, duration: 4, ease: "easeInOut" }
