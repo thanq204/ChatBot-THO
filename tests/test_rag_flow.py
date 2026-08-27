@@ -237,8 +237,16 @@ def test_general_question_labels_deterministic_fallback_honestly() -> None:
 
     outcome = chat.reply(_message("fallback-name", "bạn tên là gì"))
 
-    assert outcome.answer == "[Hệ thống]\nMình tên là THO, trợ lý cộng đồng học tập."
+    assert outcome.answer == "[Hệ thống]\nMình là THO nè, trợ lý cộng đồng học tập của mọi người á."
     assert outcome.model_used == "system-fallback"
+
+
+def test_general_llm_prompt_keeps_the_tho_persona_safe() -> None:
+    prompt = ChatOrchestrator._general_llm_system_prompt(datetime(2026, 8, 27, 20, 0, tzinfo=UTC))
+
+    assert "đáng yêu, nhẹ nhàng, nhõng nhẽo vừa phải" in prompt
+    assert "không mỉa mai, chê bai, hạ nhục hay công kích người dùng" in prompt
+    assert "nội dung nhạy cảm, cảnh báo, từ chối" in prompt
 
 
 def test_out_of_scope_cooking_question_rejected() -> None:
