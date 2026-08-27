@@ -27,12 +27,13 @@ VIETNAM_TIMEZONE = timezone(timedelta(hours=7))
 
 class ChatOrchestrator:
     _LLM_PERSONA = (
-        "Với hội thoại thông thường, nói chuyện đáng yêu, nhẹ nhàng, nhõng nhẽo vừa phải "
-        "và hơi bánh bèo; có thể điểm xuyết các từ như 'nè', 'nha', 'á' một cách tự nhiên. "
-        "Được phép mỉa mai tinh nghịch tình huống hoặc vấn đề ở mức rất nhẹ, nhưng tuyệt đối "
-        "không mỉa mai, chê bai, hạ nhục hay công kích người dùng. Không dùng emoji, không kéo dài "
-        "và không lạm dụng các từ đệm. Với nội dung nhạy cảm, cảnh báo, từ chối hoặc hướng dẫn an toàn, "
-        "giữ giọng bình tĩnh, rõ ràng và tôn trọng."
+        "Với hội thoại thông thường, nói chuyện thật cute, mềm mại, nhõng nhẽo và bánh bèo một cách tự nhiên. "
+        "Ưu tiên dùng 'hôngg' thay cho 'không', có thể kéo nhẹ một số từ như 'nhaa', 'nèee', 'áaa' nhưng "
+        "không làm câu khó đọc. Điểm xuyết tối đa 1-2 icon đáng yêu phù hợp ngữ cảnh như '><', '🥺', "
+        "'✨', '🌷', '💗' hoặc '🎀' trong mỗi câu trả lời; không lặp một icon liên tục. "
+        "Có thể mỉa mai tinh nghịch tình huống hoặc vấn đề ở mức rất nhẹ, nhưng tuyệt đối không mỉa mai, "
+        "chê bai, hạ nhục hay công kích người dùng. Với nội dung nhạy cảm, cảnh báo, từ chối hoặc hướng dẫn "
+        "an toàn, không dùng cách nói nhõng nhẽo hay mỉa mai; giữ giọng bình tĩnh, rõ ràng và tôn trọng."
     )
     _GENERAL_LLM_PATTERNS = (
         r"\b(bạn|ban)\s+(tên|ten)\s+(là|la)\s+(gì|gi)\b",
@@ -411,14 +412,14 @@ class ChatOrchestrator:
     def _general_system_answer(question: str, now: datetime) -> str:
         normalized = question.casefold()
         if "tên" in normalized or "ten" in normalized or "là ai" in normalized or "la ai" in normalized:
-            return "Mình là THO nè, trợ lý cộng đồng học tập của mọi người á."
+            return "Mình là THO nèee, trợ lý cộng đồng học tập siêu cute của mọi người áaa ><"
         if "giờ" in normalized or "gio" in normalized:
-            return f"Hiện tại là {now:%H:%M} ngày {now:%d/%m/%Y} theo giờ Việt Nam nè."
+            return f"Bây giờ là {now:%H:%M} ngày {now:%d/%m/%Y} theo giờ Việt Nam nèee ✨"
         if "ngày" in normalized or "ngay" in normalized or "hôm nay" in normalized or "hom nay" in normalized:
-            return f"Hôm nay là ngày {now:%d/%m/%Y} theo giờ Việt Nam nè."
+            return f"Hôm nay là ngày {now:%d/%m/%Y} theo giờ Việt Nam nèee 🌷"
         folded = normalize_intent_text(question)
         if re.search(r"\b(gioi|hay|tuyet|cam on|thanks?)\b", folded):
-            return "Ui cảm ơn bạn nha, khen vậy làm mình ngại á. Mình sẽ cố hỗ trợ mọi người thật tốt nè."
+            return "Uiii cảm ơn bạn nhaa, khen vậy làm mình ngại áaa 🥺 Mình sẽ cố hỗ trợ mọi người thật tốt nèee 💗"
         if re.search(r"\b(llm|model|mo hinh)\b", folded):
-            return "Mình dùng LLM cho hội thoại và câu hỏi kiến thức chung khi FAQ hoặc RAG chưa có đáp án phù hợp nha."
-        return "Mình đã nhận được tin nhắn rồi nè, nhưng LLM đang bận một xíu nên chưa trả lời đầy đủ được á."
+            return "Mình dùng LLM để tám chuyện và trả lời kiến thức chung khi FAQ hoặc RAG chưa có đáp án nèee ✨"
+        return "Mình nhận được tin nhắn rồi nèee, nhưng LLM đang bận một xíu nên chưa trả lời đầy đủ được áaa 🥺"
