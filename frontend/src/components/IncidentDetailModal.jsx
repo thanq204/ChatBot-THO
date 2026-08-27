@@ -170,22 +170,32 @@ function DetailBody({ detail, onStatusChange, savingStatus, onReputationDecision
       </dl>
 
       {root && (
-        <div className="quote">
-          <span className="section-heading">Tin nhắn gốc</span>
-          <p style={{ marginTop: 6 }}>{root.text}</p>
-          <span className="muted small">
-            {root.author_id} · {relativeTime(root.timestamp)}
-          </span>
-          {rootSourceUrl && (
-            <a
-              href={rootSourceUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="quote__link"
-            >
-              Mở tin nhắn gốc trên {platformLabel(incident.platform)} <ArrowSquareOut size={13} weight="bold" />
-            </a>
-          )}
+        <div>
+          <span className="section-heading" style={{ marginBottom: 8, display: "block" }}>Tin nhắn gốc</span>
+          <div className={`chat-bubble chat-bubble--${incident.platform || "discord"}`}>
+            <div className="chat-bubble__avatar">
+              {(root.author_name || root.author_id || "U").slice(0, 2).toUpperCase()}
+            </div>
+            <div className="chat-bubble__body">
+              <div className="chat-bubble__meta">
+                <span className="chat-bubble__author">{root.author_name || root.author_id}</span>
+                <span className="chat-bubble__platform-tag">{platformLabel(incident.platform)}</span>
+                <span className="chat-bubble__time">{relativeTime(root.timestamp)}</span>
+              </div>
+              <p className="chat-bubble__text">{root.text}</p>
+              {rootSourceUrl && (
+                <a
+                  href={rootSourceUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="quote__link"
+                  style={{ marginTop: 6 }}
+                >
+                  Mở tin nhắn gốc trên {platformLabel(incident.platform)} <ArrowSquareOut size={13} weight="bold" />
+                </a>
+              )}
+            </div>
+          </div>
         </div>
       )}
 

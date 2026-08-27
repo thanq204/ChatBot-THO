@@ -325,7 +325,7 @@ const CaseRow = memo(function CaseRow({ incident, channelName, onOpen }) {
     <div
       role="button"
       tabIndex={0}
-      className={`case-row${isSettled ? " case-row--settled" : ""}`}
+      className={`case-row${isSettled ? " case-row--settled" : ""} case-item case-item--${incident.severity || "low"}`}
       style={{ "--case-accent": SEVERITY_COLORS[incident.severity] ?? "var(--text-muted)" }}
       onClick={() => onOpen(incident.incident_id)}
       onKeyDown={(event) => {

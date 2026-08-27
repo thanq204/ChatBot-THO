@@ -1,7 +1,15 @@
 import { useCallback, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, ArrowsClockwise, UsersThree } from "@phosphor-icons/react";
+import {
+  ArrowRight,
+  ArrowsClockwise,
+  UsersThree,
+  ChatCircleDots,
+  ShieldWarning,
+  ClockCountdown,
+  WarningCircle,
+} from "@phosphor-icons/react";
 import Card from "../components/Card.jsx";
 import Counter from "../components/Counter.jsx";
 import IncidentDetailModal from "../components/IncidentDetailModal.jsx";
@@ -34,11 +42,18 @@ function buildCategoryRanks(summary) {
     }));
 }
 
-/** Compact headline number. Four of these read faster than two huge slabs. */
-function Kpi({ label, value, tone, meta }) {
+/** Compact headline number with top accent border and indicator icon. */
+function Kpi({ label, value, tone, meta, icon: Icon }) {
   return (
-    <div className={`kpi${tone ? ` kpi--${tone}` : ""}`}>
-      <span className="kpi__label">{label}</span>
+    <div className={`kpi${tone ? ` kpi--${tone}` : " kpi--total"}`}>
+      <div className="kpi__head">
+        <span className="kpi__label">{label}</span>
+        {Icon && (
+          <span className="kpi__icon">
+            <Icon size={18} weight="bold" />
+          </span>
+        )}
+      </div>
       <span className="kpi__value">
         <Counter value={value} />
       </span>
@@ -160,10 +175,10 @@ export default function OverviewPage() {
         {loading && <SkeletonBlock height={76} />}
         {!loading && summary && (
           <>
-            <Kpi label="Tin nhắn đã quét" value={summary.messages_analyzed} meta="Tổng cộng" />
-            <Kpi label="Vi phạm gắn thẻ" value={violations} tone="warn" meta="Mọi mức độ" />
-            <Kpi label="Sự cố đang mở" value={summary.open_incidents} tone="alert" meta="Chờ xử lý" />
-            <Kpi label="Nghiêm trọng" value={summary.critical_incidents} tone="critical" meta="Ưu tiên cao nhất" />
+            <Kpi label="Tin nhắn đã quét" value={summary.messages_analyzed} icon={ChatCircleDots} meta="Tổng cộng đã kiểm duyệt" />
+            <Kpi label="Vi phạm gắn thẻ" value={violations} tone="warn" icon={ShieldWarning} meta="Mọi mức độ vi phạm" />
+            <Kpi label="Sự cố đang mở" value={summary.open_incidents} tone="alert" icon={ClockCountdown} meta="Chờ Admin xử lý" />
+            <Kpi label="Nghiêm trọng" value={summary.critical_incidents} tone="critical" icon={WarningCircle} meta="Ưu tiên xử lý ngay" />
           </>
         )}
       </div>

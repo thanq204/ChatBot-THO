@@ -1,4 +1,5 @@
 import { NavLink } from "react-router-dom";
+import { X } from "@phosphor-icons/react";
 import { useAuth } from "../auth/AuthProvider.jsx";
 import { navItemsFor } from "../lib/navigation.js";
 import { BRAND } from "../lib/brand.js";
@@ -24,10 +25,22 @@ export default function Sidebar({ open, hidden, onNavigate }) {
       inert={hidden ? "" : undefined}
       aria-hidden={hidden ? "true" : undefined}
     >
-      <button type="button" className="sidebar__brand" onClick={scrollToTop} title="Về đầu trang">
-        <span className="sidebar__logo">{BRAND.name}</span>
-        <span className="sidebar__subtitle">{BRAND.dashboardSubtitle}</span>
-      </button>
+      <div className="sidebar__brand-row">
+        <button type="button" className="sidebar__brand" onClick={scrollToTop} title="Về đầu trang">
+          <span className="sidebar__logo">{BRAND.name}</span>
+          <span className="sidebar__subtitle">{BRAND.dashboardSubtitle}</span>
+        </button>
+        {open && (
+          <button
+            type="button"
+            className="sidebar__mobile-close"
+            onClick={onNavigate}
+            aria-label="Đóng menu điều hướng"
+          >
+            <X size={18} weight="bold" />
+          </button>
+        )}
+      </div>
 
       <nav className="sidebar__nav" aria-label="Điều hướng chính">
         {navItemsFor(user?.role).map(({ to, label, icon: Icon, end }) => (

@@ -47,7 +47,11 @@ export default function PlatformRing({ status, delay = 0 }) {
         </foreignObject>
       </svg>
       <span className="platform-ring__label">{platformLabel(status.platform)}</span>
-      <span className="platform-ring__status" style={{ color }}>
+      <span
+        className="platform-ring__status"
+        style={{ color, display: "inline-flex", alignItems: "center", gap: 5, justifyContent: "center" }}
+      >
+        {status.connected && <span className="live-pulse" />}
         {text}
       </span>
     </div>
