@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useIsFetching, useIsMutating } from "@tanstack/react-query";
 import {
   List,
   MagnifyingGlass,
@@ -19,6 +20,9 @@ import ProfileModal from "./ProfileModal.jsx";
 export default function Topbar({ breadcrumb, onMenuClick, menuLabel = "Mở menu" }) {
   const { theme, toggleTheme } = useTheme();
   const { user, signOut } = useAuth();
+  const isFetching = useIsFetching();
+  const isMutating = useIsMutating();
+  const isBusy = isFetching > 0 || isMutating > 0;
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -83,6 +87,7 @@ export default function Topbar({ breadcrumb, onMenuClick, menuLabel = "Mở menu
 
   return (
     <header className="topbar">
+      {isBusy && <div className="topbar__progress" aria-hidden="true" title="Đang tải dữ liệu từ máy chủ..." />}
       <div className="topbar__left">
         <button type="button" className="icon-btn topbar__menu" onClick={onMenuClick} aria-label={menuLabel} title={menuLabel}>
           <List size={20} weight="bold" />

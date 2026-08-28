@@ -1610,19 +1610,18 @@
 }
 
 .lcell--ink {
-  background: var(--sk-btn);
   border-color: transparent;
+}
+
+.lcell--ink::before {
+  background: var(--sk-btn) !important;
 }
 
 .lcell--ink .lcell__body h3,
 .lcell--ink .lcell__body p,
 .lcell--ink .lcell__body svg,
 .lcell--ink:hover .lcell__body svg {
-  color: #ffffff;
-}
-
-.lcell--ink::before {
-  display: none;
+  color: #ffffff !important;
 }
 
 .lcell--pattern {
