@@ -28,11 +28,13 @@ const FaqManagementPage = lazy(() => import("./pages/FaqManagementPage.jsx"));
 const ExperiencePage = lazy(() => import("./pages/ExperiencePage.jsx"));
 const SellerTrustPage = lazy(() => import("./pages/SellerTrustPage.jsx"));
 
+import { MascotLoader } from "./components/Skeleton.jsx";
+
 /** Shown only while a route's chunk is in flight, which is once per route. */
 function RouteFallback() {
   return (
-    <div className="page-grid">
-      <SkeletonBlock height={220} />
+    <div style={{ display: "grid", placeItems: "center", minHeight: "60vh", padding: 24 }}>
+      <MascotLoader message="Đang nạp giao diện..." height={260} />
     </div>
   );
 }
