@@ -1,7 +1,10 @@
 from unittest.mock import Mock, patch
 
+import requests
+
 from backend.config import Settings
 from backend.models.operations import MessageDecision
+from backend.services.operations_store import OperationsStore
 from backend.services.telegram.bot import TelegramRagBot
 
 
@@ -83,6 +86,74 @@ def test_telegram_can_disable_new_member_welcome() -> None:
     )
 
     bot._send_message.assert_not_called()
+
+
+def test_telegram_chat_member_updates_persist_join_and_leave() -> None:
+    bot = build_bot()
+    user = {
+        "id": 9002,
+        "username": "Thanh24109",
+        "first_name": "Thanh",
+        "last_name": "Nguyen",
+        "is_bot": False,
+    }
+
+    bot._handle_chat_member_update(
+        {
+            "chat": {"id": -100123, "type": "supergroup"},
+            "date": 1_700_000_000,
+            "new_chat_member": {"status": "member", "user": user},
+        }
+    )
+
+    assert bot._telegram_users_by_username[("-100123", "thanh24109")] == (
+        "9002",
+        "Thanh Nguyen",
+    )
+    assert bot.store.remember_telegram_member.call_args.kwargs["is_active_member"] is True
+
+    bot.store.remember_telegram_member.reset_mock()
+    bot._handle_chat_member_update(
+        {
+            "chat": {"id": -100123, "type": "supergroup"},
+            "date": 1_700_000_100,
+            "new_chat_member": {"status": "left", "user": user},
+        }
+    )
+
+    assert ("-100123", "thanh24109") not in bot._telegram_users_by_username
+    assert bot.store.remember_telegram_member.call_args.kwargs["membership_status"] == "left"
+    assert bot.store.remember_telegram_member.call_args.kwargs["is_active_member"] is False
+
+
+def test_telegram_member_directory_survives_restart_and_excludes_left_member(tmp_path) -> None:
+    settings = Settings(database_url=f"sqlite:///{tmp_path / 'telegram-members.db'}")
+    store = OperationsStore(settings)
+    store.remember_telegram_member(
+        "-100123",
+        "9002",
+        display_name="Thanh Nguyen",
+        username="Thanh24109",
+        membership_status="member",
+        is_active_member=True,
+    )
+
+    restarted_store = OperationsStore(settings)
+    assert restarted_store.find_telegram_member_by_username("-100123", "@thanh24109") == (
+        "9002",
+        "Thanh Nguyen",
+    )
+    assert restarted_store.find_telegram_member_by_username("-100999", "@thanh24109") is None
+
+    restarted_store.remember_telegram_member(
+        "-100123",
+        "9002",
+        display_name="Thanh Nguyen",
+        username="Thanh24109",
+        membership_status="left",
+        is_active_member=False,
+    )
+    assert OperationsStore(settings).find_telegram_member_by_username("-100123", "thanh24109") is None
 
 
 def test_telegram_group_requires_command_or_bot_mention() -> None:
@@ -253,6 +324,21 @@ def test_telegram_send_message_uses_ephemeral_target_and_reply() -> None:
         "force_reply": True,
         "input_field_placeholder": "Nhập mã giao dịch TRD-...",
     }
+
+
+def test_telegram_send_message_retries_one_connection_reset() -> None:
+    bot = build_bot()
+    response = Mock()
+    reset = requests.ConnectionError(
+        "connection aborted",
+        ConnectionResetError(10054, "connection reset"),
+    )
+
+    with patch("backend.services.telegram.bot.requests.post", side_effect=[reset, response]) as post:
+        bot._send_message("-100123", "Thử gửi lại")
+
+    assert post.call_count == 2
+    response.raise_for_status.assert_called_once()
     bot.telegram_alerts = Mock()
     bot.telegram_alerts.send_alert.return_value = False
     bot.platform_moderation = Mock()

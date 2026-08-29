@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""Recover Codex prompts from the latest Desktop transcript.
+"""Recover Codex turns from the latest Desktop transcript.
 
 Codex Desktop can keep a project hook from an older session alive while a
-newer task is already running. This small repair utility imports the user
-messages visible in the latest rollout transcript, skips entries it has
-already imported, and sends the new entries through the normal Phoenix
-client. It is intentionally separate from the live hook so recovery is
-explicit and idempotent.
+newer task is already running. This small repair utility imports both user
+messages and completed assistant messages visible in the latest rollout
+transcript, skips entries it has already imported, and sends the new entries
+through the normal Phoenix client. Assistant messages are recorded as
+``AssistantStop`` events so clarification questions are retained as well.
+It is intentionally separate from the live hook so recovery is explicit and
+idempotent.
 """
 
 from __future__ import annotations
@@ -55,12 +57,13 @@ def _latest_transcript() -> Path:
     return max(candidates, key=lambda path: path.name)
 
 
-def _transcript_data(path: Path) -> tuple[str, str, str]:
+def _transcript_data(path: Path) -> tuple[str, str, str, list[str]]:
     best_message = ""
     session_id = ""
     model = ""
     direct_messages: list[str] = []
     response_messages: list[str] = []
+    assistant_messages: list[str] = []
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
         try:
             record = json.loads(line)
@@ -97,6 +100,18 @@ def _transcript_data(path: Path) -> tuple[str, str, str]:
                 request = raw_message.split(marker, 1)[1].strip()
                 if request:
                     response_messages.append(request)
+        elif (
+            record.get("type") == "response_item"
+            and payload.get("type") == "message"
+            and payload.get("role") == "assistant"
+        ):
+            text = "\n".join(
+                str(item.get("text", ""))
+                for item in payload.get("content", [])
+                if isinstance(item, dict) and item.get("type") == "output_text"
+            ).strip()
+            if text:
+                assistant_messages.append(text)
 
     if not best_message and not direct_messages and not response_messages:
         raise RuntimeError(f"No user-message transcript found in {path}")
@@ -112,7 +127,7 @@ def _transcript_data(path: Path) -> tuple[str, str, str]:
             f"[{number}] user: {message}"
             for number, message in enumerate(direct_messages, start=1)
         )
-    return session_id, best_message, model
+    return session_id, best_message, model, assistant_messages
 
 
 def _existing_turns() -> set[str]:
@@ -139,7 +154,7 @@ def main() -> int:
     )
     args = parser.parse_args()
     transcript = _latest_transcript()
-    session_id, message, model = _transcript_data(transcript)
+    session_id, message, model, assistant_messages = _transcript_data(transcript)
     prompts = [(int(number), prompt.strip()) for number, prompt in USER_BLOCK.findall(message)]
     prompts = [(number, prompt) for number, prompt in prompts if prompt]
     for prompt in args.extra_prompt:
@@ -177,6 +192,32 @@ def main() -> int:
             }
         )
 
+    # A final assistant message is the useful evidence for turns where Codex
+    # stopped to ask a clarification question. Store every completed response,
+    # rather than trying to guess whether Vietnamese/English punctuation makes
+    # it a question. The distinct event name keeps it separate from user input.
+    for number, response in enumerate(assistant_messages, start=1):
+        turn_id = f"assistant-v1-{session_id}-{number}"
+        if turn_id in existing:
+            continue
+        entries.append(
+            {
+                "ts": now,
+                "tool": "codex",
+                "event": "AssistantStop",
+                "session_id": session_id,
+                "model": model,
+                "repo": repo,
+                "branch": _git(["git", "rev-parse", "--abbrev-ref", "HEAD"]),
+                "commit": _git(["git", "rev-parse", "--short", "HEAD"]),
+                "student": _git(["git", "config", "user.email"]),
+                "prompt": "",
+                "response_summary": response[:1000],
+                "turn_id": turn_id,
+                "transcript_path": str(transcript),
+            }
+        )
+
     if not entries:
         print(f"[ai-log] Nothing new to backfill from {transcript.name}")
         return 0
@@ -186,7 +227,7 @@ def main() -> int:
         for entry in entries:
             handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
-    print(f"[ai-log] Backfilled {len(entries)} Codex prompts from {transcript.name}")
+    print(f"[ai-log] Backfilled {len(entries)} Codex entries from {transcript.name}")
     return submit_log.submit_entries(entries)
 
 

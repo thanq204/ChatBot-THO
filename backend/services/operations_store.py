@@ -735,6 +735,74 @@ class OperationsStore:
             )
         return member_id
 
+    def remember_telegram_member(
+        self,
+        community_id: str,
+        platform_user_id: str,
+        *,
+        display_name: str | None,
+        username: str | None,
+        membership_status: str,
+        is_active_member: bool,
+        is_bot: bool = False,
+        observed_at: datetime | None = None,
+    ) -> None:
+        """Persist Telegram's group-local member directory in community_members."""
+        if not community_id or not platform_user_id:
+            return
+        seen_at = (observed_at or datetime.now(UTC)).isoformat()
+        normalized_username = str(username or "").strip().lstrip("@").lower() or None
+        member_id = str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"p232:telegram:{community_id}:{platform_user_id}",
+            )
+        )
+        with self._connect() as db:
+            row = db.execute(
+                """SELECT metadata FROM community_members
+                WHERE platform='telegram' AND community_id=? AND platform_user_id=?""",
+                (community_id, platform_user_id),
+            ).fetchone()
+            metadata = json_value(row["metadata"], {}) if row else {}
+            if not isinstance(metadata, dict):
+                metadata = {}
+            metadata.update(
+                {
+                    "source": "telegram_update",
+                    "username": normalized_username,
+                    "membership_status": membership_status,
+                    "is_active_member": is_active_member,
+                    "membership_updated_at": seen_at,
+                }
+            )
+            if is_active_member:
+                metadata.setdefault("joined_at", seen_at)
+                metadata.pop("left_at", None)
+            else:
+                metadata["left_at"] = seen_at
+            db.execute(
+                """INSERT INTO community_members
+                (member_id, platform, community_id, platform_user_id, display_name, is_bot, reputation_score,
+                 first_seen_at, last_seen_at, metadata)
+                VALUES (?, 'telegram', ?, ?, ?, ?, 0, ?, ?, ?)
+                ON CONFLICT(platform, community_id, platform_user_id) DO UPDATE SET
+                display_name=COALESCE(excluded.display_name, community_members.display_name),
+                is_bot=community_members.is_bot OR excluded.is_bot,
+                last_seen_at=excluded.last_seen_at,
+                metadata=excluded.metadata""",
+                (
+                    member_id,
+                    community_id,
+                    platform_user_id,
+                    display_name,
+                    is_bot,
+                    seen_at,
+                    seen_at,
+                    _json(metadata),
+                ),
+            )
+
     def mark_platform_bot(self, platform: str, platform_user_id: str, display_name: str | None = None) -> int:
         """Mark an authenticated platform bot across communities without relying on its display name."""
         with self._connect() as db:
@@ -1674,17 +1742,35 @@ class OperationsStore:
         channel_id: str,
         username: str,
     ) -> tuple[str, str | None] | None:
-        """Resolve a Telegram username only from messages in the current trade chat."""
+        """Resolve an active Telegram member only within the current trade chat."""
         normalized = username.strip().lstrip("@").lower()
         if not normalized:
             return None
         with self._connect(readonly=True) as db:
+            members = db.execute(
+                """SELECT platform_user_id, display_name, is_bot, metadata
+                FROM community_members
+                WHERE platform='telegram' AND community_id=?""",
+                (channel_id,),
+            ).fetchall()
             rows = db.execute(
                 """SELECT author_id, raw_json FROM operations_messages
                 WHERE platform='telegram' AND channel_id=?
                 ORDER BY timestamp DESC LIMIT 5000""",
                 (channel_id,),
             ).fetchall()
+        for row in members:
+            metadata = json_value(row["metadata"], {})
+            if not isinstance(metadata, dict):
+                continue
+            saved_username = str(metadata.get("username") or "").strip().lstrip("@").lower()
+            if saved_username != normalized:
+                continue
+            # A leave/kick update must override older messages from this user.
+            if row["is_bot"] or metadata.get("is_active_member") is False:
+                return None
+            display_name = row["display_name"] or f"@{saved_username}"
+            return str(row["platform_user_id"]), str(display_name)
         for row in rows:
             raw = json_value(row["raw_json"], {})
             sender = raw.get("from") if isinstance(raw, dict) else None
