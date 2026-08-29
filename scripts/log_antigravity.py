@@ -91,8 +91,18 @@ def get_brain_dirs() -> list[Path]:
     env = os.environ.get("ANTIGRAVITY_BRAIN_DIR")
     if env:
         p = Path(env)
-        return [p] if p.exists() else []
-    return [p for p in BRAIN_CANDIDATES if p.exists()]
+        try:
+            return [p] if p.exists() else []
+        except OSError:
+            return []
+    dirs = []
+    for p in BRAIN_CANDIDATES:
+        try:
+            if p.exists():
+                dirs.append(p)
+        except OSError:
+            pass
+    return dirs
 
 
 # ---------------------------------------------------------------------------
@@ -206,15 +216,25 @@ def iter_user_inputs(brain_dirs: list[Path], cutoff: datetime | None,
                      only_conv: str | None, repo_root_n: str):
     """Yield user-input dicts from every matching conversation transcript."""
     for brain in brain_dirs:
-        for conv_dir in sorted(brain.iterdir()):
-            if not conv_dir.is_dir():
+        try:
+            items = sorted(brain.iterdir())
+        except OSError:
+            continue
+        for conv_dir in items:
+            try:
+                if not conv_dir.is_dir():
+                    continue
+            except OSError:
                 continue
             if only_conv and conv_dir.name != only_conv:
                 continue
             transcript = (
                 conv_dir / ".system_generated" / "logs" / "transcript.jsonl"
             )
-            if not transcript.exists() or transcript.stat().st_size == 0:
+            try:
+                if not transcript.exists() or transcript.stat().st_size == 0:
+                    continue
+            except OSError:
                 continue
 
             cwds = _conv_cwds(transcript)
@@ -222,40 +242,43 @@ def iter_user_inputs(brain_dirs: list[Path], cutoff: datetime | None,
             if repo_root_n and not _conv_matches_repo(cwds, repo_root_n):
                 continue
 
-            with open(transcript, encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        entry = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    if (entry.get("type") != "USER_INPUT"
-                            or entry.get("source") != "USER_EXPLICIT"):
-                        continue
-
-                    ts = entry.get("created_at") or ""
-                    if cutoff and ts:
+            try:
+                with open(transcript, encoding="utf-8", errors="replace") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
                         try:
-                            ts_dt = datetime.fromisoformat(
-                                ts.replace("Z", "+00:00")
-                            )
-                            if ts_dt < cutoff:
-                                continue
-                        except ValueError:
-                            pass
+                            entry = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        if (entry.get("type") != "USER_INPUT"
+                                or entry.get("source") != "USER_EXPLICIT"):
+                            continue
 
-                    text = extract_user_prompt(entry.get("content", ""))
-                    if len(text) < 2:
-                        continue
+                        ts = entry.get("created_at") or ""
+                        if cutoff and ts:
+                            try:
+                                ts_dt = datetime.fromisoformat(
+                                    ts.replace("Z", "+00:00")
+                                )
+                                if ts_dt < cutoff:
+                                    continue
+                            except ValueError:
+                                pass
 
-                    yield {
-                        "conv_id": conv_dir.name,
-                        "step_index": int(entry.get("step_index", 0)),
-                        "timestamp": ts,
-                        "text": text,
-                    }
+                        text = extract_user_prompt(entry.get("content", ""))
+                        if len(text) < 2:
+                            continue
+
+                        yield {
+                            "conv_id": conv_dir.name,
+                            "step_index": int(entry.get("step_index", 0)),
+                            "timestamp": ts,
+                            "text": text,
+                        }
+            except OSError:
+                continue
 
 
 # ---------------------------------------------------------------------------
