@@ -56,6 +56,7 @@ class TelegramRagBot:
         self._pending_commands: dict[tuple[str, str], tuple[str, dict[str, Any], float]] = {}
         self._telegram_users_by_username: dict[tuple[str, str], tuple[str, str | None]] = {}
         self._telegram_username_by_user_id: dict[tuple[str, str], str] = {}
+        self._telegram_member_signatures: dict[tuple[str, str], tuple[str, str, str, bool]] = {}
 
     def start(self) -> None:
         print(f"[Telegram] start() called: listener_enabled={self.settings.telegram_listener_enabled}, token={'SET' if self.settings.telegram_bot_token else 'EMPTY'}", flush=True)
@@ -149,7 +150,7 @@ class TelegramRagBot:
 
         while not self._stop.is_set():
             try:
-                params: dict[str, object] = {"timeout": self.settings.telegram_polling_timeout_seconds, "allowed_updates": '["message", "message_reaction", "message_reaction_count"]'}
+                params: dict[str, object] = {"timeout": self.settings.telegram_polling_timeout_seconds, "allowed_updates": '["message", "message_reaction", "message_reaction_count", "chat_member"]'}
                 if self._offset is not None:
                     params["offset"] = self._offset
                 response = requests.get(f"{self._api_base}/getUpdates", params=params, timeout=(10, self.settings.telegram_polling_timeout_seconds + 10))
@@ -165,6 +166,8 @@ class TelegramRagBot:
                         self._handle_reaction_update(update["message_reaction"])
                     elif update.get("message_reaction_count"):
                         self._handle_reaction_count_update(update["message_reaction_count"])
+                    elif update.get("chat_member"):
+                        self._handle_chat_member_update(update["chat_member"])
                     else:
                         self._handle_update(update)
             except requests.RequestException:
@@ -180,13 +183,27 @@ class TelegramRagBot:
         sender = message.get("from") or {}
         chat_id = str((message.get("chat") or {}).get("id") or "")
         self._remember_telegram_user(chat_id, sender)
-        self._remember_telegram_user(chat_id, (message.get("reply_to_message") or {}).get("from") or {})
+        left_member = message.get("left_chat_member")
+        if isinstance(left_member, dict):
+            self._remember_telegram_user(
+                chat_id,
+                left_member,
+                membership_status="left",
+                is_active_member=False,
+                observed_at=self._telegram_update_time(message.get("date")),
+            )
         if sender.get("is_bot"):
             return
         new_members = message.get("new_chat_members")
         if isinstance(new_members, list):
             for member in new_members:
-                self._remember_telegram_user(chat_id, member)
+                self._remember_telegram_user(
+                    chat_id,
+                    member,
+                    membership_status="member",
+                    is_active_member=True,
+                    observed_at=self._telegram_update_time(message.get("date")),
+                )
             self._welcome_new_members(message, new_members)
             return
         if not text:
@@ -296,8 +313,40 @@ class TelegramRagBot:
             reply_to_message_id=message.get("message_id"),
         )
 
-    def _remember_telegram_user(self, chat_id: str, user: dict[str, Any]) -> None:
-        """Keep a group-local username-to-ID directory from Telegram updates."""
+    @staticmethod
+    def _telegram_update_time(value: Any) -> datetime | None:
+        try:
+            return datetime.fromtimestamp(int(value), UTC)
+        except (TypeError, ValueError, OSError):
+            return None
+
+    def _handle_chat_member_update(self, member_update: dict[str, Any]) -> None:
+        """Track joins, leaves and membership changes delivered by Telegram."""
+        chat_id = str((member_update.get("chat") or {}).get("id") or "")
+        new_member = member_update.get("new_chat_member") or {}
+        user = new_member.get("user") or {}
+        status = str(new_member.get("status") or "unknown").lower()
+        is_active = status in {"creator", "administrator", "member"}
+        if status == "restricted":
+            is_active = bool(new_member.get("is_member"))
+        self._remember_telegram_user(
+            chat_id,
+            user,
+            membership_status=status,
+            is_active_member=is_active,
+            observed_at=self._telegram_update_time(member_update.get("date")),
+        )
+
+    def _remember_telegram_user(
+        self,
+        chat_id: str,
+        user: dict[str, Any],
+        *,
+        membership_status: str = "active",
+        is_active_member: bool = True,
+        observed_at: datetime | None = None,
+    ) -> None:
+        """Keep a persistent, group-local Telegram username-to-ID directory."""
         if not chat_id or user.get("is_bot") or user.get("id") is None:
             return
         user_id = str(user["id"])
@@ -306,14 +355,36 @@ class TelegramRagBot:
         username = str(user.get("username") or "").strip().lstrip("@").lower()
         if previous_username and previous_username != username:
             self._telegram_users_by_username.pop((chat_id, previous_username), None)
-        if not username:
-            self._telegram_username_by_user_id.pop(reverse_key, None)
-            return
         name = " ".join(
-            part for part in (user.get("first_name"), user.get("last_name")) if part
-        ) or f"@{username}"
-        self._telegram_users_by_username[(chat_id, username)] = (user_id, str(name))
-        self._telegram_username_by_user_id[reverse_key] = username
+            str(part).strip()
+            for part in (user.get("first_name"), user.get("last_name"))
+            if part and str(part).strip()
+        ) or (f"@{username}" if username else f"Telegram user {user_id}")
+        if not is_active_member or not username:
+            self._telegram_username_by_user_id.pop(reverse_key, None)
+            if username:
+                self._telegram_users_by_username.pop((chat_id, username), None)
+        else:
+            self._telegram_users_by_username[(chat_id, username)] = (user_id, str(name))
+            self._telegram_username_by_user_id[reverse_key] = username
+
+        signature = (username, str(name), membership_status, is_active_member)
+        if self._telegram_member_signatures.get(reverse_key) == signature:
+            return
+        try:
+            self.store.remember_telegram_member(
+                chat_id,
+                user_id,
+                display_name=str(name),
+                username=username or None,
+                membership_status=membership_status,
+                is_active_member=is_active_member,
+                is_bot=False,
+                observed_at=observed_at,
+            )
+            self._telegram_member_signatures[reverse_key] = signature
+        except Exception:
+            logger.exception("Could not persist Telegram member %s in chat %s.", user_id, chat_id)
 
     def _send_moderation_notice(
         self,
@@ -701,28 +772,59 @@ class TelegramRagBot:
         force_reply: bool = False,
         force_reply_placeholder: str | None = None,
     ) -> None:
-        try:
-            payload: dict[str, object] = {"chat_id": chat_id, "text": text[:self.settings.telegram_reply_max_chars]}
-            if ephemeral_user_id is not None:
-                payload["ephemeral_message_parameters"] = {"receiver_user_id": ephemeral_user_id}
-            if reply_to_ephemeral_message_id is not None:
-                payload["reply_parameters"] = {"ephemeral_message_id": reply_to_ephemeral_message_id}
-            elif reply_to_message_id is not None:
-                payload["reply_to_message_id"] = reply_to_message_id
-            if force_reply:
-                reply_markup: dict[str, object] = {"force_reply": True}
-                # An ephemeral prompt already has exactly one receiver. Avoid
-                # selective targeting here because some mobile clients do not
-                # activate ForceReply for the new ephemeral reply target.
-                if ephemeral_user_id is None:
-                    reply_markup["selective"] = True
-                if force_reply_placeholder:
-                    reply_markup["input_field_placeholder"] = force_reply_placeholder[:64]
-                payload["reply_markup"] = reply_markup
-            response = requests.post(f"{self._api_base}/sendMessage", json=payload, timeout=20)
-            response.raise_for_status()
-        except requests.RequestException:
-            logger.exception("Telegram RAG reply failed.")
+        payload: dict[str, object] = {"chat_id": chat_id, "text": text[:self.settings.telegram_reply_max_chars]}
+        if ephemeral_user_id is not None:
+            payload["ephemeral_message_parameters"] = {"receiver_user_id": ephemeral_user_id}
+        if reply_to_ephemeral_message_id is not None:
+            payload["reply_parameters"] = {"ephemeral_message_id": reply_to_ephemeral_message_id}
+        elif reply_to_message_id is not None:
+            payload["reply_to_message_id"] = reply_to_message_id
+        if force_reply:
+            reply_markup: dict[str, object] = {"force_reply": True}
+            # An ephemeral prompt already has exactly one receiver. Avoid
+            # selective targeting here because some mobile clients do not
+            # activate ForceReply for the new ephemeral reply target.
+            if ephemeral_user_id is None:
+                reply_markup["selective"] = True
+            if force_reply_placeholder:
+                reply_markup["input_field_placeholder"] = force_reply_placeholder[:64]
+            payload["reply_markup"] = reply_markup
+
+        for attempt in range(2):
+            try:
+                response = requests.post(f"{self._api_base}/sendMessage", json=payload, timeout=20)
+                response.raise_for_status()
+                return
+            except requests.ConnectionError as exc:
+                # A reset during TCP/TLS setup happens before Telegram receives
+                # the request, so one retry is safe. Do not retry ambiguous
+                # read failures, HTTP errors, or other request exceptions.
+                if attempt == 0 and self._exception_chain_contains(exc, ConnectionResetError):
+                    logger.warning("Telegram send connection reset; retrying once.")
+                    self._stop.wait(0.5)
+                    continue
+                logger.exception("Telegram RAG reply failed.")
+                return
+            except requests.RequestException:
+                logger.exception("Telegram RAG reply failed.")
+                return
+
+    @staticmethod
+    def _exception_chain_contains(exc: BaseException, expected: type[BaseException]) -> bool:
+        """Inspect wrapped urllib3/request exceptions without string matching."""
+        pending: list[BaseException] = [exc]
+        seen: set[int] = set()
+        while pending:
+            current = pending.pop()
+            if id(current) in seen:
+                continue
+            seen.add(id(current))
+            if isinstance(current, expected):
+                return True
+            for nested in (current.__cause__, current.__context__, *current.args):
+                if isinstance(nested, BaseException):
+                    pending.append(nested)
+        return False
 
     @staticmethod
     def _ephemeral_reply_kwargs(message: dict[str, Any]) -> dict[str, int]:
