@@ -1,6 +1,17 @@
 # Weekly Journal - Team P-232 (THO)
 
-> Nhật ký phản ánh tiến trình phát triển thực tế từ cuối tháng 7 đến đầu tháng 9/2026. Chi tiết đầu việc và commit được đối chiếu tại [WORKLOG.md](WORKLOG.md).
+> Nhật ký phản ánh tiến trình phát triển thực tế từ cuối tháng 7 đến đầu tháng 9/2026. Phân công thành viên được lấy từ bảng `Tiến độ T232-G11`; mốc hoàn thành được đối chiếu với lịch sử commit và [WORKLOG.md](WORKLOG.md).
+
+## Căn cứ phân công
+
+| Thành viên | Vai trò theo bảng tiến độ | Phạm vi phụ trách chính |
+|---|---|---|
+| Nguyễn Chiến Thắng | Leader, QA | Kiến trúc dữ liệu và Supabase runtime; luồng Rule/Moderation/FAQ/RAG; moderation, FAQ, EXP/trade; deploy, tài liệu và kiểm thử |
+| Nguyễn Thái Tú | DEV | Tái cấu trúc FE/BE; frontend, landing, đăng nhập/đăng ký; backend auth, email thông báo; công cụ Admin và bot command |
+| Hà Nhật Khánh Duy | PM, Data | Định hướng sản phẩm; PostgreSQL/pgvector và schema Supabase; dữ liệu thử nghiệm; kiểm thử tổng thể, scope và test case tấn công |
+| Bùi Hữu Nghĩa | Model | Chatbot đa nền tảng; Rule/RAG; moderation backend và hành động thủ công; auth/role; Telegram moderation và thông báo đa nền tảng |
+
+> Các đầu việc tích hợp có thể có nhiều người cùng tham gia. Journal ghi người phụ trách theo bảng tiến độ và nêu thêm người trực tiếp tích hợp khi có bằng chứng commit.
 
 ---
 
@@ -23,10 +34,10 @@
 
 | Thành viên | Đóng góp |
 |---|---|
-| Nguyễn Chiến Thắng | Chốt phạm vi QA, dựng moderation demo và AI logging |
-| Bùi Hữu Nghĩa | Khảo sát model moderation và schema output |
-| Nguyễn Thái Tú | Phác thảo luồng dashboard Admin/Mod |
-| Hà Nhật Khánh Duy | Xác định entity dữ liệu và risk taxonomy ban đầu |
+| Nguyễn Chiến Thắng (Leader, QA) | Chốt phạm vi QA, dựng moderation demo, thiết lập AI logging và xác định tiêu chí kiểm thử đầu tiên |
+| Nguyễn Thái Tú (DEV) | Phác thảo luồng frontend cho dashboard Admin/Mod và các màn hình cần có |
+| Hà Nhật Khánh Duy (PM, Data) | Định hướng bài toán, xác định entity dữ liệu và risk taxonomy ban đầu |
+| Bùi Hữu Nghĩa (Model) | Khảo sát model moderation, schema output và hướng điều phối chatbot |
 
 ### Khó khăn & Giải pháp
 
@@ -72,10 +83,10 @@
 
 | Thành viên | Đóng góp |
 |---|---|
-| Nguyễn Chiến Thắng | Thử community radar, chuyển chatbot sang Discord và kiểm tra luồng chính |
-| Bùi Hữu Nghĩa | Thử model/platform flow và thiết kế CommonMessage |
-| Nguyễn Thái Tú | Xây ModGuard frontend, tái cấu trúc backend/frontend |
-| Hà Nhật Khánh Duy | Xây review queue, audit log, risk simulator và cập nhật data mapping |
+| Nguyễn Chiến Thắng (Leader, QA) | Đánh giá community radar cũ, chuyển trọng tâm sang Discord, tổ chức lại dữ liệu và kiểm tra luồng chính |
+| Nguyễn Thái Tú (DEV) | Tái cấu trúc `frontend/` và `backend/`, xây ModGuard frontend và landing prototype |
+| Hà Nhật Khánh Duy (PM, Data) | Xây review queue, audit log, risk simulator; cập nhật data mapping và kế hoạch Supabase |
+| Bùi Hữu Nghĩa (Model) | Thử model/platform flow, thiết kế `CommonMessage` và khung chatbot đa nền tảng |
 
 ### Khó khăn & Giải pháp
 
@@ -123,10 +134,10 @@
 
 | Thành viên | Đóng góp |
 |---|---|
-| Nguyễn Chiến Thắng | CI, data contracts, gated AI routing, alert QA, Supabase fallback và demo evidence |
-| Bùi Hữu Nghĩa | Multi-platform workflow, Rule/RAG, manual action và warning DM |
-| Nguyễn Thái Tú | API integration, landing/login, notification và toàn bộ nhóm trang Admin tools |
-| Hà Nhật Khánh Duy | Data plan, PostgreSQL Cloud migration và kiểm tra integrity dữ liệu |
+| Nguyễn Chiến Thắng (Leader, QA) | Chuẩn hóa data contract và pipeline, gated AI routing, alert QA, Supabase runtime/fallback, CI và demo evidence |
+| Nguyễn Thái Tú (DEV) | Tích hợp API, hoàn thiện landing/login, notification và nhóm trang công cụ Admin |
+| Hà Nhật Khánh Duy (PM, Data) | Lập data plan, thiết lập PostgreSQL/pgvector và Supabase Cloud, kiểm tra schema cùng tính toàn vẹn dữ liệu |
+| Bùi Hữu Nghĩa (Model) | Xây multi-platform workflow, Rule/RAG, moderation backend, manual action và warning DM |
 
 ### Khó khăn & Giải pháp
 
@@ -177,10 +188,10 @@
 
 | Thành viên | Đóng góp |
 |---|---|
-| Nguyễn Chiến Thắng | Supabase/data flow docs, harden AI routing, spam classification và integration QA |
-| Bùi Hữu Nghĩa | Google auth/roles, invite restriction, alert retention và chatbot guardrail |
-| Nguyễn Thái Tú | Knowledge UI, DB pooling, frontend cache, lazy routes và sync cursor |
-| Hà Nhật Khánh Duy | Data validation, cập nhật dataset và deterministic scope filter |
+| Nguyễn Chiến Thắng (Leader, QA) | Đồng bộ Supabase/data flow, cải thiện FAQ/RAG routing, spam classification, moderation memory và integration QA |
+| Nguyễn Thái Tú (DEV) | Hoàn thiện Knowledge UI, auth screens, DB pooling, frontend cache, lazy routes và sync cursor |
+| Hà Nhật Khánh Duy (PM, Data) | Kiểm tra schema Supabase, cập nhật dataset, bổ sung prompt/scope và test case ngoài phạm vi |
+| Bùi Hữu Nghĩa (Model) | Xây Google auth/roles, invite restriction, alert retention, member sync và chatbot guardrail |
 
 ### Khó khăn & Giải pháp
 
@@ -232,10 +243,10 @@
 
 | Thành viên | Đóng góp |
 |---|---|
-| Nguyễn Chiến Thắng | Railway/Docker, EXP/trade, bot-message filter, AI hardening, đa ngôn ngữ và persona THO |
-| Bùi Hữu Nghĩa | Telegram moderation, platform parity, workspace setup và member update events |
-| Nguyễn Thái Tú | Auth UX, pool/guild fixes, pagination, accessibility, landing page và Command Center |
-| Hà Nhật Khánh Duy | Review schema EXP/trade, test data đa ngôn ngữ và kiểm tra scope v1 |
+| Nguyễn Chiến Thắng (Leader, QA) | Deploy Railway/Docker, chuyển reputation sang EXP và verified trade, lọc bot message, AI hardening, đa ngôn ngữ và persona THO |
+| Nguyễn Thái Tú (DEV) | Hoàn thiện auth UX, pool/guild fixes, pagination, accessibility, landing page, Command Center và công cụ quản trị |
+| Hà Nhật Khánh Duy (PM, Data) | Rà soát schema EXP/trade, bổ sung dữ liệu test đa ngôn ngữ, kiểm tra scope và các tình huống tấn công chatbot |
+| Bùi Hữu Nghĩa (Model) | Hoàn thiện Telegram moderation/action, platform parity, workspace setup và member update events |
 
 ### Khó khăn & Giải pháp
 
@@ -253,6 +264,7 @@
 - Seller summary chỉ tóm tắt giao dịch đã xác nhận; AI không được chứng nhận “an toàn” hoặc kết luận “lừa đảo”.
 - Production đóng gói React SPA và FastAPI trong một Docker image.
 - Persona cute chỉ áp dụng hội thoại thường; moderation, từ chối và cảnh báo phải rõ ràng, tôn trọng.
+- Hạng mục “điểm uy tín” trong bảng tiến độ được điều chỉnh thành EXP cho hoạt động cộng đồng; độ tin cậy người bán dùng verified trade và review có nguồn gốc riêng.
 
 ### Bài học
 
@@ -289,10 +301,10 @@
 
 | Thành viên | Đóng góp |
 |---|---|
-| Nguyễn Chiến Thắng | Audit code, hardening, CI, architecture, test và release QA |
-| Bùi Hữu Nghĩa | Smoke test Discord/Telegram listener, command và alert |
-| Nguyễn Thái Tú | Review route/role gate, frontend production build và UI consistency |
-| Hà Nhật Khánh Duy | Đối chiếu Supabase tables, import pipeline và data flow documentation |
+| Nguyễn Chiến Thắng (Leader, QA) | Audit code, hardening, CI, cập nhật architecture/README, chạy regression test và chốt release QA |
+| Nguyễn Thái Tú (DEV) | Review route/role gate, frontend production build, auth flow và UI consistency |
+| Hà Nhật Khánh Duy (PM, Data) | Đối chiếu Supabase tables, import pipeline, data flow và giới hạn multi-community |
+| Bùi Hữu Nghĩa (Model) | Smoke test Discord/Telegram listener, chatbot command, moderation action và alert đa nền tảng |
 
 ### Khó khăn & Giải pháp
 
