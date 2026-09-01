@@ -1,24 +1,56 @@
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from backend.models.auth import AuthResponse, GoogleLoginRequest, InviteAcceptRequest, InvitePreview, LoginRequest, ModInvitePublic, ModInviteRequest, RegisterRequest, SelfProfileUpdateRequest, UserCreateRequest, UserPublic, UserRoleUpdateRequest, UserStatusUpdateRequest
-from backend.services.auth_service import current_user, get_auth_store, issue_token, require_roles, verify_google
+from backend.models.auth import (
+    AuthResponse,
+    GoogleLoginRequest,
+    InviteAcceptRequest,
+    InvitePreview,
+    LoginRequest,
+    ModInvitePublic,
+    ModInviteRequest,
+    RegisterRequest,
+    SelfProfileUpdateRequest,
+    UserCreateRequest,
+    UserPublic,
+    UserRoleUpdateRequest,
+    UserStatusUpdateRequest,
+)
+from backend.services.auth_service import (
+    current_user,
+    get_auth_store,
+    issue_token,
+    require_roles,
+    verify_google,
+)
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 
-def _response(user: UserPublic) -> AuthResponse: return AuthResponse(access_token=issue_token(user), user=user)
+
+def _response(user: UserPublic) -> AuthResponse:
+    return AuthResponse(access_token=issue_token(user), user=user)
+
 
 @router.get("/google/config")
 def google_config() -> dict[str, str | bool]:
     """A Google OAuth client ID is public; expose it so Vite needn't embed env values."""
     from backend.config import get_settings
+
     client_id = get_settings().google_oauth_client_id.strip()
     return {"enabled": bool(client_id), "client_id": client_id}
+
 
 @router.post("/login", response_model=AuthResponse)
 def login(payload: LoginRequest) -> AuthResponse:
     user = get_auth_store().login_password(str(payload.email), payload.password)
-    if not user: raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Email hoặc mật khẩu không đúng.")
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Email hoặc mật khẩu không đúng.",
+        )
     return _response(user)
+
 
 @router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
 def register(payload: RegisterRequest) -> AuthResponse:
@@ -28,6 +60,7 @@ def register(payload: RegisterRequest) -> AuthResponse:
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return _response(user)
+
 
 @router.post("/google", response_model=AuthResponse)
 def google_login(payload: GoogleLoginRequest) -> AuthResponse:
@@ -44,8 +77,11 @@ def google_login(payload: GoogleLoginRequest) -> AuthResponse:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tài khoản Google này chưa được Admin cấp quyền hoặc đã bị vô hiệu hoá.")
     return _response(user)
 
+
 @router.get("/me", response_model=UserPublic)
-def me(user: UserPublic = Depends(current_user)) -> UserPublic: return user
+def me(user: UserPublic = Depends(current_user)) -> UserPublic:
+    return user
+
 
 @router.patch("/me", response_model=UserPublic)
 def update_me(payload: SelfProfileUpdateRequest, user: UserPublic = Depends(current_user)) -> UserPublic:
@@ -54,17 +90,30 @@ def update_me(payload: SelfProfileUpdateRequest, user: UserPublic = Depends(curr
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
+
 @router.get("/users", response_model=list[UserPublic])
-def users(_: UserPublic = Depends(require_roles("admin"))) -> list[UserPublic]: return get_auth_store().list_users()
+def users(_: UserPublic = Depends(require_roles("admin"))) -> list[UserPublic]:
+    return get_auth_store().list_users()
+
 
 @router.post("/users", response_model=UserPublic, status_code=status.HTTP_201_CREATED)
 def create_user(payload: UserCreateRequest, admin: UserPublic = Depends(require_roles("admin"))) -> UserPublic:
-    try: return get_auth_store().create_user(email=str(payload.email), display_name=payload.display_name, role=payload.role, password=payload.password, created_by=admin.user_id)
-    except ValueError as exc: raise HTTPException(status_code=409, detail=str(exc)) from exc
+    try:
+        return get_auth_store().create_user(
+            email=str(payload.email),
+            display_name=payload.display_name,
+            role=payload.role,
+            password=payload.password,
+            created_by=admin.user_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
 
 @router.get("/mod-invites", response_model=list[ModInvitePublic])
 def mod_invites(_: UserPublic = Depends(require_roles("admin"))) -> list[ModInvitePublic]:
     return get_auth_store().list_mod_invites()
+
 
 @router.post("/mod-invites", response_model=ModInvitePublic, status_code=status.HTTP_201_CREATED)
 def invite_mod(payload: ModInviteRequest, admin: UserPublic = Depends(require_roles("admin"))) -> ModInvitePublic:
@@ -73,10 +122,12 @@ def invite_mod(payload: ModInviteRequest, admin: UserPublic = Depends(require_ro
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
+
 @router.delete("/mod-invites/{email}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_mod_invite(email: str, _: UserPublic = Depends(require_roles("admin"))) -> None:
     if not get_auth_store().delete_mod_invite(email):
         raise HTTPException(status_code=404, detail="Không tìm thấy lời mời đang chờ.")
+
 
 @router.get("/invites/{token}", response_model=InvitePreview)
 def preview_invite(token: str) -> InvitePreview:
@@ -85,6 +136,7 @@ def preview_invite(token: str) -> InvitePreview:
     if not invite:
         raise HTTPException(status_code=404, detail="Link mời không hợp lệ hoặc đã được sử dụng.")
     return InvitePreview(email=invite.email)
+
 
 @router.post("/invites/{token}/accept", response_model=AuthResponse)
 def accept_invite(token: str, payload: InviteAcceptRequest) -> AuthResponse:
@@ -96,29 +148,36 @@ def accept_invite(token: str, payload: InviteAcceptRequest) -> AuthResponse:
         raise HTTPException(status_code=404, detail="Link mời không hợp lệ hoặc đã được sử dụng.")
     return _response(user)
 
+
 @router.post("/invites/{token}/decline", status_code=status.HTTP_204_NO_CONTENT)
 def decline_invite(token: str) -> None:
     """Public: the invited person opts out from the invite-link page."""
     if not get_auth_store().decline_mod_invite(token):
         raise HTTPException(status_code=404, detail="Link mời không hợp lệ hoặc đã được sử dụng.")
 
+
 @router.patch("/users/{user_id}/role", response_model=UserPublic)
 def update_role(user_id: str, payload: UserRoleUpdateRequest, _: UserPublic = Depends(require_roles("admin"))) -> UserPublic:
-    from uuid import UUID
-    try: return get_auth_store().update_role(UUID(user_id), payload.role)
-    except KeyError as exc: raise HTTPException(status_code=404, detail="Không tìm thấy tài khoản.") from exc
-    except ValueError as exc: raise HTTPException(status_code=409, detail=str(exc)) from exc
+    try:
+        return get_auth_store().update_role(UUID(user_id), payload.role)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Không tìm thấy tài khoản.") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
 
 @router.patch("/users/{user_id}/status", response_model=UserPublic)
 def update_status(user_id: str, payload: UserStatusUpdateRequest, _: UserPublic = Depends(require_roles("admin"))) -> UserPublic:
-    from uuid import UUID
-    try: return get_auth_store().update_status(UUID(user_id), payload.is_active)
-    except KeyError as exc: raise HTTPException(status_code=404, detail="Không tìm thấy tài khoản.") from exc
-    except ValueError as exc: raise HTTPException(status_code=409, detail=str(exc)) from exc
+    try:
+        return get_auth_store().update_status(UUID(user_id), payload.is_active)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Không tìm thấy tài khoản.") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
 
 @router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_user(user_id: str, admin: UserPublic = Depends(require_roles("admin"))) -> None:
-    from uuid import UUID
     try:
         target = UUID(user_id)
         if target == admin.user_id:

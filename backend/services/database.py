@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import re
 import threading
+from collections.abc import Generator, Iterable, Sequence
 from contextlib import contextmanager
-from typing import Any, Generator, Iterable, Sequence
+from typing import Any
 
 import psycopg2
 import psycopg2.extras
@@ -88,7 +89,7 @@ class PostgresConnection:
         if readonly:
             self._connection.autocommit = True
 
-    def __enter__(self) -> "PostgresConnection":
+    def __enter__(self) -> PostgresConnection:
         return self
 
     def __exit__(self, exc_type, exc, traceback) -> None:

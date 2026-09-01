@@ -301,15 +301,20 @@ class AuthStore:
 
 
 _store: AuthStore | None = None
+
+
 def get_auth_store() -> AuthStore:
     global _store
-    if _store is None: _store = AuthStore()
+    if _store is None:
+        _store = AuthStore()
     return _store
 
 
 def _secret(settings: Settings) -> bytes:
-    if settings.auth_jwt_secret: return settings.auth_jwt_secret.encode()
-    if settings.app_env == "production": raise RuntimeError("AUTH_JWT_SECRET is required in production.")
+    if settings.auth_jwt_secret:
+        return settings.auth_jwt_secret.encode()
+    if settings.app_env == "production":
+        raise RuntimeError("AUTH_JWT_SECRET is required in production.")
     return b"development-only-change-auth-jwt-secret"
 
 
@@ -333,9 +338,11 @@ def current_user(credentials: HTTPAuthorizationCredentials | None = Depends(bear
         head, body, signature = credentials.credentials.split(".")
         expected = _b64(hmac.new(_secret(get_settings()), f"{head}.{body}".encode(), hashlib.sha256).digest())
         payload = json.loads(_unb64(body))
-        if not hmac.compare_digest(expected, signature) or payload["exp"] < datetime.now(UTC).timestamp(): raise ValueError
+        if not hmac.compare_digest(expected, signature) or payload["exp"] < datetime.now(UTC).timestamp():
+            raise ValueError
         user = get_auth_store().get_user(UUID(payload["sub"]))
-        if not user or not user.is_active: raise ValueError
+        if not user or not user.is_active:
+            raise ValueError
         return user
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Phiên đăng nhập không hợp lệ hoặc đã hết hạn.", headers={"WWW-Authenticate": "Bearer"}) from exc

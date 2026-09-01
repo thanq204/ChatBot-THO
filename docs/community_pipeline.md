@@ -6,8 +6,10 @@ Runtime sử dụng Supabase PostgreSQL + pgvector làm source of truth. `data/`
 
 ```mermaid
 flowchart TD
-    A[Discord/Telegram message] --> B[Normalize + lưu operations_messages]
-    B --> C[Gate 1: fast filter theo policy]
+    A[Discord/Telegram message] --> H{Human message?}
+    H -->|Bot/webhook/application/system| X[Bỏ khỏi moderation, analytics và EXP]
+    H -->|Có| B[Normalize + lưu operations_messages]
+    B --> C[Gate 1: spam/link/threat/abuse fast filter]
     C --> D[Gate 2: context review, tối đa 12 tin/10 phút]
     D --> E[Gate 3: reviewed-case embedding + LLM verify tùy cấu hình]
     E --> F{Có cần cảnh báo?}
@@ -26,21 +28,23 @@ Gate chỉ giúp giảm cảnh báo sai và cảnh báo trùng. AI không tự x
 
 ```mermaid
 flowchart TD
-    A[Tag CHAT-10/private message] --> B[Rule command?]
+    A[Tag THO/private message] --> B[Rule command?]
     B -->|Có| C[Trả command deterministic]
     B -->|Không| D[Moderation]
     D -->|Không cho trả lời| E[Cảnh báo thành viên, ghi nhận review]
-    D -->|An toàn| F[Ghi operations_faq_questions]
-    F --> G[FAQ semantic match]
+    D -->|An toàn| Q{Câu hỏi đủ điều kiện FAQ?}
+    Q -->|Không| O[Scope filter rồi LLM hội thoại]
+    Q -->|Có| G[FAQ semantic match]
     G -->|Đã duyệt| H[Trả operations_faqs, không gọi LLM/RAG]
-    G -->|Chưa có| O{Câu hội thoại chung?}
-    O -->|Có| P[LLM thật, nhãn LLM]
-    O -->|Không| I[Knowledge retrieval]
+    G -->|Chưa có| V{Câu hội thoại chung?}
+    V -->|Có| P[LLM tiếng Việt, nhãn LLM]
+    V -->|Không| I[Knowledge retrieval]
     I --> J[Reranking]
     J --> K[Relevance gate]
     K -->|Đạt| L[Trả canonical source + citation, nhãn RAG]
-    K -->|Không đạt| M[Ghi unanswered, không bịa câu trả lời]
-    F -. gom topic .-> N[faq_topic_clusters -> Top 10 cho Admin]
+    K -->|Không đạt và cần nguồn| M[Ghi unanswered, không bịa câu trả lời]
+    K -->|Không đạt và không cần nguồn| P
+    M -. gom topic .-> N[faq_topic_clusters -> Top 10 cho Admin]
     N -->|Admin nhập đáp án| H
 ```
 

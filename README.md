@@ -1,184 +1,153 @@
-# CHAT-10 - Community Health & Conflict Mediation Copilot
+# THO - Triage, Help, Oversight
 
-CHAT-10 hỗ trợ Admin/Moderator quản lý cộng đồng học tập trên Discord và Telegram. Hệ thống kết hợp moderation theo ngữ cảnh, FAQ do Admin duyệt, RAG có reranking/relevance gate và LLM thật cho hội thoại chung.
+![THO logo](frontend/public/tho-logo.jpg)
 
-## Vấn đề
+THO là trợ lý AI hỗ trợ Admin/Moderator quản lý cộng đồng học tập trên Discord và Telegram. Hệ thống theo dõi tin nhắn người thật, phát hiện rủi ro theo ngữ cảnh, trả lời FAQ/RAG có kiểm soát và giữ quyền quyết định cuối cùng cho con người.
 
-- Admin/Mod phải theo dõi nhiều tin nhắn, đọc lại ngữ cảnh xung đột và xử lý cảnh báo trùng lặp.
-- Thành viên thường hỏi lại cùng một câu; gửi mọi câu hỏi tới LLM gây tốn chi phí và dễ trả lời không có nguồn.
-- Bộ lọc từ khóa đơn giản không đủ phân biệt phản biện, nói đùa, công kích và đe dọa thật.
+## Bài toán
+
+- Admin/Mod phải theo dõi nhiều tin nhắn và dễ bỏ sót xung đột, spam hoặc lừa đảo.
+- Bộ lọc từ khóa đơn giản khó phân biệt nói đùa, tranh luận, công kích và đe dọa thật.
+- Câu hỏi lặp lại làm tốn thời gian; gửi mọi câu hỏi tới LLM vừa tốn chi phí vừa có nguy cơ trả lời không có nguồn.
+- Đánh giá người bán liên quan tiền bạc nên không thể dựa vào điểm hoạt động hoặc phán quyết tự động của AI.
 
 ## Giải pháp
 
-- Phân tích moderation theo ba tầng: lọc nhanh, phân loại policy và đánh giá ngữ cảnh.
-- Gom tin nhắn rủi ro thành incident để Admin/Mod review, hành động và lưu audit trail.
-- Phân luồng chatbot theo thứ tự `Rule -> Moderation -> FAQ -> LLM hoặc RAG`.
-- FAQ trả câu trả lời đã được Admin duyệt mà không gọi LLM.
-- Câu hội thoại chung như tên bot, khả năng, ngày/giờ dùng LLM thật và hiển thị nhãn `[LLM]`.
-- Câu kiến thức dùng retrieval, reranking và relevance gate; chỉ trả nguồn đạt ngưỡng với nhãn `[RAG]` và citation.
-- Câu chưa đủ nguồn được ghi nhận để Admin cân nhắc bổ sung FAQ hoặc tài liệu.
-- EXP chỉ ghi nhận đóng góp tích cực; moderation và tranh chấp không làm EXP âm.
-- Đánh giá người bán chỉ nhận từ giao dịch Discord được buyer và seller cùng xác nhận; AI tóm tắt dữ kiện, Admin/Mod quyết định case nhạy cảm.
+- Phân luồng chatbot theo `Rule -> Moderation -> FAQ -> RAG/LLM`.
+- Moderation realtime qua ba gate: fast filter, context review và human-reviewed case retrieval.
+- Loại tin nhắn bot, webhook, application và system khỏi moderation, analytics và EXP.
+- Gom message rủi ro thành incident, gửi dashboard/Telegram và chờ Admin/Mod xử lý.
+- FAQ chỉ trả nội dung đã được Admin duyệt.
+- RAG dùng retrieval, reranking và relevance gate; nguồn yếu thì không trả bừa.
+- LLM hỗ trợ input đa ngôn ngữ, còn phần giải thích hiển thị được chuẩn hóa về tiếng Việt.
+- EXP chỉ phản ánh đóng góp tích cực của thành viên thật.
+- Giao dịch cần buyer và seller cùng xác nhận; review và AI summary chỉ là bằng chứng hỗ trợ Admin/Mod.
 
-## Người dùng
+THO không tự kết tội thành viên, chứng nhận người bán an toàn hoặc đưa tư vấn pháp lý/tài chính. Xóa tin nhắn, timeout, kick và ban chỉ được thực hiện sau khi người quản trị xác nhận.
 
-- Chính: Admin và Moderator của cộng đồng học tập.
-- Phụ: thành viên hỏi đáp, xem nội quy, gửi báo cáo hoặc tra cứu tài liệu đã duyệt.
-
-## Tính năng MVP
+## Tính năng hiện có
 
 | Nhóm | Tính năng |
 |---|---|
-| Chatbot | Lệnh `/help`, `/rule`, `/event`, `/daily`, `/weekly`, `/faq`, `/report`, `/admin`, `/resources` |
-| Hỏi đáp | FAQ match, LLM hội thoại chung, RAG có citation, ghi nhận câu chưa có đáp án |
-| Moderation | Ba gate, incident grouping, review queue, audit log, manual action |
-| Cộng đồng | Bảng EXP cho thành viên thật; giới hạn chống cày và không trộn với vi phạm |
-| Giao dịch | `/trade_open`, `/trade_confirm`, `/trade_review`, `/seller_check`; hồ sơ người bán có cỡ mẫu và hàng đợi Admin/Mod |
-| Nền tảng | Discord listener, Telegram listener/alert, FastAPI, React/Vite admin dashboard |
-| Dữ liệu | Supabase PostgreSQL + pgvector; `data/` chỉ giữ contract/example, import JSON/JSONL/CSV/TSV/XLSX/YAML/HTML/MD/TXT/DOCX/PDF, embedding OpenAI tùy chọn |
+| Chatbot | Lệnh deterministic, FAQ đã duyệt, LLM hội thoại, RAG có citation và ghi nhận câu chưa có đáp án |
+| Moderation | Lọc bot/webhook, ba gate realtime, phân tích đa ngôn ngữ, incident, review queue, manual action và audit trail |
+| Dashboard | Tổng quan, cộng đồng, AI Sandbox, nhật ký, FAQ/knowledge, Mod, thông báo, lệnh bot, EXP và hồ sơ người bán |
+| EXP | Reaction từ người thật, chống tự reaction/event trùng, chỉ cộng đóng góp dương |
+| Giao dịch | `/trade_open`, `/trade_confirm`, `/trade_review`, `/seller_check` trên Discord và Telegram |
+| Import knowledge | JSON, JSONL, CSV, TSV, XLSX, YAML, HTML, Markdown, TXT, DOCX và PDF |
+| Xác thực | Password, Google OAuth, JWT, role Admin/Mod, invite Mod và token revocation |
+| Tích hợp | Discord listener, Telegram listener/alert, SMTP invite, OpenAI, Gemini tùy cấu hình và Supabase |
 
 ## Kiến trúc
 
-Sơ đồ và mô tả chi tiết nằm tại [docs/architecture_diagram.md](docs/architecture_diagram.md).
-
-```text
-Discord/Telegram/Web
-        |
-        v
-FastAPI + platform listeners
-        |
-        +--> Moderation gates --> Incident/Review/Audit --> Admin dashboard
-        |
-        +--> Rule --> FAQ --> General LLM
-                         \--> Retrieval --> Reranker --> Relevance --> RAG + citation
-        |
-        v
-Supabase PostgreSQL + pgvector
-  (messages, moderation, FAQ, knowledge, embeddings, EXP, trades, seller reviews, audit)
+```mermaid
+flowchart LR
+    Member["Thành viên"] --> Discord["Discord"]
+    Member --> Telegram["Telegram"]
+    Staff["Admin / Mod"] --> Web["React 18 + Vite"]
+    Discord --> Runtime["FastAPI + platform listeners"]
+    Telegram --> Runtime
+    Web --> Runtime
+    Runtime --> Chat["Rule -> Moderation -> FAQ -> RAG/LLM"]
+    Runtime --> Ops["Incident / Review / Audit"]
+    Chat --> AI["OpenAI / Gemini + src/ai_models"]
+    Ops --> DB[("Supabase PostgreSQL + pgvector")]
+    Chat --> DB
 ```
 
-## Tech Stack
+Production dùng một Docker image chứa React SPA và FastAPI. Uvicorn nhận `PORT` từ Railway; toàn bộ dữ liệu runtime nằm trên Supabase, không nằm trong filesystem của container.
+
+Tài liệu chi tiết:
+
+- [Kiến trúc chính thức](ARCHITECTURE.md)
+- [Sơ đồ và từng luồng runtime](docs/architecture_diagram.md)
+- [Luồng dữ liệu Supabase](docs/SUPABASE_DATA_FLOW.md)
+- [Moderation và chatbot pipeline](docs/community_pipeline.md)
+
+## Tech stack
 
 | Layer | Công nghệ |
 |---|---|
-| Model | OpenAI `gpt-4o-mini`, `text-embedding-3-small`; Gemini có thể cấu hình |
-| Agent | LangGraph, LangChain |
-| Backend | Python 3.11+, FastAPI, Uvicorn, Pydantic |
-| Frontend | React 18, Vite |
-| Database | Supabase PostgreSQL + pgvector |
-| Platform | Discord.py, Telegram Bot API |
-| DevOps | Docker, Docker Compose, GitHub Actions |
-| Test | pytest, Ruff |
+| AI | OpenAI `gpt-4o-mini`, `text-embedding-3-small`; Gemini tùy cấu hình |
+| Agent/model pipeline | LangGraph, LangChain, structured outputs, reranking và relevance gate |
+| Backend | Python 3.11, FastAPI, Uvicorn, Pydantic |
+| Frontend | React 18, Vite 6, React Router 7, TanStack Query 5, Motion |
+| Database | Supabase PostgreSQL, pgvector, psycopg2 connection pool |
+| Platform | discord.py, Telegram Bot API, SMTP |
+| Delivery | GitHub Actions, Docker multi-stage, Railway |
+| Quality | Ruff, pytest, frontend production build |
 
-## Cài đặt
+## Cài đặt local
 
-### 1. Clone và tạo môi trường
+### 1. Backend
 
 ```powershell
 git clone https://github.com/AI20K-Build-Phase-Cohort-3/P-232.git
-cd P-232
+Set-Location P-232
 py -3.11 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
-```
-
-### 2. Cấu hình biến môi trường
-
-```powershell
 Copy-Item .env.example .env
 ```
 
-Biến tối thiểu để chạy backend và LLM:
+Các biến tối thiểu:
 
 ```dotenv
+APP_ENV=development
 OPENAI_API_KEY=your-openai-key
 FAQ_PG_DSN=postgresql://postgres:[PASSWORD]@db.[PROJECT-REF].supabase.co:5432/postgres
+AUTH_JWT_SECRET=replace-with-a-long-random-secret
 MODERATION_MODE=openai
 MODERATION_PROVIDER=openai
 DISCORD_RAG_LLM_ENABLED=true
 DISCORD_RAG_MODEL=gpt-4o-mini
-# Chỉ dùng khi chạy test cô lập, không dùng làm runtime production.
-DATABASE_URL=sqlite:///./data/community_channel.db
 ```
 
-Khi `FAQ_PG_DSN` được cấu hình, Supabase là source of truth của runtime. `DATABASE_URL` chỉ còn phục vụ unit test SQLite được chỉ định rõ; ứng dụng không tự chuyển sang SQLite khi Supabase lỗi.
+Khi `FAQ_PG_DSN` được cấu hình, Supabase là source of truth. Ứng dụng không tự chuyển sang SQLite khi Supabase lỗi; `DATABASE_URL=sqlite://...` chỉ dành cho test cô lập.
 
-Để bật Discord:
-
-```dotenv
-DISCORD_BOT_TOKEN=your-discord-token
-DISCORD_LISTENER_ENABLED=true
-DISCORD_TRADE_CHANNEL_ID=your-dedicated-trade-channel-id
-```
-
-Luồng giao dịch chỉ mở trong `DISCORD_TRADE_CHANNEL_ID`. Hai bên xác nhận cùng một `trade_id`; sau đó chỉ buyer mới được gửi một review. Mặc định cần ít nhất `3` giao dịch xác thực và `3` buyer khác nhau để hồ sơ chuyển từ “Chưa đủ dữ liệu” sang “Có lịch sử giao dịch”. Đây không phải chứng nhận người bán an toàn.
-
-Để bật Telegram:
-
-```dotenv
-TELEGRAM_BOT_TOKEN=your-telegram-token
-TELEGRAM_LISTENER_ENABLED=true
-TELEGRAM_TRADE_CHAT_ID=your-dedicated-trade-chat-id
-```
-
-Trong nhóm `TELEGRAM_TRADE_CHAT_ID`, Telegram hỗ trợ cùng luồng xác thực như Discord:
-`/trade_open`, `/trade_confirm`, `/trade_review` và `/seller_check`. Với seller, có thể reply
-tin nhắn của họ hoặc nhập `@username`; seller cần từng gửi ít nhất một tin nhắn để bot ánh xạ
-username sang Telegram user ID.
-`/report` và các lệnh trade được đăng ký là Telegram ephemeral commands. Trong group, command,
-ô nhập tiếp theo, lỗi validation và kết quả chỉ người thao tác với bot nhìn thấy; dùng `/cancel`
-để hủy thao tác đang chờ.
-
-Không commit `.env`. Danh sách đầy đủ và giá trị mặc định nằm trong [.env.example](.env.example).
-
-### 3. Chạy ứng dụng
-
-Backend và bot listener:
+Chạy backend:
 
 ```powershell
 python -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-Swagger UI: `http://127.0.0.1:8000/docs`
+Development mở Swagger tại `http://127.0.0.1:8000/docs`; production tắt Swagger/OpenAPI public.
 
-Frontend development, trong terminal khác:
+### 2. Frontend
 
 ```powershell
 Set-Location frontend
-npm install
+npm ci
 npm run dev
 ```
 
-Chạy bằng Docker:
+Vite chạy riêng trong development và gọi API qua `/api`. Production build được FastAPI phục vụ trực tiếp.
+
+### 3. Discord và Telegram
+
+```dotenv
+DISCORD_BOT_TOKEN=your-discord-token
+DISCORD_LISTENER_ENABLED=true
+DISCORD_TRADE_CHANNEL_ID=your-dedicated-trade-channel-id
+
+TELEGRAM_BOT_TOKEN=your-telegram-token
+TELEGRAM_LISTENER_ENABLED=true
+TELEGRAM_DEFAULT_CHAT_ID=your-community-chat-id
+TELEGRAM_TRADE_CHAT_ID=your-dedicated-trade-chat-id
+TELEGRAM_ADMIN_CHAT_ID=your-private-admin-chat-id
+TELEGRAM_ALERTS_ENABLED=true
+```
+
+Trade command chỉ mở trong channel/chat được cấu hình. Không đưa bot token, API key, database password hoặc SMTP App Password vào Git.
+
+Danh sách đầy đủ nằm trong [.env.example](.env.example).
+
+## Chạy bằng Docker
 
 ```powershell
-docker compose up --build
+docker build -t tho .
+docker run --env-file .env -p 8000:8000 tho
 ```
-
-## Sample Queries
-
-### Discord/Telegram
-
-```text
-@CHAT-10 /help
-@CHAT-10 bạn tên là gì
-@CHAT-10 hôm nay ngày bao nhiêu
-@CHAT-10 tôi đang tham gia một dự án, muốn học bằng dự án thì phương pháp này như nào?
-@CHAT-10 làm sao để báo cáo spam?
-/trade_open @seller Bàn phím cơ cũ
-/trade_confirm TRD-XXXXXXXXXXXX
-/trade_review TRD-XXXXXXXXXXXX
-/seller_check @seller
-```
-
-Kỳ vọng:
-
-- Lệnh trả từ nhánh `Rule`.
-- Câu hỏi đã có FAQ trả từ `admin-faq`.
-- Tên bot và ngày/giờ trả với nhãn `[LLM]`.
-- Câu hỏi kiến thức đủ liên quan trả `[RAG]` và dòng `Trích từ tài liệu:`.
-
-### API
 
 Health check:
 
@@ -186,74 +155,63 @@ Health check:
 Invoke-RestMethod http://127.0.0.1:8000/health
 ```
 
-Phân tích moderation:
+## Ví dụ demo
 
-```powershell
-$body = @{
-  message = @{
-    message_id = "sample-001"
-    platform = "web"
-    author_id = "member-01"
-    text = "Mình không đồng ý, bạn cho mình xin nguồn nhé"
-    timestamp = (Get-Date).ToUniversalTime().ToString("o")
-  }
-  context = @()
-} | ConvertTo-Json -Depth 5
+```text
+@THO /help
+@THO hôm nay ngày bao nhiêu?
+@THO học bằng dự án là gì?
+@THO làm sao để báo cáo spam?
 
-Invoke-RestMethod `
-  -Method Post `
-  -Uri http://127.0.0.1:8000/api/v1/messages/analyze `
-  -ContentType "application/json" `
-  -Body $body
+/trade_open @seller Bàn phím cơ cũ
+/trade_confirm TRD-XXXXXXXXXXXX
+/trade_review TRD-XXXXXXXXXXXX
+/seller_check @seller
 ```
 
-RAG API:
+Kết quả kỳ vọng:
 
-```powershell
-$body = @{ question = "Học bằng dự án là gì?" } | ConvertTo-Json
-Invoke-RestMethod `
-  -Method Post `
-  -Uri http://127.0.0.1:8000/api/v1/rag/ask `
-  -ContentType "application/json" `
-  -Body $body
-```
+- Lệnh trả từ nhánh `Rule`.
+- Câu đã có FAQ trả từ `admin-faq` và không gọi LLM.
+- Hội thoại chung trả nhãn `[LLM]` hoặc `[Hệ thống]` khi provider lỗi.
+- Câu kiến thức đủ liên quan trả `[RAG]` và citation; nguồn yếu trả `Không đủ nguồn`.
+- Message rủi ro tạo incident chờ người quản trị, không tự động tác động thành viên.
 
 ## Kiểm thử
 
 ```powershell
-python -m pytest -q
 python -m ruff check backend src tests eval
+python -m pytest tests -q
+npm ci --prefix frontend
+npm run build --prefix frontend
+docker build -t tho-ci .
 ```
 
-Bằng chứng Discord manual sẽ được bổ sung tại [eval/results/report.md](eval/results/report.md) sau khi có đủ 5 ảnh test thực tế.
+GitHub Actions chạy các bước backend, frontend và Docker trên push hoặc pull request vào `main`, `Develop` và `QA`.
 
-## Cấu trúc dự án
+## Cấu trúc repo
 
 ```text
-backend/                 FastAPI, LangGraph, services và platform bots
-frontend/                React/Vite admin dashboard
-src/ai_models/           Routing, FAQ, reranking, relevance, citation và memory
-data/                    Data contracts, examples và hướng dẫn chuẩn hóa (không phải runtime DB)
-tests/                   Unit/integration tests
-eval/                    Báo cáo và ảnh evaluation thực tế
-docs/                    Architecture và technical guide
-presentation/            Kịch bản/video/pitch artifacts
+backend/                 FastAPI, auth, services, moderation và platform bots
+frontend/                React/Vite dashboard
+src/ai_models/           Reranking, relevance, citation và moderation memory
+supabase/migrations/     Runtime PostgreSQL/pgvector schema
+data/                    Contract và ví dụ chuẩn hóa, không phải production DB
+tests/                   Unit và integration tests
+eval/                    Evaluation cases và báo cáo
+docs/                    Architecture, pipeline và data flow
+presentation/            Kịch bản demo/pitch
 scripts/                 AI logging hooks và Phoenix submission
 ```
 
-## Trạng thái Gate 2
+## Giới hạn hiện tại
 
-> Người chấm có thể xem nhanh từng deliverable, vị trí code, test và chỗ gắn video tại [GATE2_SUBMISSION.md](GATE2_SUBMISSION.md).
+- Hệ thống đang triển khai cho một community. Schema có `community_id`, nhưng connector, cấu hình và quyền dữ liệu chưa cô lập multi-tenant end-to-end.
+- Đăng ký dashboard chỉ tạo một Admin trong community hiện tại, chưa tự tạo tenant, community hoặc bot configuration mới.
+- Rate limiter nằm trong bộ nhớ và phù hợp một replica; cần distributed store trước khi scale ngang.
+- Kết quả người bán là dữ kiện hỗ trợ, không phải chứng nhận an toàn hay thay thế kiểm tra của Admin/Mod.
 
-| Deliverable | Trạng thái | Bằng chứng |
-|---|---|---|
-| MVP demo video 3 phút, end-to-end với LLM thật | Đạt | [Video MVP trên YouTube](https://youtu.be/1EdQj81X47M) |
-| Architecture diagram | Đạt | `docs/architecture_diagram.md` |
-| Repo có ít nhất 10 PR merged | Đạt | 12 PR merge riêng biệt trong lịch sử Git |
-| README có setup, env vars, sample queries | Đạt | README này |
-| Ít nhất 5 manual eval với output thật | Đạt | 5/5 case Discord trong `eval/results/report.md` |
-
-**Tổng hiện tại: 5/5 deliverable Gate 2.**
+BTC vui lòng dùng tài khoản test được gợi ý trực tiếp trên trang đăng nhập/landing page; tính năng đăng ký và provision cộng đồng mới chưa hoàn thiện.
 
 ## Thành viên
 
@@ -264,219 +222,14 @@ scripts/                 AI logging hooks và Phoenix submission
 | Nguyễn Thái Tú | Web Developer | 2A202601504 |
 | Hà Nhật Khánh Duy | Data Analyst | 2A202602031 |
 
-## Tài liệu liên quan
+## Tài liệu nộp bài
 
-- [Bản đồ nộp bài Gate 2](GATE2_SUBMISSION.md)
-- [Architecture](docs/architecture_diagram.md)
+- [Bản đồ deliverables](GATE2_SUBMISSION.md)
 - [Model pipeline](src/ai_models/README.md)
-- [Supabase data flow](docs/SUPABASE_DATA_FLOW.md)
 - [Data rules](data/RULES.md)
 - [Evaluation report](eval/results/report.md)
-- [Video MVP Gate 2](https://youtu.be/1EdQj81X47M)
+- [Video MVP](https://youtu.be/1EdQj81X47M)
 
 ## License
 
 MIT
-
-<!-- Nội dung starter template cũ được giữ tạm bên dưới để không làm mất lịch sử khi file bị Windows khóa thao tác replace.
-
-Template chính thức cho học viên **VinUni AI20K Build Phase** — cung cấp sẵn cấu trúc dự án, code mẫu, và hướng dẫn kỹ thuật chi tiết để xây dựng AI Agent đạt điểm cao (35+/50).
-
-> 📖 **Technical Guidebook:** [phoenix.note.transformerlabs.ai/technical-book](https://phoenix.note.transformerlabs.ai/technical-book)
-
-## 🎯 Template này dùng để làm gì?
-
-Khi tham gia AI20K Build Phase, mỗi đội cần xây dựng một AI Agent hoàn chỉnh — từ kiến trúc, code, test, đến deploy. Thay vì bắt đầu từ con số không, template này cung cấp:
-
-- **Cấu trúc thư mục chuẩn** — đã được thiết kế theo best practices (separation of concerns)
-- **Code mẫu** cho các phần cốt lõi: LangGraph agent, FastAPI API, config, schemas
-- **Docker + CI/CD sẵn** — Dockerfile multi-stage, GitHub Actions workflow
-- **Hướng dẫn kỹ thuật 10 chương** — từ clone template đến nộp bài Demo Day
-- **Checklist 10 deliverables** — đảm bảo không bỏ sót yêu cầu BTC
-- **AI Usage Logging tự động** — Pre-configured hooks cho Claude Code, Cursor, Codex, Gemini CLI, Antigravity, và GitHub Copilot
-
-## ⚡ Quick Start
-
-### Bước 1: Fork hoặc Clone
-
-```bash
-# Clone template
-git clone https://github.com/AI20K-Build-Cohort-2/starter-code-template.git team-YOUR_TEAM_NAME
-cd team-YOUR_TEAM_NAME
-
-# Xóa git history cũ và khởi tạo lại
-rm -rf .git
-git init
-git add .
-git commit -m "feat: khởi tạo dự án từ template"
-```
-
-### Bước 2: Setup môi trường
-
-```bash
-# Tạo virtual environment
-python3.11 -m venv .venv
-source .venv/bin/activate
-
-# Cài dependencies
-pip install -e ".[dev]"
-
-# Cấu hình API keys
-cp .env.example .env
-# Mở .env và thêm OPENAI_API_KEY của bạn
-# Đồng thời cập nhật AI_LOG_API_KEY bằng key riêng từ link mời của BTC
-# (giá trị trong .env.example chỉ là placeholder)
-```
-
-### Bước 3: Cài AI Logging Hooks
-
-```bash
-# Linux / macOS / Git Bash
-bash scripts/setup_hooks.sh
-
-# Windows PowerShell
-# powershell -ExecutionPolicy Bypass -File scripts\setup_hooks.ps1
-```
-
-Hooks tự động log mọi AI prompt khi dùng Claude Code, Cursor, Codex, Gemini CLI, Antigravity, hoặc GitHub Copilot. Không cần thao tác thủ công.
-
-### Bước 4: Chạy server
-
-```bash
-# Chạy FastAPI backend
-uvicorn src.main:app --reload --port 8000
-
-# Mở Swagger UI
-# http://localhost:8000/docs
-```
-
-### Bước 5: Đọc hướng dẫn
-
-📖 Mở **[Technical Guidebook](https://phoenix.note.transformerlabs.ai/technical-book)** và làm theo từng chương.
-
-## 📁 Cấu trúc dự án
-
-```
-├── src/
-│   ├── agents/           # 🧠 LangGraph Agent
-│   │   ├── graph.py      #    State graph (nodes + edges)
-│   │   ├── state.py      #    State schema (TypedDict)
-│   │   ├── nodes/        #    Node functions
-│   │   └── tools/        #    Agent tools (@tool)
-│   ├── api/              # 🌐 FastAPI Backend
-│   │   └── routes.py     #    API endpoints
-│   ├── models/           # 📋 Pydantic schemas
-│   ├── services/         # 🔧 Business logic (LLM, etc.)
-│   ├── config.py         # ⚙️ Pydantic Settings
-│   └── main.py           # 🚀 App entry point
-├── tests/                # 🧪 pytest suite
-│   ├── test_agents/      #    Agent/graph tests
-│   └── test_api/         #    API endpoint tests
-├── scripts/              # 🔌 AI Logging Hooks
-│   ├── log_hook.py       #    Auto-log cho Claude/Cursor/Codex/Gemini/Copilot
-│   ├── log_antigravity.py#    Antigravity IDE prompt scanner
-│   ├── log_manual.py     #    Manual log cho ChatGPT / web tools
-│   ├── submit_log.py     #    Submit logs on git push
-│   └── setup_hooks.sh    #    One-time hook installer
-├── .claude/ .codex/ .cursor/ .gemini/  # Per-tool hook configs
-├── .agents/              # Antigravity rules + workflows
-├── .ai-log/              # 📊 AI usage logs (auto-generated)
-├── docs/
-│   ├── guide/            # 📖 Technical Guidebook (10 chapters)
-│   └── architecture_diagram.md
-├── eval/                 # 📊 Evaluation results
-├── presentation/         # 🎤 Demo Day slides
-├── .github/workflows/    # ⚡ CI/CD (GitHub Actions)
-├── .github/hooks/        # 🪝 Copilot hook config
-├── Dockerfile            # 🐳 Multi-stage build
-├── docker-compose.yml    # 🐙 Full stack orchestration
-└── README_boilerplate.md # 📝 README template cho đội của bạn
-```
-
-## 📚 Technical Guidebook — 10 Chương
-
-| Chương | Nội dung | Thời gian |
-|---------|----------|-----------|
-| 1 | Lời mở đầu — Mục tiêu, cách sử dụng | 15 phút |
-| 2 | Khởi tạo dự án — Clone, setup, git workflow | 4 giờ |
-| 3 | Thiết kế kiến trúc — 3-tier, diagrams, ADR | 6 giờ |
-| 4 | **LangGraph Agent** — State, nodes, edges, tools, RAG | 8 giờ |
-| 5 | FastAPI — Routes, validation, error handling, streaming | 6 giờ |
-| 6 | Giao diện — Next.js + Streamlit quickstart | 6 giờ |
-| 7 | DevOps — Docker, CI/CD, deploy, logging | 6 giờ |
-| 8 | Kiểm thử — Unit test, integration test, RAGAS | 4 giờ |
-| 9 | Demo Day — 10 deliverables, checklist, tips | 2 giờ |
-| 10 | Tài nguyên — Khóa học, docs, BMAD method | tham khảo |
-
-📖 **Đọc online:** [phoenix.note.transformerlabs.ai/technical-book](https://phoenix.note.transformerlabs.ai/technical-book)
-
-## 📋 10 Deliverables cho Demo Day
-
-| # | Deliverable | File vị trí | Template có sẵn |
-|---|-------------|-------------|:---:|
-| 1 | Source Code | `src/` | ✅ |
-| 2 | README.md | `README_boilerplate.md` → copy thành `README.md` | ✅ |
-| 3 | Architecture Diagram | `docs/architecture_diagram.md` | ✅ |
-| 4 | AI Logs | LangSmith (3 env vars) + Auto AI Usage Logging | ✅ |
-| 5 | Live URL | Deploy lên Render/Vercel | ⚡ CI/CD sẵn |
-| 6 | Video Demo | `presentation/` | 📝 |
-| 7 | Pitch Deck | `presentation/` | 📝 |
-| 8 | Development Journal | `JOURNAL.md` | ✅ |
-| 9 | Worklog | `WORKLOG.md` | ✅ |
-| 10 | Evaluation Evidence | `eval/` | 📝 |
-
-## 🛠 Tech Stack
-
-| Layer | Technology | Version |
-|-------|-----------|---------|
-| AI Agent | LangGraph + LangChain | Latest |
-| Backend | FastAPI + Uvicorn | 0.100+ |
-| LLM | OpenAI GPT-4o-mini | API |
-| Frontend | Next.js / Streamlit | 14+ / 1.30+ |
-| Database | Supabase PostgreSQL + pgvector; SQLite chỉ cho unit test cô lập | — |
-| DevOps | Docker + GitHub Actions | — |
-| Testing | pytest + pytest-asyncio | 8+ |
-
-## 📊 AI Usage Logging
-
-Template đã tích hợp sẵn auto-logging hooks cho 6 AI tools:
-
-| Tool | Cơ chế | Config |
-|------|--------|--------|
-| Claude Code | `.claude/settings.json` hooks | Tự động |
-| Cursor | `.cursor/hooks.json` | Tự động |
-| OpenAI Codex CLI | `.codex/hooks.json` | Tự động |
-| Gemini CLI | `.gemini/settings.json` | Tự động |
-| GitHub Copilot | `.github/hooks/hooks.json` | Tự động |
-| Antigravity IDE | Pre-push scan transcript | Tự động trên `git push` |
-
-Tất cả prompts và tool calls được log vào `.ai-log/session.jsonl` và tự động submit lên grading server mỗi khi `git push`.
-
-**ChatGPT / web tools khác** — log thủ công:
-```bash
-bash scripts/_pyrun.sh scripts/log_manual.py --tool chatgpt --prompt "What you asked"
-```
-
-> ⚠️ Chạy `bash scripts/setup_hooks.sh` một lần sau khi clone để cài pre-push hook.
-
-## 📖 Đọc Technical Guidebook
-
-**Online (khuyến nghị):** [phoenix.note.transformerlabs.ai/technical-book](https://phoenix.note.transformerlabs.ai/technical-book)
-
-Đăng nhập bằng GitHub (cùng account đã được BTC mời vào org `AI20K-Build-Cohort-2`)
-→ chọn tab **Technical Book** ở sidebar trái → đọc 10 chương + topic sections,
-có table of contents bên phải, hỗ trợ light/dark/cyberpunk theme.
-
-**Offline:** mọi chương đều ở thư mục `docs/guide/` trong template này — mở bằng
-bất kỳ markdown viewer/editor nào (VS Code, Obsidian, GitHub UI, …).
-
-## 🔗 Liên kết
-
-- 📖 **Technical Guidebook:** [phoenix.note.transformerlabs.ai/technical-book](https://phoenix.note.transformerlabs.ai/technical-book)
-- 🏫 **AI20K Program:** VinUni AI20K Build Phase
-- 👨‍🏫 **Mentor:** Đặng Hải Lộc
-
-## 📄 License
-
-MIT — Sử dụng tự do cho mục đích giáo dục.
--->

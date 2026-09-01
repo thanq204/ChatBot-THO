@@ -135,8 +135,8 @@ async def lifespan(app: FastAPI):
 settings = get_settings()
 production = settings.app_env == "production"
 app = FastAPI(
-    title="AI20K Agent",
-    description="AI Agent built with LangGraph",
+    title=settings.app_name,
+    description="THO community operations API for moderation, FAQ/RAG and human-reviewed workflows",
     version="1.0.0",
     lifespan=lifespan,
     docs_url=None if production else "/docs",

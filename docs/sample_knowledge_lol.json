@@ -117,7 +117,7 @@
     {
       "document_id": "KN-LOL-020", "dataset": "league_of_legends",
       "title": "Cách hỏi trợ lý về Liên Minh",
-      "body": "Có thể hỏi CHAT-10 những câu như: Vai trò đi rừng cần làm gì? Khi nào nên tranh Baron? Tại sao đội cần kiểm soát tầm nhìn? Trợ lý chỉ nên trả lời dựa trên tài liệu đã được nạp.",
+      "body": "Có thể hỏi THO những câu như: Vai trò đi rừng cần làm gì? Khi nào nên tranh Baron? Tại sao đội cần kiểm soát tầm nhìn? Trợ lý chỉ nên trả lời dựa trên tài liệu đã được nạp.",
       "tags": ["chatbot", "rag", "demo"]
     }
   ]
